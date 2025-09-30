@@ -4,7 +4,7 @@ AI-powered radiological assistant for CT scan analysis with explainable AI and p
 
 Note: This project is in the initial development phase. Repository structure, naming conventions, technology choices, and implementation details are subject to change based on ongoing technical discussions and requirements refinement.
 
-## About Ethos AI
+## About MedScan AI
 
 Scope - Click [here]() 
 
@@ -19,8 +19,8 @@ Scope - Click [here]()
 
 ```bash
 # Clone repository
-git clone [TBD]
-cd ethos-ai
+git clone https://github.com/rjaditya-2702/MedScan_ai.git
+cd medscan-ai
 
 # Create virtual environment
 python -m venv venv
@@ -49,7 +49,7 @@ TBD - Environment variables will be documented upon implementation
 ## Project Structure
 
 ```
-ethos-ai/
+medscan-ai/
 ├── src/
 │   ├── models/          # TBD
 │   ├── services/        # TBD
@@ -82,10 +82,10 @@ TBD - API documentation pending implementation
 
 ```bash
 # Build image
-docker build -t ethos-ai .
+docker build -t medscan-ai .
 
 # Run container
-docker run -p 8080:8080 --env-file .env ethos-ai
+docker run -p 8080:8080 --env-file .env medscan-ai
 ```
 
 ## Development
