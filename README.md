@@ -6,7 +6,7 @@ Note: This project is in the initial development phase. Repository structure, na
 
 ## About MedScan AI
 
-Scope - Click [here]() 
+Scope - Click [here](docs/Scoping.pdf) 
 
 ## Requirements
 
@@ -131,9 +131,8 @@ TBD - Deployment instructions pending infrastructure setup
 
 ### Datasets Used
 
-- Brain Cancer MRI Dataset
 - CT Scan Lung Cancer Dataset
-- Diabetic Retinopathy Dataset
+- Tuberculosis  (TB)
 
 ### Data Pipeline
 
