@@ -1,4 +1,4 @@
-# Ethos AI
+# MedScan AI
 
 AI-powered radiological assistant for CT scan analysis with explainable AI and patient engagement RAG to answer questions about their report's content.
 
