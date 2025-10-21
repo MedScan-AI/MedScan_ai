@@ -1,0 +1,5 @@
+[core]
+    no_scm = True
+    remote = myremote
+['remote "myremote"']
+    url = gs://medscan-ai-objects-neu

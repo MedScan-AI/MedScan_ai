@@ -1,0 +1,2 @@
+['remote "myremote"']
+    credentialpath = ../../../Downloads/__auto_generated_csp_test_log.json
