@@ -6,4 +6,5 @@
 *.jpg
 *.jpeg
 *.png
-data/
+data/*
+!data/*.dvc
