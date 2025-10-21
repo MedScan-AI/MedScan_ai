@@ -1,1 +1,9 @@
 .DS_STORE
+*.md
+*.json
+*.jsonl
+*.csv
+*.jpg
+*.jpeg
+*.png
+
