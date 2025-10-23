@@ -1,0 +1,89 @@
+# Vision Pipeline Configuration
+# Configuration for data acquisition and preprocessing
+
+data_acquisition:
+  kaggle:
+    # Enable year/month/day partitioning for raw data
+    use_partitioning: true  # Write to data/raw/<dataset>/YYYY/MM/DD/
+    
+    datasets:
+      - name: "lung_cancer_ct_scan"
+        dataset_id: "dishantrathi20/ct-scan-images-for-lung-cancer"
+        download_path: "data/raw/lung_cancer_ct_scan"
+        description: "CT scan images for lung cancer detection"
+      
+      - name: "brain_tumor_mri"
+        dataset_id: "masoudnickparvar/brain-tumor-mri-dataset"
+        download_path: "data/raw/brain_tumor_mri"
+        description: "Brain tumor MRI dataset"
+    
+    # Kaggle API configuration
+    api:
+      use_kagglehub: true   # Use kagglehub library for downloads
+      unzip: true           # Automatically unzip downloaded files
+      force_download: false # Force re-download if data already exists
+
+# Data Preprocessing Configuration
+data_preprocessing:
+  # Common preprocessing parameters
+  common:
+    target_size: [224, 224]  # Target image size [width, height]
+    quality: 95              # JPEG quality (1-100)
+    output_format: "JPEG"    # Output image format
+  
+  # Brain Tumor MRI specific configuration
+  brain_tumor_mri:
+    raw_data_path: "data/raw/brain_tumor_mri"
+    preprocessed_data_path: "data/preprocessed/brain_tumor_mri"
+    test_output_path: "data/test_preprocessed/brain_tumor_mri"
+    
+    # Dataset structure
+    splits: ["Training", "Testing"]
+    classes: ["glioma", "meningioma", "notumor", "pituitary"]
+    
+    # Test configuration
+    test:
+      sample_images_per_class: 3  # Number of sample images to create in tests
+      num_test_images: 10          # Number of images to preprocess in real data test
+  
+  # Lung Cancer CT Scan specific configuration
+  lung_cancer_ct_scan:
+    raw_data_path: "data/raw/lung_cancer_ct_scan"
+    preprocessed_data_path: "data/preprocessed/lung_cancer_ct_scan"
+    test_output_path: "data/test_preprocessed/lung_cancer_ct_scan"
+    
+    # Dataset structure (discovered dynamically, but expected values)
+    expected_splits: ["train", "test", "valid"]
+    expected_classes: 
+      - "adenocarcinoma"
+      - "benign"
+      - "large_cell_carcinoma"
+      - "malignant"
+      - "normal"
+      - "squamous_cell_carcinoma"
+    
+    # Class name mapping for normalization
+    class_mapping:
+      "adenocarcinoma": "adenocarcinoma"
+      "bengin cases": "benign"
+      "bengincases": "benign"
+      "bengin case": "benign"
+      "large.cell.carcinoma": "large_cell_carcinoma"
+      "malignant cases": "malignant"
+      "malignantcases": "malignant"
+      "malignant case": "malignant"
+      "normal": "normal"
+      "squamous.cell.carcinoma": "squamous_cell_carcinoma"
+    
+    # Test configuration
+    test:
+      sample_images_per_split: 2   # Number of sample images per split in tests
+      num_test_images: 10           # Number of images to preprocess in real data test
+      max_images_per_class: 2       # Max images to pick per class in real data test
+
+# Notes: 
+# - Data Acquisition: download_path - Directory where raw data will be stored (created automatically)
+# - Data from kagglehub is automatically copied to the configured download_path
+# - Original kagglehub cache: ~/.cache/kagglehub/ (Windows: C:\Users\<user>\.cache\kagglehub\)
+# - Preprocessing: All paths are relative to the project root directory
+

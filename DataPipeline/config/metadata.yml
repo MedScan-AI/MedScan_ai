@@ -1,0 +1,293 @@
+# TFDV and MLMD Configuration for MedScan AI
+
+# Dataset Configuration
+datasets:
+  brain_tumor:
+    name: "brain_tumor_mri_patients"
+    raw_base_path: "data/raw/brain_tumor"
+    preprocessed_base_path: "data/preprocessed/brain_tumor"
+    metadata_base_path: "data/synthetic_metadata"  # CSV files with patient metadata
+    metadata_filename: "brain_tumor_mri_patients.csv"
+    description: "Brain tumor MRI patient metadata"
+  
+  lung_cancer:
+    name: "lung_cancer_ct_scan_patients"
+    raw_base_path: "data/raw/lung_cancer"
+    preprocessed_base_path: "data/preprocessed/lung_cancer"
+    metadata_base_path: "data/synthetic_metadata"  # CSV files with patient metadata
+    metadata_filename: "lung_cancer_ct_scan_patients.csv"
+    description: "Lung cancer CT scan patient metadata"
+
+# Partitioning Configuration
+partitioning:
+  enabled: true
+  format: "year/month/day"  # Directory structure: YYYY/MM/DD
+  metadata_file: "data/partition_metadata.json"  # Tracks raw->preprocessed mappings
+
+# Schema Constraints
+schema_constraints:
+  numerical_features:
+    Age_Years:
+      min: 0
+      max: 120
+      required: true
+    
+    Weight_KG:
+      min: 2
+      max: 300
+      required: true
+    
+    Height_CM:
+      min: 40
+      max: 250
+      required: true
+  
+  categorical_features:
+    Gender:
+      allowed_values: ["Male", "Female", "Other"]
+      required: true
+    
+    Examination_Type:
+      allowed_values: ["X-ray", "CT", "MRI", "Ultrasound", "PET", "Mammography"]
+      required: true
+    
+    Body_Region:
+      allowed_values: ["Head", "Chest", "Abdomen", "Pelvis", "Spine", "Extremities", "Head/Brain"]
+      required: true
+    
+    Urgency_Level:
+      allowed_values: ["Routine", "Urgent", "Emergent", "STAT"]
+      required: true
+    
+    Diagnosis_Class:
+      required: true
+      # Values are dataset-specific: glioma, meningioma, notumor, pituitary for brain
+      # adenocarcinoma, large.cell.carcinoma, normal, squamous.cell.carcinoma for lung
+  
+  string_features:
+    Patient_Full_Name:
+      required: true
+    
+    Patient_ID:
+      required: true
+      unique: true
+    
+    Presenting_Symptoms:
+      required: false
+    
+    Current_Medications:
+      required: false
+    
+    Previous_Relevant_Surgeries:
+      required: false
+    
+    Image_Path:
+      required: true
+
+# Great Expectations Configuration
+great_expectations:
+  statistics:
+    # Output directories for statistics
+    output_dir: "data/ge_outputs"
+    baseline_dir: "data/ge_outputs/baseline"
+    new_data_dir: "data/ge_outputs/new_data"
+    
+    # Statistics generation options
+    feature_allowlist: null  # null means all features
+    schema_inference:
+      infer_feature_shape: true
+      max_string_domain_size: 100
+  
+  schema:
+    # Schema output directory
+    output_dir: "data/ge_outputs/schemas"
+    
+    # Schema customization
+    auto_infer: true
+    
+  validation:
+    # Validation output directory
+    output_dir: "data/ge_outputs/validations"
+    
+    # Anomaly detection thresholds
+    enable_anomaly_detection: true
+    
+  drift_detection:
+    # Drift detection configuration
+    enable: true
+    output_dir: "data/ge_outputs/drift"
+    
+    # Statistical test threshold for drift detection
+    statistical_test_threshold: 0.05  # P-value threshold (lower = more sensitive)
+    
+  visualization:
+    # HTML report generation
+    enable: true
+    output_dir: "data/ge_outputs/reports"
+    statistics_report: "statistics_report.html"
+    schema_report: "schema_report.html"
+    validation_report: "validation_report.html"
+    drift_report: "drift_report.html"
+
+# Exploratory Data Analysis (EDA) Configuration
+eda:
+  # EDA output directory
+  output_dir: "data/ge_outputs/eda"
+  
+  # EDA options
+  enable: true
+  outlier_detection_method: "IQR"  # IQR (Interquartile Range) or Z-score
+  correlation_threshold: 0.5  # Threshold for high correlations
+  histogram_bins: 20  # Number of bins for histograms
+
+# MLMD Configuration (used by MLflow)
+mlmd:
+  # Metadata store configuration
+  store:
+    type: "sqlite"  # sqlite or mysql
+    database_path: "data/mlflow_store/metadata.db"
+    
+  # Artifact types
+  artifact_types:
+    - name: "Dataset"
+      properties:
+        - name: "name"
+          type: "STRING"
+        - name: "path"
+          type: "STRING"
+        - name: "num_rows"
+          type: "INT"
+        - name: "num_columns"
+          type: "INT"
+        - name: "description"
+          type: "STRING"
+    
+    - name: "Schema"
+      properties:
+        - name: "name"
+          type: "STRING"
+        - name: "path"
+          type: "STRING"
+        - name: "num_features"
+          type: "INT"
+        - name: "version"
+          type: "STRING"
+    
+    - name: "Statistics"
+      properties:
+        - name: "name"
+          type: "STRING"
+        - name: "path"
+          type: "STRING"
+        - name: "dataset_name"
+          type: "STRING"
+        - name: "num_examples"
+          type: "INT"
+    
+    - name: "ValidationResult"
+      properties:
+        - name: "name"
+          type: "STRING"
+        - name: "path"
+          type: "STRING"
+        - name: "is_valid"
+          type: "INT"
+        - name: "num_anomalies"
+          type: "INT"
+        - name: "dataset_name"
+          type: "STRING"
+    
+    - name: "DriftReport"
+      properties:
+        - name: "name"
+          type: "STRING"
+        - name: "path"
+          type: "STRING"
+        - name: "baseline_dataset"
+          type: "STRING"
+        - name: "comparison_dataset"
+          type: "STRING"
+        - name: "has_drift"
+          type: "INT"
+  
+  # Execution types
+  execution_types:
+    - name: "StatisticsGeneration"
+      properties:
+        - name: "dataset_name"
+          type: "STRING"
+        - name: "timestamp"
+          type: "STRING"
+        - name: "num_examples"
+          type: "INT"
+    
+    - name: "SchemaInference"
+      properties:
+        - name: "dataset_name"
+          type: "STRING"
+        - name: "timestamp"
+          type: "STRING"
+        - name: "num_features"
+          type: "INT"
+    
+    - name: "DataValidation"
+      properties:
+        - name: "dataset_name"
+          type: "STRING"
+        - name: "timestamp"
+          type: "STRING"
+        - name: "is_valid"
+          type: "INT"
+        - name: "num_anomalies"
+          type: "INT"
+    
+    - name: "DriftDetection"
+      properties:
+        - name: "baseline_dataset"
+          type: "STRING"
+        - name: "comparison_dataset"
+          type: "STRING"
+        - name: "timestamp"
+          type: "STRING"
+        - name: "has_drift"
+          type: "INT"
+  
+  # Context types
+  context_types:
+    - name: "DataValidationPipeline"
+      properties:
+        - name: "pipeline_name"
+          type: "STRING"
+        - name: "version"
+          type: "STRING"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "data/logs/schema_statistics.log"
+
+# Execution Configuration
+execution:
+  # Which datasets to process
+  process_datasets:
+    - "brain_tumor"
+    - "lung_cancer"
+  
+  # Which operations to perform
+  operations:
+    generate_statistics: true
+    infer_schema: true
+    perform_eda: true  # Perform exploratory data analysis on latest partition
+    validate_data: true
+    detect_drift: true
+    generate_reports: true
+  
+  # Drift detection setup
+  drift:
+    # Use temporal partitions for drift detection
+    enabled: true
+    min_partitions_required: 2  # Need at least 2 partitions to detect drift
+    baseline_partition: "second_most_recent"  # Use second most recent partition as baseline
+    new_partition: "most_recent"  # Use most recent partition as new data
+
