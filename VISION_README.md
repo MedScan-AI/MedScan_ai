@@ -194,6 +194,7 @@ pytest tests/data_acquisition/fetch_data_test.py -v
 pytest tests/data_preprocessing/preprocess_tb_test.py -v
 pytest tests/data_preprocessing/preprocess_lung_cancer_test.py -v
 pytest tests/data_preprocessing/baseline_synthetic_data_generator_test.py -v
+pytest tests/data_preprocessing/schema_statistics_test.py -v
 ```
 
 **Output Structure (Partitioned by Date):**

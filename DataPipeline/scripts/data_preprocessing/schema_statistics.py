@@ -160,6 +160,70 @@ class SchemaStatisticsManager:
         os.makedirs(partition_path, exist_ok=True)
         return partition_path
     
+    def _get_mitigated_data_partition_path(self, base_output_dir: str, dataset_key: str, partition_timestamp: str = None) -> str:
+        """
+        Generate disease-specific partitioned output path for mitigated data.
+        
+        Args:
+            base_output_dir: Base output directory (e.g., 'data/synthetic_metadata_mitigated')
+            dataset_key: Dataset key (e.g., 'tb', 'lung_cancer')
+            partition_timestamp: ISO timestamp from data partition (optional)
+            
+        Returns:
+            Disease-specific partitioned output path: base_output_dir/{disease}/YYYY/MM/DD
+        """
+        if partition_timestamp:
+            # Parse timestamp from data partition
+            try:
+                dt = datetime.fromisoformat(partition_timestamp.replace('Z', '+00:00'))
+            except:
+                dt = datetime.now()
+        else:
+            dt = datetime.now()
+        
+        # Create disease-specific path structure
+        partition_path = os.path.join(
+            base_output_dir,
+            dataset_key,  # Disease-specific directory
+            f"{dt.year:04d}",
+            f"{dt.month:02d}",
+            f"{dt.day:02d}"
+        )
+        os.makedirs(partition_path, exist_ok=True)
+        return partition_path
+    
+    def _get_ge_outputs_partition_path(self, base_output_dir: str, dataset_key: str, partition_timestamp: str = None) -> str:
+        """
+        Generate disease-specific partitioned output path for ge_outputs.
+        
+        Args:
+            base_output_dir: Base output directory (e.g., 'data/ge_outputs/statistics')
+            dataset_key: Dataset key (e.g., 'tb', 'lung_cancer')
+            partition_timestamp: ISO timestamp from data partition (optional)
+            
+        Returns:
+            Disease-specific partitioned output path: base_output_dir/{disease}/YYYY/MM/DD
+        """
+        if partition_timestamp:
+            # Parse timestamp from data partition
+            try:
+                dt = datetime.fromisoformat(partition_timestamp.replace('Z', '+00:00'))
+            except:
+                dt = datetime.now()
+        else:
+            dt = datetime.now()
+        
+        # Create disease-specific path structure
+        partition_path = os.path.join(
+            base_output_dir,
+            dataset_key,  # Disease-specific directory
+            f"{dt.year:04d}",
+            f"{dt.month:02d}",
+            f"{dt.day:02d}"
+        )
+        os.makedirs(partition_path, exist_ok=True)
+        return partition_path
+    
     def _setup_mlflow(self):
         """Setup MLflow tracking."""
         # Set MLflow tracking URI
@@ -243,6 +307,7 @@ class SchemaStatisticsManager:
     def _discover_partitions(self, base_path: str) -> List[Dict[str, Any]]:
         """
         Discover all partitions in a base path.
+        Handles both disease-specific synthetic_metadata structure and general partition structure.
         
         Args:
             base_path: Base directory to search
@@ -255,29 +320,57 @@ class SchemaStatisticsManager:
         if not os.path.exists(base_path):
             return partitions
         
-        # Find all YYYY/MM/DD directories
-        pattern = os.path.join(base_path, "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]")
-        partition_dirs = glob(pattern)
-        
-        for partition_dir in sorted(partition_dirs):
-            # Extract year/month/day from path
-            parts = Path(partition_dir).parts[-3:]
-            try:
-                year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
-                timestamp = datetime(year, month, day)
-                
-                # Find CSV files in this partition
-                csv_files = glob(os.path.join(partition_dir, "*.csv"))
-                
-                if csv_files:
-                    partitions.append({
-                        'path': partition_dir,
-                        'timestamp': timestamp.isoformat(),
-                        'files': csv_files
-                    })
-            except (ValueError, IndexError) as e:
-                self.logger.warning(f"Could not parse partition path {partition_dir}: {e}")
-                continue
+        # Check if this is a disease-specific synthetic_metadata path
+        # Structure: data/synthetic_metadata/{disease}/{year}/{month}/{day}/{disease}_patients.csv
+        if 'synthetic_metadata' in base_path:
+            # Find all YYYY/MM/DD directories within the disease-specific path
+            pattern = os.path.join(base_path, "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]")
+            partition_dirs = glob(pattern)
+            
+            for partition_dir in sorted(partition_dirs):
+                # Extract year/month/day from path
+                parts = Path(partition_dir).parts[-3:]
+                try:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    timestamp = datetime(year, month, day)
+                    
+                    # Find CSV files in this partition
+                    csv_files = glob(os.path.join(partition_dir, "*.csv"))
+                    
+                    if csv_files:
+                        partitions.append({
+                            'path': partition_dir,
+                            'timestamp': timestamp.isoformat(),
+                            'files': csv_files
+                        })
+                except (ValueError, IndexError) as e:
+                    self.logger.warning(f"Could not parse partition path {partition_dir}: {e}")
+                    continue
+        else:
+            # Standard partition discovery for other data sources
+            # Find all YYYY/MM/DD directories
+            pattern = os.path.join(base_path, "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]")
+            partition_dirs = glob(pattern)
+            
+            for partition_dir in sorted(partition_dirs):
+                # Extract year/month/day from path
+                parts = Path(partition_dir).parts[-3:]
+                try:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    timestamp = datetime(year, month, day)
+                    
+                    # Find CSV files in this partition
+                    csv_files = glob(os.path.join(partition_dir, "*.csv"))
+                    
+                    if csv_files:
+                        partitions.append({
+                            'path': partition_dir,
+                            'timestamp': timestamp.isoformat(),
+                            'files': csv_files
+                        })
+                except (ValueError, IndexError) as e:
+                    self.logger.warning(f"Could not parse partition path {partition_dir}: {e}")
+                    continue
         
         return partitions
     
@@ -2407,7 +2500,8 @@ class SchemaStatisticsManager:
             features_to_balance = {}
             for slice_info in problematic_slices:
                 feature = slice_info.get('feature', '')
-                if feature in df_mitigated.columns and feature in slicing_features:
+                # Balance any feature that has problematic slices, regardless of slicing_features list
+                if feature in df_mitigated.columns:
                     if feature not in features_to_balance:
                         features_to_balance[feature] = []
                     features_to_balance[feature].append(slice_info)
@@ -2417,22 +2511,37 @@ class SchemaStatisticsManager:
                 if feature in df_mitigated.columns:
                     # Get counts per group
                     value_counts = df_mitigated[feature].value_counts()
-                    majority_count = value_counts.max()
-                    target_ratio = resampling_config.get('target_ratio', 0.8)
-                    method = resampling_config.get('method', 'oversample')
+                    total_samples = len(df_mitigated)
+                    n_groups = len(value_counts)
                     
-                    # Resample minority groups
+                    # Calculate balanced target size (equal representation)
+                    balanced_target = total_samples // n_groups
+                    target_ratio = resampling_config.get('target_ratio', 0.8)
+                    method = resampling_config.get('method', 'balanced')
+                    
+                    # Resample to achieve balanced distribution
                     dfs = []
                     modifications_made = False
                     
                     for group_value, count in value_counts.items():
                         group_df = df_mitigated[df_mitigated[feature] == group_value]
                         
-                        # Calculate target size
-                        target_size = int(majority_count * target_ratio)
+                        # Calculate target size for balanced distribution
+                        target_size = int(balanced_target * target_ratio)
                         
-                        if count < target_size and method == 'oversample':
-                            # Oversample minority group
+                        if count > target_size and method == 'balanced':
+                            # Undersample overrepresented group
+                            undersampled = group_df.sample(n=target_size, random_state=42)
+                            dfs.append(undersampled)
+                            
+                            mitigation_report['modifications'][f"{feature}_{group_value}"] = {
+                                'original_count': int(count),
+                                'removed_samples': int(count - target_size),
+                                'final_count': int(target_size)
+                            }
+                            modifications_made = True
+                        elif count < target_size and method == 'balanced':
+                            # Oversample underrepresented group
                             n_samples = target_size - count
                             oversampled = group_df.sample(n=n_samples, replace=True, random_state=42)
                             dfs.append(group_df)
@@ -2445,12 +2554,13 @@ class SchemaStatisticsManager:
                             }
                             modifications_made = True
                         else:
+                            # Keep as is
                             dfs.append(group_df)
                     
                     if modifications_made:
                         df_mitigated = pd.concat(dfs, ignore_index=True)
                         mitigation_report['strategies_applied'].append('resample_underrepresented')
-                        self.logger.info(f"Resampled {len([k for k in mitigation_report['modifications'].keys() if k.startswith(feature)])} groups in {feature}")
+                        self.logger.info(f"Balanced {len([k for k in mitigation_report['modifications'].keys() if k.startswith(feature)])} groups in {feature}")
         
         # Strategy 2: Compute class weights for model training
         if 'class_weights' in strategies and 'Diagnosis_Class' in df_mitigated.columns:
@@ -2842,7 +2952,7 @@ class SchemaStatisticsManager:
     
     def generate_reports(self, dataset_name: str, baseline_stats: Dict, new_stats: Dict,
                         expectations: Dict, validation_results: Dict, drift_report: Dict = None,
-                        partition_timestamp: str = None):
+                        partition_timestamp: str = None, dataset_key: str = None):
         """
         Generate HTML visualization reports.
         
@@ -2860,8 +2970,12 @@ class SchemaStatisticsManager:
         viz_config = self.config['great_expectations']['visualization']
         base_output_dir = viz_config['output_dir']
         
-        # Use partitioned output path
-        output_dir = self._get_output_partition_path(base_output_dir, partition_timestamp)
+        # Use disease-specific partitioned output path
+        if dataset_key:
+            output_dir = self._get_ge_outputs_partition_path(base_output_dir, dataset_key, partition_timestamp)
+        else:
+            # Fallback to old method if dataset_key not provided
+            output_dir = self._get_output_partition_path(base_output_dir, partition_timestamp)
         
         # Generate statistics comparison HTML
         stats_html = self._generate_statistics_html(baseline_stats, new_stats)
@@ -3127,13 +3241,13 @@ class SchemaStatisticsManager:
                     if len(data_partitions) > 2:
                         self.logger.info(f"  Note: Found {len(data_partitions)} total partitions, comparing latest 2")
                 else:
-                    # Only one partition - check if previous baselines exist
+                    # Only one partition - check if previous baselines exist for THIS specific dataset
                     baseline_dir = self.config['great_expectations']['statistics']['baseline_dir']
                     has_previous_baselines = False
                     
                     if os.path.exists(baseline_dir):
-                        # Check if baseline directory has any data
-                        baseline_files = list(Path(baseline_dir).rglob('*.json'))
+                        # Check if baseline directory has data for THIS specific dataset
+                        baseline_files = list(Path(baseline_dir).rglob(f'*{dataset_name}*.json'))
                         has_previous_baselines = len(baseline_files) > 0
                     
                     if has_previous_baselines:
@@ -3151,28 +3265,53 @@ class SchemaStatisticsManager:
                         
                         # Create intentional drift by sorting on a key feature before splitting
                         # This simulates temporal drift where distributions change over time
+                        # Use dataset-specific sorting to create unique drift patterns
                         
-                        # Check if Diagnosis_Class exists (common in medical datasets)
-                        if 'Diagnosis_Class' in full_df.columns:
-                            # Sort by diagnosis class and then by age to create class distribution drift
-                            full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
+                        # Create dataset-specific drift patterns
+                        if dataset_name == 'tb_patients':
+                            # TB-specific drift: Sort by diagnosis class (Normal vs Tuberculosis)
+                            if 'Diagnosis_Class' in full_df.columns:
+                                full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
                                                                   ascending=[True, True]).reset_index(drop=True)
-                            self.logger.info(f"Creating drift by sorting on Diagnosis_Class and Age_Years")
-                        elif 'Age_Years' in full_df.columns:
-                            # Sort by age to create age distribution drift
-                            full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
-                            self.logger.info(f"Creating drift by sorting on Age_Years")
-                        else:
-                            # Fallback: sort by first numeric column
-                            numeric_cols = full_df.select_dtypes(include=[np.number]).columns
-                            if len(numeric_cols) > 0:
-                                sort_col = numeric_cols[0]
-                                full_df_sorted = full_df.sort_values(sort_col).reset_index(drop=True)
-                                self.logger.info(f"Creating drift by sorting on {sort_col}")
+                                self.logger.info(f"Creating TB-specific drift by sorting on Diagnosis_Class and Age_Years")
                             else:
-                                # No numeric columns, use random shuffle
-                                full_df_sorted = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
-                                self.logger.warning(f"No numeric columns found for drift creation, using random split")
+                                full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
+                                self.logger.info(f"Creating TB-specific drift by sorting on Age_Years")
+                                
+                        elif dataset_name == 'lung_cancer_ct_scan_patients':
+                            # Lung cancer-specific drift: Sort by age and urgency level
+                            if 'Age_Years' in full_df.columns and 'Urgency_Level' in full_df.columns:
+                                # Create different drift pattern for lung cancer
+                                full_df_sorted = full_df.sort_values(['Urgency_Level', 'Age_Years'], 
+                                                                  ascending=[False, True]).reset_index(drop=True)
+                                self.logger.info(f"Creating Lung Cancer-specific drift by sorting on Urgency_Level and Age_Years")
+                            elif 'Age_Years' in full_df.columns:
+                                # Reverse age sorting for different pattern
+                                full_df_sorted = full_df.sort_values('Age_Years', ascending=False).reset_index(drop=True)
+                                self.logger.info(f"Creating Lung Cancer-specific drift by reverse sorting on Age_Years")
+                            else:
+                                full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
+                                self.logger.info(f"Creating Lung Cancer-specific drift by sorting on Age_Years")
+                        else:
+                            # Generic drift for other datasets
+                            if 'Diagnosis_Class' in full_df.columns:
+                                full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
+                                                                  ascending=[True, True]).reset_index(drop=True)
+                                self.logger.info(f"Creating generic drift by sorting on Diagnosis_Class and Age_Years")
+                            elif 'Age_Years' in full_df.columns:
+                                full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
+                                self.logger.info(f"Creating generic drift by sorting on Age_Years")
+                            else:
+                                # Fallback: sort by first numeric column
+                                numeric_cols = full_df.select_dtypes(include=[np.number]).columns
+                                if len(numeric_cols) > 0:
+                                    sort_col = numeric_cols[0]
+                                    full_df_sorted = full_df.sort_values(sort_col).reset_index(drop=True)
+                                    self.logger.info(f"Creating drift by sorting on {sort_col}")
+                                else:
+                                    # No numeric columns, use random shuffle
+                                    full_df_sorted = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
+                                    self.logger.warning(f"No numeric columns found for drift creation, using random split")
                         
                         split_point = int(total_rows * 0.7)
                         baseline_df = full_df_sorted.iloc[:split_point].copy()
@@ -3235,9 +3374,9 @@ class SchemaStatisticsManager:
             new_stats = None
             
             if operations['generate_statistics']:
-                # Use partitioned output paths
+                # Use disease-specific partitioned output paths
                 stats_base_dir = self.config['great_expectations']['statistics']['baseline_dir']
-                stats_output_dir = self._get_output_partition_path(stats_base_dir, baseline_timestamp)
+                stats_output_dir = self._get_ge_outputs_partition_path(stats_base_dir, dataset_key, baseline_timestamp)
                 stats_output_path = os.path.join(stats_output_dir, f"{dataset_name}_stats.json")
                 
                 baseline_stats = self.generate_statistics(
@@ -3249,7 +3388,7 @@ class SchemaStatisticsManager:
                 # Generate statistics for new data only if it exists
                 if new_df_clean is not None:
                     new_stats_base_dir = self.config['great_expectations']['statistics']['new_data_dir']
-                    new_stats_output_dir = self._get_output_partition_path(new_stats_base_dir, new_timestamp)
+                    new_stats_output_dir = self._get_ge_outputs_partition_path(new_stats_base_dir, dataset_key, new_timestamp)
                     new_stats_output_path = os.path.join(new_stats_output_dir, f"{dataset_name}_new_stats.json")
                     
                     new_stats = self.generate_statistics(
@@ -3261,10 +3400,10 @@ class SchemaStatisticsManager:
             # Infer schema
             expectations = None
             if operations['infer_schema']:
-                # Use partitioned output path (use new timestamp if available, otherwise baseline)
+                # Use disease-specific partitioned output path (use new timestamp if available, otherwise baseline)
                 schema_timestamp = new_timestamp if new_timestamp else baseline_timestamp
                 schema_base_dir = self.config['great_expectations']['schema']['output_dir']
-                schema_output_dir = self._get_output_partition_path(schema_base_dir, schema_timestamp)
+                schema_output_dir = self._get_ge_outputs_partition_path(schema_base_dir, dataset_key, schema_timestamp)
                 schema_output_path = os.path.join(schema_output_dir, f"{dataset_name}_schema.json")
                 
                 expectations = self.infer_schema(
@@ -3281,9 +3420,9 @@ class SchemaStatisticsManager:
                 eda_partition_label = "latest" if new_df_clean is not None else "baseline"
                 eda_timestamp = new_timestamp if new_timestamp else baseline_timestamp
                 
-                # Use partitioned output path
+                # Use disease-specific partitioned output path
                 eda_base_dir = self.config.get('eda', {}).get('output_dir', 'data/ge_outputs/eda')
-                eda_output_dir = self._get_output_partition_path(eda_base_dir, eda_timestamp)
+                eda_output_dir = self._get_ge_outputs_partition_path(eda_base_dir, dataset_key, eda_timestamp)
                 
                 eda_output_path = os.path.join(eda_output_dir, f"{dataset_name}_eda_{eda_partition_label}.json")
                 eda_results = self.perform_exploratory_analysis(
@@ -3304,10 +3443,10 @@ class SchemaStatisticsManager:
             # Validate data
             validation_results = None
             if operations['validate_data'] and expectations:
-                # Use partitioned output path
+                # Use disease-specific partitioned output path
                 validation_timestamp = new_timestamp if new_timestamp else baseline_timestamp
                 validation_base_dir = self.config['great_expectations']['validation']['output_dir']
-                validation_output_dir = self._get_output_partition_path(validation_base_dir, validation_timestamp)
+                validation_output_dir = self._get_ge_outputs_partition_path(validation_base_dir, dataset_key, validation_timestamp)
                 validation_output_path = os.path.join(validation_output_dir, f"{dataset_name}_validation.json")
                 
                 validation_results = self.validate_data(
@@ -3320,9 +3459,9 @@ class SchemaStatisticsManager:
             # Detect drift - only if new data exists
             drift_report = None
             if operations['detect_drift'] and new_df_clean is not None and new_stats:
-                # Use partitioned output path (use new timestamp for drift reports)
+                # Use disease-specific partitioned output path (use new timestamp for drift reports)
                 drift_base_dir = self.config['great_expectations']['drift_detection']['output_dir']
-                drift_output_dir = self._get_output_partition_path(drift_base_dir, new_timestamp)
+                drift_output_dir = self._get_ge_outputs_partition_path(drift_base_dir, dataset_key, new_timestamp)
                 drift_output_path = os.path.join(drift_output_dir, f"{dataset_name}_drift.json")
                 
                 drift_report = self.detect_drift(
@@ -3342,9 +3481,9 @@ class SchemaStatisticsManager:
                 bias_df = new_df_clean if new_df_clean is not None else baseline_df_clean
                 bias_timestamp = new_timestamp if new_timestamp else baseline_timestamp
                 
-                # Use partitioned output path
+                # Use disease-specific partitioned output path
                 bias_base_dir = self.config.get('bias_detection', {}).get('output_dir', 'data/ge_outputs/bias_analysis')
-                bias_output_dir = self._get_output_partition_path(bias_base_dir, bias_timestamp)
+                bias_output_dir = self._get_ge_outputs_partition_path(bias_base_dir, dataset_key, bias_timestamp)
                 bias_output_path = os.path.join(bias_output_dir, f"{dataset_name}_bias_analysis.json")
                 
                 bias_analysis = self.detect_bias_via_slicing(
@@ -3382,21 +3521,21 @@ class SchemaStatisticsManager:
                         self.logger.info(f"Mitigated dataset saved to: {mitigated_csv_path}")
                         self._log_artifact_file(mitigated_csv_path, "bias_analysis")
                         
-                        # Save to partitioned synthetic_metadata_mitigated directory
+                        # Save to disease-specific partitioned synthetic_metadata_mitigated directory
                         mitigated_data_dir = self.config.get('bias_detection', {}).get('mitigation', {}).get(
                             'mitigated_data_output_dir', 'data/synthetic_metadata_mitigated'
                         )
-                        mitigated_partition_path = self._get_output_partition_path(
+                        mitigated_partition_path = self._get_mitigated_data_partition_path(
                             mitigated_data_dir,
+                            dataset_key,  # Use dataset_key for disease-specific directory
                             bias_timestamp
                         )
-                        os.makedirs(mitigated_partition_path, exist_ok=True)
                         
                         # Use the original metadata filename for consistency
                         mitigated_filename = metadata_filename if metadata_filename else f"{dataset_name}.csv"
                         mitigated_partitioned_path = os.path.join(mitigated_partition_path, mitigated_filename)
                         df_mitigated.to_csv(mitigated_partitioned_path, index=False)
-                        self.logger.info(f"Mitigated dataset saved to partitioned directory: {mitigated_partitioned_path}")
+                        self.logger.info(f"Mitigated dataset saved to disease-specific partitioned directory: {mitigated_partitioned_path}")
                         self._log_artifact_file(mitigated_partitioned_path, "mitigated_metadata")
                 
                 # Generate bias analysis HTML report
@@ -3420,7 +3559,8 @@ class SchemaStatisticsManager:
                     expectations=expectations,
                     validation_results=validation_results,
                     drift_report=drift_report,
-                    partition_timestamp=report_timestamp
+                    partition_timestamp=report_timestamp,
+                    dataset_key=dataset_key
                 )
             
             self.logger.info(f"Completed processing for {dataset_key}")

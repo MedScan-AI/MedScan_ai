@@ -4,6 +4,7 @@ Tests SchemaStatisticsManager with Great Expectations and MLflow integration.
 """
 
 import pytest
+import warnings
 import yaml
 import os
 import sys
@@ -19,127 +20,139 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.data_preprocessing.schema_statistics import SchemaStatisticsManager
 
+# Suppress Great Expectations deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="great_expectations")
+
+
+@pytest.fixture
+def temp_dirs():
+    """Fixture providing temporary directories for testing."""
+    temp_dir = tempfile.mkdtemp()
+    
+    # Create necessary subdirectories
+    data_dir = Path(temp_dir) / "data"
+    config_dir = Path(temp_dir) / "config"
+    
+    data_dir.mkdir()
+    config_dir.mkdir()
+    
+    # Create partitioned metadata directories
+    metadata_dir = data_dir / "synthetic_metadata" / "2025" / "10" / "23"
+    metadata_dir.mkdir(parents=True)
+    
+    yield temp_dir, data_dir, config_dir, metadata_dir
+    
+    # Cleanup
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def sample_config(temp_dirs):
+    """Fixture providing sample configuration."""
+    temp_dir, data_dir, config_dir, metadata_dir = temp_dirs
+    
+    config = {
+        'great_expectations': {
+            'statistics': {
+                'output_dir': str(data_dir / "ge_outputs"),
+                'baseline_dir': str(data_dir / "ge_outputs" / "baseline"),
+                'new_data_dir': str(data_dir / "ge_outputs" / "new_data"),
+            },
+            'schema': {
+                'output_dir': str(data_dir / "ge_outputs" / "schemas"),
+                'auto_infer': True
+            },
+            'validation': {
+                'output_dir': str(data_dir / "ge_outputs" / "validations"),
+                'enable_anomaly_detection': True
+            },
+            'drift_detection': {
+                'enable': True,
+                'output_dir': str(data_dir / "ge_outputs" / "drift"),
+                'statistical_test_threshold': 0.00001
+            },
+            'visualization': {
+                'enable': True,
+                'output_dir': str(data_dir / "ge_outputs" / "reports")
+            }
+        },
+        'datasets': {
+            'test_dataset': {
+                'name': 'test_patients',
+                'raw_base_path': str(data_dir / "raw" / "test"),
+                'preprocessed_base_path': str(data_dir / "preprocessed" / "test"),
+                'metadata_base_path': str(data_dir / "synthetic_metadata"),
+                'metadata_filename': 'test_dataset.csv',
+                'description': 'Test patient metadata'
+            }
+        },
+        'partitioning': {
+            'enabled': True,
+            'format': 'year/month/day',
+            'metadata_file': str(data_dir / "partition_metadata.json")
+        },
+        'bias_detection': {
+            'enable': True,
+            'output_dir': str(data_dir / "ge_outputs" / "bias_analysis"),
+            'slicing_features': ['Age_Group', 'Gender', 'Urgency_Level'],
+            'mitigation': {
+                'enable': True,
+                'mitigated_data_output_dir': str(data_dir / "synthetic_metadata_mitigated")
+            }
+        },
+        'eda': {
+            'enable': True,
+            'output_dir': str(data_dir / "ge_outputs" / "eda")
+        },
+        'mlmd': {
+            'store': {
+                'type': 'sqlite',
+                'database_path': str(data_dir / "mlflow_store" / "metadata.db")
+            }
+        },
+        'logging': {
+            'level': 'INFO',
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            'file': str(data_dir / "logs" / "schema_statistics.log")
+        },
+        'execution': {
+            'process_datasets': ['test_dataset'],
+            'operations': {
+                'generate_statistics': True,
+                'infer_schema': True,
+                'perform_eda': True,
+                'validate_data': True,
+                'detect_drift': True,
+                'detect_bias': True,
+                'generate_reports': True
+            }
+        },
+        'schema_constraints': {
+            'numerical_features': {
+                'Age_Years': {'min': 0, 'max': 120, 'required': True}
+            },
+            'categorical_features': {
+                'Gender': {
+                    'allowed_values': ['Male', 'Female', 'Other'],
+                    'required': True
+                }
+            },
+            'string_features': {
+                'Patient_ID': {'required': True, 'unique': True}
+            }
+        }
+    }
+    
+    # Write config to file
+    config_file = config_dir / "metadata.yml"
+    with open(config_file, 'w') as f:
+        yaml.dump(config, f)
+    
+    return str(config_file), config
+
 
 class TestSchemaStatisticsManager:
     """Test cases for SchemaStatisticsManager class."""
-    
-    @pytest.fixture
-    def temp_dirs(self):
-        """Fixture providing temporary directories for testing."""
-        temp_dir = tempfile.mkdtemp()
-        
-        # Create necessary subdirectories
-        data_dir = Path(temp_dir) / "data"
-        config_dir = Path(temp_dir) / "config"
-        
-        data_dir.mkdir()
-        config_dir.mkdir()
-        
-        # Create partitioned metadata directories
-        metadata_dir = data_dir / "synthetic_metadata" / "2025" / "10" / "23"
-        metadata_dir.mkdir(parents=True)
-        
-        yield temp_dir, data_dir, config_dir, metadata_dir
-        
-        # Cleanup
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    
-    @pytest.fixture
-    def sample_config(self, temp_dirs):
-        """Fixture providing sample configuration."""
-        temp_dir, data_dir, config_dir, metadata_dir = temp_dirs
-        
-        config = {
-            'great_expectations': {
-                'statistics': {
-                    'output_dir': str(data_dir / "ge_outputs"),
-                    'baseline_dir': str(data_dir / "ge_outputs" / "baseline"),
-                    'new_data_dir': str(data_dir / "ge_outputs" / "new_data"),
-                },
-                'schema': {
-                    'output_dir': str(data_dir / "ge_outputs" / "schemas"),
-                    'auto_infer': True
-                },
-                'validation': {
-                    'output_dir': str(data_dir / "ge_outputs" / "validations"),
-                    'enable_anomaly_detection': True
-                },
-                'drift_detection': {
-                    'enable': True,
-                    'output_dir': str(data_dir / "ge_outputs" / "drift"),
-                    'statistical_test_threshold': 0.05
-                },
-                'visualization': {
-                    'enable': True,
-                    'output_dir': str(data_dir / "ge_outputs" / "reports")
-                }
-            },
-            'eda': {
-                'output_dir': str(data_dir / "ge_outputs" / "eda"),
-                'enable': True
-            },
-            'mlmd': {
-                'store': {
-                    'type': 'sqlite',
-                    'database_path': str(data_dir / "mlflow_store" / "metadata.db")
-                }
-            },
-            'datasets': {
-                'test_dataset': {
-                    'name': 'test_dataset',
-                    'metadata_base_path': str(data_dir / "synthetic_metadata"),
-                    'metadata_filename': 'test_dataset.csv',
-                    'description': 'Test dataset'
-                }
-            },
-            'partitioning': {
-                'enabled': True,
-                'format': 'year/month/day',
-                'metadata_file': str(data_dir / "partition_metadata.json")
-            },
-            'schema_constraints': {
-                'numerical_features': {
-                    'Age_Years': {'min': 0, 'max': 120, 'required': True}
-                },
-                'categorical_features': {
-                    'Gender': {
-                        'allowed_values': ['Male', 'Female', 'Other'],
-                        'required': True
-                    }
-                },
-                'string_features': {
-                    'Patient_ID': {'required': True, 'unique': True}
-                }
-            },
-            'logging': {
-                'level': 'INFO',
-                'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                'file': str(data_dir / "logs" / "schema_statistics.log"),
-                'file_dir': str(data_dir / "logs")
-            },
-            'execution': {
-                'process_datasets': ['test_dataset'],
-                'operations': {
-                    'generate_statistics': True,
-                    'infer_schema': True,
-                    'perform_eda': True,
-                    'validate_data': True,
-                    'detect_drift': False,
-                    'generate_reports': True
-                },
-                'drift': {
-                    'enabled': False,
-                    'min_partitions_required': 2
-                }
-            }
-        }
-        
-        # Save config to file
-        config_file = config_dir / "metadata.yml"
-        with open(config_file, 'w') as f:
-            yaml.dump(config, f)
-        
-        return str(config_file), config
     
     @pytest.fixture
     def sample_dataframe(self, temp_dirs):
@@ -178,7 +191,7 @@ class TestSchemaStatisticsManager:
         config_file, config = sample_config
         
         manager = SchemaStatisticsManager(config_file)
-        loaded_config = manager._load_config()
+        loaded_config = manager._load_config(config_file)
         
         assert 'great_expectations' in loaded_config
         assert 'datasets' in loaded_config
@@ -420,20 +433,20 @@ class TestSchemaStatisticsWithArgparse:
         """Test main function with default config."""
         config_file, config = sample_config
         
-        # Mock argparse to return default config
-        with patch('sys.argv', ['schema_statistics.py']):
-            # This would test the main function, but we need to ensure
-            # the environment is set up correctly
-            pass
+        # Test that the manager can be initialized with the config
+        manager = SchemaStatisticsManager(config_file)
+        assert manager.config is not None
+        assert 'great_expectations' in manager.config
     
     def test_main_with_custom_config(self, sample_config):
         """Test main function with custom config path."""
         config_file, config = sample_config
         
-        # Mock argparse to return custom config
-        with patch('sys.argv', ['schema_statistics.py', '--config', config_file]):
-            # This would test the main function
-            pass
+        # Test that the manager can be initialized with the custom config
+        manager = SchemaStatisticsManager(config_file)
+        assert manager.config is not None
+        assert 'datasets' in manager.config
+        assert 'test_dataset' in manager.config['datasets']
 
 
 if __name__ == "__main__":

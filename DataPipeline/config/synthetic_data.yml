@@ -9,8 +9,8 @@
 # Output configuration
 output:
   format: "csv"  # csv or json
-  tb_output_path: "data/synthetic_metadata/tb_patients.csv"
-  lung_cancer_output_path: "data/synthetic_metadata/lung_cancer_ct_scan_patients.csv"
+  tb_output_path: "data/synthetic_metadata/tb/tb_patients.csv"
+  lung_cancer_output_path: "data/synthetic_metadata/lung_cancer/lung_cancer_ct_scan_patients.csv"
   include_image_path: true
   random_seed: 42  # For reproducibility, set to null for random
   

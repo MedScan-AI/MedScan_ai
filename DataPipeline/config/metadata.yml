@@ -6,7 +6,7 @@ datasets:
     name: "tb_patients"
     raw_base_path: "data/raw/tb"
     preprocessed_base_path: "data/preprocessed/tb"
-    metadata_base_path: "data/synthetic_metadata"  # CSV files with patient metadata
+    metadata_base_path: "data/synthetic_metadata/tb"  # Disease-specific metadata path
     metadata_filename: "tb_patients.csv"
     description: "Tuberculosis chest X-ray patient metadata"
   
@@ -14,7 +14,7 @@ datasets:
     name: "lung_cancer_ct_scan_patients"
     raw_base_path: "data/raw/lung_cancer"
     preprocessed_base_path: "data/preprocessed/lung_cancer"
-    metadata_base_path: "data/synthetic_metadata"  # CSV files with patient metadata
+    metadata_base_path: "data/synthetic_metadata/lung_cancer"  # Disease-specific metadata path
     metadata_filename: "lung_cancer_ct_scan_patients.csv"
     description: "Lung cancer CT scan patient metadata"
 
@@ -178,6 +178,7 @@ bias_detection:
   # Slicing features for bias analysis
   slicing_features:
     - "Age_Years"
+    - "Age_Group"
     - "Diagnosis_Class"
     - "Urgency_Level"
     - "Body_Region"
@@ -225,8 +226,8 @@ bias_detection:
     
     # Resampling configuration
     resampling:
-      target_ratio: 0.8  # Target ratio of minority to majority class (0.8 = 80%)
-      method: "oversample"  # oversample, undersample, or smote
+      target_ratio: 0.8  # Target ratio for balanced groups (0.8 = 80%)
+      method: "balanced"  # balanced, oversample, undersample, or smote
     
     # Fairlearn post-processing configuration
     fairlearn_postprocessing:
