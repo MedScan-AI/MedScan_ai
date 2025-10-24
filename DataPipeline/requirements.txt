@@ -15,6 +15,12 @@ great-expectations
 scipy
 mlflow
 
+# Fairness and bias detection
+tensorflow
+fairlearn
+scikit-learn
+tensorflow-model-analysis
+
 # Testing dependencies
 pytest
 

@@ -140,6 +140,133 @@ eda:
   correlation_threshold: 0.5  # Threshold for high correlations
   histogram_bins: 20  # Number of bins for histograms
 
+# Advanced Data Bias Detection Configuration
+bias_detection:
+  # Bias detection output directory
+  output_dir: "data/ge_outputs/bias_analysis"
+  
+  # Enable bias detection
+  enable: true
+  
+  # Advanced bias detection libraries
+  libraries:
+    # Custom SliceFinder implementation for automatic problematic slice discovery
+    slicefinder:
+      enable: true
+      min_slice_size: 30
+      max_slices: 50
+      alpha: 0.05  # Significance level
+      max_problematic_slices: 10
+      distribution_threshold: 0.1  # 10% deviation threshold
+      missing_data_threshold: 0.05  # 5% missing data difference threshold
+      z_score_threshold: 2.0  # Z-score threshold for numerical anomalies
+    
+    # TensorFlow Model Analysis for comprehensive model performance slicing
+    tfma:
+      enable: true
+      model_type: "RandomForestClassifier"
+      performance_threshold: 0.2  # 20% performance difference threshold
+      min_slice_size: 10
+    
+    # Enhanced Fairlearn for industry-standard fairness metrics
+    fairlearn:
+      enable: true
+      demographic_parity_threshold: 0.1  # 10% difference threshold
+      equalized_odds_threshold: 0.1     # 10% difference threshold
+      ratio_threshold: 0.8               # 80% rule threshold
+  
+  # Slicing features for bias analysis
+  slicing_features:
+    - "Age_Years"
+    - "Diagnosis_Class"
+    - "Urgency_Level"
+    - "Body_Region"
+  
+  # Age grouping for age-based slicing
+  age_bins:
+    - name: "Young Adult"
+      min: 18
+      max: 35
+    - name: "Middle Age"
+      min: 36
+      max: 55
+    - name: "Senior"
+      min: 56
+      max: 75
+    - name: "Elderly"
+      min: 76
+      max: 120
+  
+  # Statistical tests for bias detection (legacy support)
+  statistical_tests:
+    # Chi-square test for categorical distributions
+    chi_square_threshold: 0.05  # P-value threshold for significance
+    
+    # Cohen's d effect size threshold (0.2=small, 0.5=medium, 0.8=large)
+    effect_size_threshold: 0.3
+    
+    # Minimum sample size per slice to be considered valid
+    min_slice_size: 30
+  
+  # Advanced bias mitigation strategies
+  mitigation:
+    enable: true
+    
+    # Output directory for mitigated datasets (partitioned by date: YYYY/MM/DD)
+    mitigated_data_output_dir: "data/synthetic_metadata_mitigated"
+    
+    # Strategies to apply when bias is detected
+    strategies:
+      - "resample_underrepresented"  # Over-sample minority groups
+      - "class_weights"  # Compute class weights for model training
+      - "stratified_split"  # Ensure proportional representation
+      - "fairlearn_postprocessing"  # Use Fairlearn ThresholdOptimizer
+      - "correlation_removal"  # Use Fairlearn CorrelationRemover
+    
+    # Resampling configuration
+    resampling:
+      target_ratio: 0.8  # Target ratio of minority to majority class (0.8 = 80%)
+      method: "oversample"  # oversample, undersample, or smote
+    
+    # Fairlearn post-processing configuration
+    fairlearn_postprocessing:
+      threshold_optimizer:
+        enable: true
+        objective: "demographic_parity"  # or "equalized_odds"
+        threshold_range: [0.1, 0.9]
+      
+      correlation_remover:
+        enable: true
+        sensitive_feature_names: ["Age_Group"]
+    
+    # Document mitigation process
+    generate_report: true
+  
+  # Comprehensive fairness metrics to compute
+  fairness_metrics:
+    # Demographic Parity
+    demographic_parity:
+      enable: true
+      difference_threshold: 0.1
+      ratio_threshold: 0.8
+    
+    # Equalized Odds
+    equalized_odds:
+      enable: true
+      difference_threshold: 0.1
+      ratio_threshold: 0.8
+    
+    # Equal Opportunity
+    equal_opportunity:
+      enable: true
+      difference_threshold: 0.1
+      ratio_threshold: 0.8
+    
+    # Calibration
+    calibration:
+      enable: true
+      difference_threshold: 0.1
+
 # MLMD Configuration (used by MLflow)
 mlmd:
   # Metadata store configuration
@@ -281,6 +408,7 @@ execution:
     perform_eda: true  # Perform exploratory data analysis on latest partition
     validate_data: true
     detect_drift: true
+    detect_bias: true  # Perform bias detection using data slicing
     generate_reports: true
   
   # Drift detection setup
