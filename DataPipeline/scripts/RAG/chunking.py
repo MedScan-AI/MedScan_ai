@@ -1,14 +1,14 @@
 import re
 import json
 import logging
+import os
+import tiktoken
 from pathlib import Path
 from typing import List, Dict, Tuple
 from datetime import datetime
 
-import tiktoken
-
 # Configure paths
-INPUT_DIR = Path(__file__).parent.parent.parent / "data" / "RAG" / "raw_data"
+INPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "raw_data" / "raw_data.jsonl"
 OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "chunked_data" / "chunks.json"
 
 # Setup logging
@@ -35,7 +35,7 @@ class HeaderDetector:
             'introduction', 'overview', 'background', 'summary', 'conclusion',
             'abstract', 'methods', 'results', 'discussion', 'references',
             'symptoms', 'treatment', 'diagnosis', 'causes', 'prevention',
-            'what is', 'how to', 'why', 'when', 'where'
+            'what is', 'how to', 'why', 'when', 'where', 'section'
         }
     
     def is_likely_heading(self, line: str, next_line: str = "") -> Tuple[bool, int]:
@@ -52,21 +52,23 @@ class HeaderDetector:
             if len(text.split()) <= 10:
                 return True, 2
         
-        # ALL CAPS
-        if stripped.isupper() and 2 <= len(stripped.split()) <= 12:
-            if not re.match(r'^[A-Z0-9\-]+$', stripped.replace(' ', '')):
-                return True, 2
+        # ALL CAPS (including single hyphenated words like WITH-HYPHENS)
+        word_count = len(stripped.split())
+        if stripped.isupper() and ((word_count >= 2 and word_count <= 12) or (word_count == 1 and '-' in stripped)):
+            return True, 2
         
-        # Short line followed by longer content
-        if len(stripped) < 60 and len(next_line.strip()) > 60:
-            if not stripped.endswith(('.', ',', ';', ':', '!', '?')):
+        # Short line followed by longer content (use word count)
+        first_line_words = len(stripped.split())
+        next_line_words = len(next_line.strip().split())
+        if first_line_words < 20 and next_line_words > first_line_words:
+            if not stripped.endswith(('.', ',', ';', '!', '?')):
                 if any(keyword in stripped.lower() for keyword in self.heading_keywords):
-                    return True, 2
+                    return True, 1  # Main section headers are level 1
                 if re.match(r'^\d+\.?\d*\.?\s+[A-Z]', stripped):
                     return True, 2
         
-        # Numbered sections
-        if re.match(r'^\d+\.\s+[A-Z]', stripped) and len(stripped) < 80:
+        # Numbered sections (supports sub-numbering like 1., 2.1., 3.1.2.)
+        if re.match(r'^\d+(\.\d+)*\.\s+[A-Z]', stripped) and len(stripped) < 80:
             return True, 2
         
         # Question format headings
@@ -74,14 +76,15 @@ class HeaderDetector:
             if stripped[0].isupper():
                 return True, 3
         
-        # Common heading words in title case
+        # Common heading words in title case (check ANY word for keywords)
         words = stripped.split()
         if len(words) >= 2 and len(words) <= 10:
-            first_word = words[0].lower().rstrip(':')
-            if first_word in self.heading_keywords:
+            # Check if any word (after removing punctuation) is a keyword
+            has_keyword = any(w.lower().rstrip(':') in self.heading_keywords for w in words)
+            if has_keyword:
                 title_case_count = sum(1 for w in words if w[0].isupper())
                 if title_case_count >= len(words) * 0.6:
-                    return True, 2
+                    return True, 1  # Main section headers are level 1
         
         return False, 0
     
@@ -234,7 +237,7 @@ class RAGChunker:
         
         return chunks
     
-    def process_file(self, filepath: Path) -> List[Dict]:
+    def process_file(self, record: dict) -> List[Dict]:
         """
         Process a markdown file and return chunks with metadata.
         
@@ -242,21 +245,24 @@ class RAGChunker:
             List of dictionaries with metadata and content chunks
         """
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
             # Step 1 & 6: Extract metadata
-            metadata, content_body = self.extract_metadata(content)
+            content_body = record.get('markdown_text', record.get('text', ''))
+            excluded_keys = ['markdown_title', 'markdown_text', 'text', 'word_count', 'token_count']
+            metadata = {k: v for k,v in record.items() if k not in excluded_keys}
+            doc_link = record.get('link', 'N/A')
+            if content_body == "":
+                logger.error(f"No text found for {doc_link}")
+                return []
             
             # Step 2: Check if headers exist
             has_headers = self.has_headers(content_body)
             
             # Step 3: Add headers if missing
             if not has_headers:
-                logger.info(f"  ⚡ Adding headers to: {filepath.name}")
+                logger.info(f"Adding headers to: {doc_link}")
                 content_body = self.detector.process_markdown(content_body)
             else:
-                logger.info(f"  ✓ Headers found in: {filepath.name}")
+                logger.info(f"  ✓ Headers found in: {doc_link}")
             
             # Step 4: Chunk by headers
             chunks = self.chunk_by_headers(content_body)
@@ -266,24 +272,24 @@ class RAGChunker:
             for i, chunk in enumerate(chunks):
                 chunk_data = {
                     'chunk_id': i,
-                    'source_file': str(filepath.name),
                     'section_header': chunk['header'],
                     'section_level': chunk['level'],
                     'content': chunk['content'],
-                    'token_count': chunk.get('token_count', 0),
+                    'chunk_token_count': chunk.get('token_count', 0),
                     **metadata  # Expand metadata into the main structure
                 }
                 result.append(chunk_data)
 
             
-            logger.info(f"  → Generated {len(result)} chunks")
+            logger.info(f"Generated {len(result)} chunks")
             return result
             
         except Exception as e:
-            logger.error(f"  ✗ Error processing {filepath.name}: {e}")
+            doc_link = record.get('link', 'N/A')
+            logger.error(f"Error processing {doc_link}: {e}")
             return []
     
-    def process_directory(self, input_dir: Path, output_file: Path):
+    def process_directory(self, input_file: Path, output_file: Path):
         """
         Process all markdown files in a directory and save to JSON.
         
@@ -292,22 +298,21 @@ class RAGChunker:
             output_file: Path to output JSON file
         """
         logger.info(f"Starting chunking process...")
-        logger.info(f"Input directory: {input_dir}")
+        logger.info(f"Input file: {input_file}")
         logger.info(f"Output file: {output_file}")
         
         all_chunks = []
-        md_files = sorted(input_dir.glob('*.md'))
-        
-        if not md_files:
-            logger.warning(f"No .md files found in {input_dir}")
-            return []
-        
-        logger.info(f"Found {len(md_files)} markdown files\n")
-        
-        for md_file in md_files:
-            logger.info(f"Processing: {md_file.name}")
-            chunks = self.process_file(md_file)
-            all_chunks.extend(chunks)
+
+        with open(input_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            logger.info(f"Found {len(lines)} markdown files\n")
+            # records = json.load(f)
+            for line in lines:
+                line = line.strip()
+                record = json.loads(line)
+                logger.info(f"Processing: {record.get('link', 'N/A')}")
+                chunks = self.process_file(record)
+                all_chunks.extend(chunks)
         
         # Save to JSON
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -316,7 +321,7 @@ class RAGChunker:
         
         logger.info(f"\n{'='*60}")
         logger.info(f"COMPLETE!")
-        logger.info(f"Processed {len(all_chunks)} chunks from {len(md_files)} files")
+        logger.info(f"Processed {len(all_chunks)} chunks from Raw data")
         logger.info(f"Saved to: {output_file}")
         logger.info(f"{'='*60}")
         
@@ -329,8 +334,8 @@ def main():
     chunker = RAGChunker()
     
     # Process all files
-    if INPUT_DIR.exists():
-        chunks = chunker.process_directory(INPUT_DIR, OUTPUT_FILE)
+    if os.path.exists(INPUT_FILE):
+        chunks = chunker.process_directory(INPUT_FILE, OUTPUT_FILE)
         
         # Print sample chunk for verification
         if chunks:
@@ -342,7 +347,7 @@ def main():
             logger.info(f"  - Max tokens: {max(token_counts)}")
             logger.info(f"  - Avg tokens: {sum(token_counts)/len(token_counts):.2f}")
     else:
-        logger.error(f"Input directory not found: {INPUT_DIR}")
+        logger.error(f"Input File not found: {INPUT_FILE}")
         logger.error("Please create the directory and add markdown files.")
 
 
