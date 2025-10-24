@@ -1186,30 +1186,47 @@ class SchemaStatisticsManager:
         # Detect drift for categorical features
         for col in baseline_df.select_dtypes(include=['object', 'category']).columns:
             if col in new_df.columns:
-                # Chi-square test
-                baseline_counts = baseline_df[col].value_counts()
-                new_counts = new_df[col].value_counts()
+                # Get proportions (normalize to handle different sample sizes)
+                baseline_counts = baseline_df[col].value_counts(normalize=True)
+                new_counts = new_df[col].value_counts(normalize=True)
                 
                 # Align categories
-                all_categories = set(baseline_counts.index) | set(new_counts.index)
-                baseline_freq = [baseline_counts.get(cat, 0) for cat in all_categories]
-                new_freq = [new_counts.get(cat, 0) for cat in all_categories]
+                all_categories = sorted(set(baseline_counts.index) | set(new_counts.index))
+                baseline_props = np.array([baseline_counts.get(cat, 0) for cat in all_categories])
+                new_props = np.array([new_counts.get(cat, 0) for cat in all_categories])
                 
-                try:
-                    statistic, pvalue = scipy_stats.chisquare(new_freq, baseline_freq)
-                    
-                    threshold = drift_config['statistical_test_threshold']
-                    if pvalue < threshold:
-                        drifted_features.append({
-                            'feature': col,
-                            'type': 'categorical',
-                            'test': 'Chi-square',
-                            'statistic': float(statistic),
-                            'pvalue': float(pvalue),
-                            'drift_detected': True
-                        })
-                except Exception as e:
-                    self.logger.warning(f"Could not perform chi-square test for {col}: {e}")
+                # Use Chi-square test with actual counts (scaled appropriately)
+                baseline_n = len(baseline_df)
+                new_n = len(new_df)
+                
+                # Convert proportions to expected counts for chi-square
+                baseline_expected = baseline_props * new_n
+                new_observed = new_props * new_n
+                
+                # Filter out categories with very low expected frequencies
+                mask = baseline_expected >= 1.0  # Chi-square requirement
+                
+                if np.sum(mask) > 1:  # Need at least 2 categories for test
+                    try:
+                        statistic, pvalue = scipy_stats.chisquare(
+                            new_observed[mask], 
+                            baseline_expected[mask]
+                        )
+                        
+                        threshold = drift_config['statistical_test_threshold']
+                        if pvalue < threshold:
+                            drifted_features.append({
+                                'feature': col,
+                                'type': 'categorical',
+                                'test': 'Chi-square',
+                                'statistic': float(statistic),
+                                'pvalue': float(pvalue),
+                                'drift_detected': True
+                            })
+                    except Exception as e:
+                        self.logger.warning(f"Could not perform chi-square test for {col}: {e}")
+                else:
+                    self.logger.debug(f"Skipping chi-square for {col}: insufficient valid categories")
         
         drift_report = {
             'dataset_name': dataset_name,
@@ -1531,13 +1548,71 @@ class SchemaStatisticsManager:
                     if len(data_partitions) > 2:
                         self.logger.info(f"  Note: Found {len(data_partitions)} total partitions, comparing latest 2")
                 else:
-                    # Only one partition - use it as baseline, no drift detection
-                    baseline_df = self._load_partition_data(data_partitions)
-                    new_df = None
-                    baseline_timestamp = data_partitions[0]['timestamp']
-                    new_timestamp = None
-                    self.logger.info(f"Only 1 partition found. Drift detection will be skipped.")
-                    self.logger.info(f"  Baseline: {baseline_timestamp} ({len(baseline_df)} rows)")
+                    # Only one partition - check if previous baselines exist
+                    baseline_dir = self.config['great_expectations']['statistics']['baseline_dir']
+                    has_previous_baselines = False
+                    
+                    if os.path.exists(baseline_dir):
+                        # Check if baseline directory has any data
+                        baseline_files = list(Path(baseline_dir).rglob('*.json'))
+                        has_previous_baselines = len(baseline_files) > 0
+                    
+                    if has_previous_baselines:
+                        # Previous baselines exist - use current partition as baseline, no drift
+                        baseline_df = self._load_partition_data(data_partitions)
+                        new_df = None
+                        baseline_timestamp = data_partitions[0]['timestamp']
+                        new_timestamp = None
+                        self.logger.info(f"Only 1 partition found. Drift detection will be skipped.")
+                        self.logger.info(f"  Baseline: {baseline_timestamp} ({len(baseline_df)} rows)")
+                    else:
+                        # No previous baselines - split current partition 70:30 for drift detection
+                        full_df = self._load_partition_data(data_partitions)
+                        total_rows = len(full_df)
+                        
+                        # Create intentional drift by sorting on a key feature before splitting
+                        # This simulates temporal drift where distributions change over time
+                        
+                        # Check if Diagnosis_Class exists (common in medical datasets)
+                        if 'Diagnosis_Class' in full_df.columns:
+                            # Sort by diagnosis class and then by age to create class distribution drift
+                            full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
+                                                                  ascending=[True, True]).reset_index(drop=True)
+                            self.logger.info(f"Creating drift by sorting on Diagnosis_Class and Age_Years")
+                        elif 'Age_Years' in full_df.columns:
+                            # Sort by age to create age distribution drift
+                            full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
+                            self.logger.info(f"Creating drift by sorting on Age_Years")
+                        else:
+                            # Fallback: sort by first numeric column
+                            numeric_cols = full_df.select_dtypes(include=[np.number]).columns
+                            if len(numeric_cols) > 0:
+                                sort_col = numeric_cols[0]
+                                full_df_sorted = full_df.sort_values(sort_col).reset_index(drop=True)
+                                self.logger.info(f"Creating drift by sorting on {sort_col}")
+                            else:
+                                # No numeric columns, use random shuffle
+                                full_df_sorted = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
+                                self.logger.warning(f"No numeric columns found for drift creation, using random split")
+                        
+                        split_point = int(total_rows * 0.7)
+                        baseline_df = full_df_sorted.iloc[:split_point].copy()
+                        new_df = full_df_sorted.iloc[split_point:].copy()
+                        baseline_timestamp = data_partitions[0]['timestamp']
+                        new_timestamp = data_partitions[0]['timestamp']  # Same timestamp
+                        
+                        self.logger.info(f"Only 1 partition found with no previous baselines.")
+                        self.logger.info(f"Splitting data 70:30 for drift detection with intentional distribution shift:")
+                        self.logger.info(f"  Baseline (70%): {len(baseline_df)} rows")
+                        self.logger.info(f"  New (30%): {len(new_df)} rows")
+                        self.logger.info(f"  Total rows: {total_rows}")
+                        
+                        # Log distribution differences if Diagnosis_Class exists
+                        if 'Diagnosis_Class' in full_df.columns:
+                            baseline_dist = baseline_df['Diagnosis_Class'].value_counts(normalize=True)
+                            new_dist = new_df['Diagnosis_Class'].value_counts(normalize=True)
+                            self.logger.info(f"  Baseline distribution: {baseline_dist.to_dict()}")
+                            self.logger.info(f"  New distribution: {new_dist.to_dict()}")
             else:
                 # Non-partitioned mode: load from single CSV
                 if metadata_base_path and metadata_filename:

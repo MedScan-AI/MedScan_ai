@@ -12,10 +12,10 @@ data_acquisition:
         download_path: "data/raw/lung_cancer_ct_scan"
         description: "CT scan images for lung cancer detection"
       
-      - name: "brain_tumor_mri"
-        dataset_id: "masoudnickparvar/brain-tumor-mri-dataset"
-        download_path: "data/raw/brain_tumor_mri"
-        description: "Brain tumor MRI dataset"
+      - name: "tb"
+        dataset_id: "tawsifurrahman/tuberculosis-tb-chest-xray-dataset"
+        download_path: "data/raw/tb"
+        description: "Tuberculosis TB Chest X-ray dataset"
     
     # Kaggle API configuration
     api:
@@ -31,15 +31,15 @@ data_preprocessing:
     quality: 95              # JPEG quality (1-100)
     output_format: "JPEG"    # Output image format
   
-  # Brain Tumor MRI specific configuration
-  brain_tumor_mri:
-    raw_data_path: "data/raw/brain_tumor_mri"
-    preprocessed_data_path: "data/preprocessed/brain_tumor_mri"
-    test_output_path: "data/test_preprocessed/brain_tumor_mri"
+  # Tuberculosis Chest X-ray specific configuration
+  tb:
+    raw_data_path: "data/raw/tb"
+    preprocessed_data_path: "data/preprocessed/tb"
+    test_output_path: "data/test_preprocessed/tb"
     
     # Dataset structure
-    splits: ["Training", "Testing"]
-    classes: ["glioma", "meningioma", "notumor", "pituitary"]
+    splits: ["train", "test"]
+    classes: ["Normal", "Tuberculosis"]
     
     # Test configuration
     test:

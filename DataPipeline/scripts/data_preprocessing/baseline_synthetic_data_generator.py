@@ -3,7 +3,7 @@ Baseline Synthetic Patient Data Generator using Faker
 
 This module generates synthetic patient metadata for preprocessed medical images
 using the Faker library for realistic patient demographics, symptoms, medications,
-and examination details for brain tumor MRI and lung cancer CT scan datasets.
+and examination details for tuberculosis chest X-ray and lung cancer CT scan datasets.
 """
 
 import os
@@ -218,18 +218,18 @@ class PatientDataGenerator:
         return random.choices(levels, weights=weights)[0]
 
 
-class BrainTumorDataGenerator(PatientDataGenerator):
-    """Generator for brain tumor MRI patient data using Faker."""
+class TBDataGenerator(PatientDataGenerator):
+    """Generator for tuberculosis chest X-ray patient data using Faker."""
     
     def __init__(self, config: Dict):
         """
-        Initialize the brain tumor data generator.
+        Initialize the tuberculosis data generator.
         
         Args:
             config: Configuration dictionary
         """
         super().__init__(config)
-        self.brain_config = config['brain_tumor']
+        self.tb_config = config['tb']
     
     def generate_patient_record(
         self, 
@@ -237,11 +237,11 @@ class BrainTumorDataGenerator(PatientDataGenerator):
         class_name: str
     ) -> Dict[str, str]:
         """
-        Generate a complete patient record for a brain tumor MRI image.
+        Generate a complete patient record for a tuberculosis chest X-ray image.
         
         Args:
             image_path: Path to the image file
-            class_name: Tumor class (glioma, meningioma, pituitary, notumor)
+            class_name: Class (Normal, Tuberculosis)
             
         Returns:
             Dictionary with patient data
@@ -250,9 +250,9 @@ class BrainTumorDataGenerator(PatientDataGenerator):
         patient_id = self.extract_patient_id_from_filename(image_path)
         
         # Get class-specific symptoms
-        symptoms_list = self.brain_config['presenting_symptoms'].get(
+        symptoms_list = self.tb_config['presenting_symptoms'].get(
             class_name, 
-            self.brain_config['presenting_symptoms']['notumor']
+            self.tb_config['presenting_symptoms']['Normal']
         )
         
         record = {
@@ -260,19 +260,19 @@ class BrainTumorDataGenerator(PatientDataGenerator):
             'Patient_ID': patient_id,
             'Presenting_Symptoms': self.generate_symptoms(symptoms_list),
             'Current_Medications': self.generate_medications(
-                self.brain_config['current_medications']
+                self.tb_config['current_medications']
             ),
             'Previous_Relevant_Surgeries': self.generate_surgeries(
-                self.brain_config['previous_surgeries']
+                self.tb_config['previous_surgeries']
             ),
             'Age_Years': self.generate_age(),
             'Weight_KG': self.generate_weight(),
             'Height_CM': self.generate_height(),
             'Gender': self.generate_gender(),
-            'Examination_Type': self.brain_config['examination_type'],
-            'Body_Region': self.brain_config['body_region'],
+            'Examination_Type': self.tb_config['examination_type'],
+            'Body_Region': self.tb_config['body_region'],
             'Urgency_Level': self.generate_urgency(
-                self.brain_config['urgency_levels']
+                self.tb_config['urgency_levels']
             )
         }
         
@@ -364,7 +364,7 @@ class SyntheticDataPipeline:
         self.config = self._load_config()
         
         # Initialize generators
-        self.brain_generator = BrainTumorDataGenerator(self.config)
+        self.tb_generator = TBDataGenerator(self.config)
         self.lung_generator = LungCancerDataGenerator(self.config)
     
     def _load_config(self) -> Dict:
@@ -501,29 +501,29 @@ class SyntheticDataPipeline:
         
         return image_files
     
-    def generate_brain_tumor_data(self) -> List[Dict[str, str]]:
+    def generate_tb_data(self) -> List[Dict[str, str]]:
         """
-        Generate synthetic patient data for all brain tumor MRI images.
+        Generate synthetic patient data for all tuberculosis chest X-ray images.
         
         Returns:
             List of patient records
         """
-        logger.info("Generating synthetic data for brain tumor MRI...")
+        logger.info("Generating synthetic data for tuberculosis chest X-rays...")
         
         # Get preprocessed images
-        preprocessed_path = "data/preprocessed/brain_tumor_mri"
+        preprocessed_path = "data/preprocessed/tb"
         image_files = self.get_image_files(preprocessed_path)
         
         if not image_files:
-            logger.warning("No brain tumor MRI images found!")
+            logger.warning("No tuberculosis chest X-ray images found!")
             return []
         
-        logger.info(f"Found {len(image_files)} brain tumor MRI images")
+        logger.info(f"Found {len(image_files)} tuberculosis chest X-ray images")
         
         # Generate patient records
         records = []
         for idx, (img_path, split, class_name) in enumerate(image_files, start=1):
-            record = self.brain_generator.generate_patient_record(
+            record = self.tb_generator.generate_patient_record(
                 image_path=img_path,
                 class_name=class_name
             )
@@ -532,7 +532,7 @@ class SyntheticDataPipeline:
             if idx % 500 == 0:
                 logger.info(f"Generated {idx}/{len(image_files)} records...")
         
-        logger.info(f"Generated {len(records)} brain tumor patient records")
+        logger.info(f"Generated {len(records)} tuberculosis patient records")
         return records
     
     def generate_lung_cancer_data(self) -> List[Dict[str, str]]:
@@ -659,17 +659,17 @@ class SyntheticDataPipeline:
         logger.info(f"Partitioning enabled: {use_partitioning}")
         logger.info(f"Using latest partition only: {use_latest_partition}")
         
-        # Generate brain tumor data (for latest partition only)
-        brain_records = self.generate_brain_tumor_data()
-        if brain_records:
-            brain_output_path = self.config['output']['brain_tumor_output_path']
+        # Generate tuberculosis data (for latest partition only)
+        tb_records = self.generate_tb_data()
+        if tb_records:
+            tb_output_path = self.config['output']['tb_output_path']
             
             if output_format == 'csv':
-                self.save_records_csv(brain_records, brain_output_path, use_partitioning=use_partitioning)
+                self.save_records_csv(tb_records, tb_output_path, use_partitioning=use_partitioning)
             else:
                 # Change extension to .json if needed
-                brain_output_path = brain_output_path.replace('.csv', '.json')
-                self.save_records_json(brain_records, brain_output_path, use_partitioning=use_partitioning)
+                tb_output_path = tb_output_path.replace('.csv', '.json')
+                self.save_records_json(tb_records, tb_output_path, use_partitioning=use_partitioning)
         
         # Generate lung cancer data (for latest partition only)
         lung_records = self.generate_lung_cancer_data()
@@ -689,9 +689,9 @@ class SyntheticDataPipeline:
         print("\n" + "="*60)
         print("SYNTHETIC DATA GENERATION SUMMARY")
         print("="*60)
-        print(f"Brain Tumor MRI Records: {len(brain_records)}")
+        print(f"Tuberculosis Chest X-ray Records: {len(tb_records)}")
         print(f"Lung Cancer CT Scan Records: {len(lung_records)}")
-        print(f"Total Records Generated: {len(brain_records) + len(lung_records)}")
+        print(f"Total Records Generated: {len(tb_records) + len(lung_records)}")
         print(f"Output Format: {output_format.upper()}")
         print(f"Partitioning Enabled: {use_partitioning}")
         print(f"Latest Partition Only: {use_latest_partition}")

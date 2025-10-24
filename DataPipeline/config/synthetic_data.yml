@@ -1,7 +1,7 @@
 # Synthetic Patient Data Generation Configuration using Faker
 # 
 # Note: Patient IDs are extracted from preprocessed image filenames.
-# The preprocessing scripts (process_braintumor.py, process_lungcancer.py) 
+# The preprocessing scripts (process_tb.py, process_lungcancer.py) 
 # automatically generate unique UUID-based Patient IDs (32-character hex strings)
 # and use them as image filenames. This generator reads those filenames to
 # ensure Patient IDs match between images and metadata.
@@ -9,7 +9,7 @@
 # Output configuration
 output:
   format: "csv"  # csv or json
-  brain_tumor_output_path: "data/synthetic_metadata/brain_tumor_mri_patients.csv"
+  tb_output_path: "data/synthetic_metadata/tb_patients.csv"
   lung_cancer_output_path: "data/synthetic_metadata/lung_cancer_ct_scan_patients.csv"
   include_image_path: true
   random_seed: 42  # For reproducibility, set to null for random
@@ -41,79 +41,59 @@ demographics:
     Female: 0.48
     Other: 0.04
 
-# Brain Tumor MRI Specific Configuration
-brain_tumor:
-  examination_type: "MRI"
-  body_region: "Head/Brain"
+# Tuberculosis Chest X-ray Specific Configuration
+tb:
+  examination_type: "X-ray"
+  body_region: "Chest"
   
   # Class-specific presenting symptoms
   presenting_symptoms:
-    glioma:
-      - "Persistent headaches"
-      - "Seizures"
-      - "Memory problems"
-      - "Personality changes"
-      - "Vision problems"
-      - "Difficulty speaking"
-      - "Weakness on one side of body"
-      - "Balance problems"
-      - "Nausea and vomiting"
-    
-    meningioma:
-      - "Headaches"
-      - "Vision changes"
-      - "Hearing loss"
-      - "Memory loss"
-      - "Seizures"
-      - "Weakness in arms or legs"
-      - "Numbness"
-      - "Dizziness"
-    
-    pituitary:
-      - "Headaches"
-      - "Vision problems"
-      - "Unexplained weight gain or loss"
+    Tuberculosis:
+      - "Persistent cough lasting more than 3 weeks"
+      - "Coughing up blood or sputum"
+      - "Chest pain"
+      - "Night sweats"
+      - "Fever"
+      - "Unexplained weight loss"
       - "Fatigue"
-      - "Mood changes"
-      - "Sexual dysfunction"
-      - "Changes in menstruation"
-      - "Excessive thirst or urination"
+      - "Loss of appetite"
+      - "Shortness of breath"
     
-    notumor:
+    Normal:
       - "Routine screening"
       - "Follow-up examination"
-      - "Headaches"
-      - "Dizziness"
+      - "Pre-employment screening"
+      - "Contact screening"
       - "None reported"
   
   # Medical treatments and medications
   current_medications:
-    - "Dexamethasone (steroid)"
-    - "Levetiracetam (anti-seizure)"
-    - "Phenytoin (anti-seizure)"
-    - "Temozolomide (chemotherapy)"
-    - "Bevacizumab (targeted therapy)"
-    - "Lisinopril (blood pressure)"
-    - "Metformin (diabetes)"
-    - "Aspirin (blood thinner)"
-    - "Atorvastatin (cholesterol)"
+    - "Isoniazid (TB treatment)"
+    - "Rifampicin (TB treatment)"
+    - "Pyrazinamide (TB treatment)"
+    - "Ethambutol (TB treatment)"
+    - "Streptomycin (TB treatment)"
+    - "Albuterol (bronchodilator)"
+    - "Prednisone (steroid)"
+    - "Vitamin B6 (pyridoxine)"
+    - "Antihistamines"
     - "None"
   
   # Surgical history
   previous_surgeries:
     - "None"
-    - "Craniotomy"
-    - "Brain biopsy"
-    - "VP shunt placement"
-    - "Previous tumor resection"
+    - "Thoracotomy"
+    - "Lung resection"
+    - "Pleural biopsy"
+    - "Bronchoscopy"
     - "Appendectomy"
     - "Cholecystectomy"
     - "Hernia repair"
   
   # Urgency levels and weights
   urgency_levels:
-    Routine: 0.6
-    Urgent: 0.3
+    Routine: 0.7
+    Urgent: 0.2
     Emergent: 0.1
 
 # Lung Cancer CT Scan Specific Configuration

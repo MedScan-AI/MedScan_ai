@@ -1,7 +1,7 @@
 """
-Brain Tumor MRI Dataset Preprocessing Script
+Tuberculosis Chest X-ray Dataset Preprocessing Script
 
-This module provides object-oriented classes for preprocessing brain tumor MRI images.
+This module provides object-oriented classes for preprocessing tuberculosis chest X-ray images.
 It handles image loading, resizing, normalization, and augmentation for model training.
 """
 
@@ -120,31 +120,35 @@ class ImageProcessor:
         return normalized
 
 
-class BrainTumorPreprocessor(ImageProcessor):
-    """Preprocessor specifically for Brain Tumor MRI dataset."""
+class TBPreprocessor(ImageProcessor):
+    """Preprocessor specifically for Tuberculosis Chest X-ray dataset."""
     
     def __init__(
         self,
         raw_data_path: str,
         preprocessed_data_path: str,
         target_size: Tuple[int, int] = (224, 224),
-        quality: int = 95
+        quality: int = 95,
+        classes: List[str] = None,
+        splits: List[str] = None
     ):
         """
-        Initialize the BrainTumorPreprocessor.
+        Initialize the TBPreprocessor.
         
         Args:
-            raw_data_path: Path to raw brain tumor data
+            raw_data_path: Path to raw tuberculosis X-ray data
             preprocessed_data_path: Path to save preprocessed data
             target_size: Target size for resizing images
             quality: JPEG quality for saving images (1-100)
+            classes: List of class names (default: ['Normal', 'Tuberculosis'])
+            splits: List of data splits (default: ['train', 'test'])
         """
         super().__init__(target_size)
         self.raw_data_path = Path(raw_data_path)
         self.preprocessed_data_path = Path(preprocessed_data_path)
         self.quality = quality
-        self.classes = ['glioma', 'meningioma', 'notumor', 'pituitary']
-        self.splits = ['Training', 'Testing']
+        self.classes = classes if classes is not None else ['Normal', 'Tuberculosis']
+        self.splits = splits if splits is not None else ['train', 'test']
         self.stats: Dict[str, int] = {
             'total_processed': 0,
             'total_failed': 0,
@@ -175,19 +179,30 @@ class BrainTumorPreprocessor(ImageProcessor):
         Get all image files for a specific split and class.
         
         Args:
-            split: Data split (Training/Testing)
-            class_name: Class name (e.g., 'glioma')
+            split: Data split (train/test)
+            class_name: Class name (e.g., 'Normal', 'Tuberculosis')
             
         Returns:
             List of image file paths (deduplicated)
         """
+        # Try standard split structure first
         class_dir = self.raw_data_path / split / class_name
-        if not class_dir.exists():
-            self.logger.warning(f"Directory not found: {class_dir}")
-            return []
+        using_tb_db_structure = False
         
-        # Support jpg and jpeg extensions, deduplicate for case-insensitive filesystems
-        image_extensions = ['*.jpg', '*.jpeg']
+        # If standard structure doesn't exist, try TB_Chest_Radiography_Database structure
+        if not class_dir.exists():
+            # Check if data is in TB_Chest_Radiography_Database subdirectory (no splits)
+            tb_db_dir = self.raw_data_path / "TB_Chest_Radiography_Database" / class_name
+            if tb_db_dir.exists():
+                class_dir = tb_db_dir
+                using_tb_db_structure = True
+                self.logger.info(f"Using TB database structure: {class_dir}")
+            else:
+                self.logger.warning(f"Directory not found: {class_dir}")
+                return []
+        
+        # Support jpg, jpeg, and png extensions, deduplicate for case-insensitive filesystems
+        image_extensions = ['*.jpg', '*.jpeg', '*.png']
         image_files = set()  # Use set to avoid duplicates
         
         for ext in image_extensions:
@@ -195,7 +210,24 @@ class BrainTumorPreprocessor(ImageProcessor):
             # Also check uppercase on case-sensitive systems
             image_files.update(class_dir.glob(ext.upper()))
         
-        return sorted(list(image_files))
+        all_images = sorted(list(image_files))
+        
+        # If using TB database structure (no pre-existing splits), split the data
+        if using_tb_db_structure and len(self.splits) > 1:
+            # Split data: 80% train, 20% test (or adjust based on number of splits)
+            train_ratio = 0.8
+            split_point = int(len(all_images) * train_ratio)
+            
+            if split == 'train':
+                return all_images[:split_point]
+            elif split == 'test':
+                return all_images[split_point:]
+            else:
+                # For any other split name, return empty
+                self.logger.warning(f"Unknown split '{split}' for unsplit dataset")
+                return []
+        
+        return all_images
     
     def preprocess_image(
         self,
@@ -236,7 +268,7 @@ class BrainTumorPreprocessor(ImageProcessor):
         Uses UUID-based Patient IDs as filenames.
         
         Args:
-            split: Data split (Training/Testing)
+            split: Data split (train/test)
             class_name: Class name
             
         Returns:
@@ -278,7 +310,7 @@ class BrainTumorPreprocessor(ImageProcessor):
         Returns:
             Statistics dictionary with processing results
         """
-        self.logger.info("Starting Brain Tumor MRI preprocessing...")
+        self.logger.info("Starting Tuberculosis Chest X-ray preprocessing...")
         self.logger.info(f"Raw data path: {self.raw_data_path}")
         self.logger.info(f"Preprocessed data path: {self.preprocessed_data_path}")
         
@@ -458,7 +490,7 @@ def main():
     import yaml
     
     parser = argparse.ArgumentParser(
-        description='Preprocess brain tumor MRI images with partition support'
+        description='Preprocess tuberculosis chest X-ray images with partition support'
     )
     parser.add_argument(
         '--config',
@@ -481,19 +513,22 @@ def main():
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
-    # Get paths from config (with fallback to default)
-    brain_tumor_config = None
-    for dataset in config.get('data_acquisition', {}).get('kaggle', {}).get('datasets', []):
-        if dataset.get('name') == 'brain_tumor_mri':
-            brain_tumor_config = dataset
-            break
+    # Get preprocessing config
+    preprocessing_config = config.get('data_preprocessing', {})
+    common_config = preprocessing_config.get('common', {})
+    tb_config = preprocessing_config.get('tb', {})
     
-    if brain_tumor_config:
-        raw_base_path = project_root / brain_tumor_config['download_path']
-    else:
-        raw_base_path = project_root / "data" / "raw" / "brain_tumor_mri"
+    # Get paths from config
+    raw_base_path = project_root / tb_config.get('raw_data_path', 'data/raw/tb')
+    preprocessed_base_path = project_root / tb_config.get('preprocessed_data_path', 'data/preprocessed/tb')
     
-    preprocessed_base_path = project_root / "data" / "preprocessed" / "brain_tumor_mri"
+    # Get target size and quality from config
+    target_size = tuple(common_config.get('target_size', [224, 224]))
+    quality = common_config.get('quality', 95)
+    
+    # Get expected splits and classes
+    expected_splits = tb_config.get('splits', ['train', 'test'])
+    expected_classes = tb_config.get('classes', ['Normal', 'Tuberculosis'])
     
     # Discover raw partitions
     raw_partitions = discover_partitions(raw_base_path)
@@ -522,12 +557,14 @@ def main():
         print(f"  Raw data: {raw_data_path}")
         print(f"  Output to: {preprocessed_data_path}")
     
-    # Initialize preprocessor
-    preprocessor = BrainTumorPreprocessor(
+    # Initialize preprocessor with config values
+    preprocessor = TBPreprocessor(
         raw_data_path=str(raw_data_path),
         preprocessed_data_path=str(preprocessed_data_path),
-        target_size=(224, 224),
-        quality=95
+        target_size=target_size,
+        quality=quality,
+        classes=expected_classes,
+        splits=expected_splits
     )
     
     # Process all images
@@ -547,8 +584,8 @@ def main():
     validator = DatasetValidator(str(preprocessed_data_path))
     
     structure_valid = validator.validate_structure(
-        expected_splits=['Training', 'Testing'],
-        expected_classes=['glioma', 'meningioma', 'notumor', 'pituitary']
+        expected_splits=expected_splits,
+        expected_classes=expected_classes
     )
     
     if structure_valid:
@@ -556,7 +593,7 @@ def main():
     else:
         print("\n✗ Directory structure validation failed")
     
-    images_valid = validator.validate_images(target_size=(224, 224))
+    images_valid = validator.validate_images(target_size=target_size)
     
     if images_valid:
         print("✓ Image format validation passed")

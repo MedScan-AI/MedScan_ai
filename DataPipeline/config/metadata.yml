@@ -2,13 +2,13 @@
 
 # Dataset Configuration
 datasets:
-  brain_tumor:
-    name: "brain_tumor_mri_patients"
-    raw_base_path: "data/raw/brain_tumor"
-    preprocessed_base_path: "data/preprocessed/brain_tumor"
+  tb:
+    name: "tb_patients"
+    raw_base_path: "data/raw/tb"
+    preprocessed_base_path: "data/preprocessed/tb"
     metadata_base_path: "data/synthetic_metadata"  # CSV files with patient metadata
-    metadata_filename: "brain_tumor_mri_patients.csv"
-    description: "Brain tumor MRI patient metadata"
+    metadata_filename: "tb_patients.csv"
+    description: "Tuberculosis chest X-ray patient metadata"
   
   lung_cancer:
     name: "lung_cancer_ct_scan_patients"
@@ -61,7 +61,7 @@ schema_constraints:
     
     Diagnosis_Class:
       required: true
-      # Values are dataset-specific: glioma, meningioma, notumor, pituitary for brain
+      # Values are dataset-specific: Normal, Tuberculosis for tb
       # adenocarcinoma, large.cell.carcinoma, normal, squamous.cell.carcinoma for lung
   
   string_features:
@@ -118,7 +118,7 @@ great_expectations:
     output_dir: "data/ge_outputs/drift"
     
     # Statistical test threshold for drift detection
-    statistical_test_threshold: 0.05  # P-value threshold (lower = more sensitive)
+    statistical_test_threshold: 0.00001  # P-value threshold (lower = more sensitive)
     
   visualization:
     # HTML report generation
@@ -271,7 +271,7 @@ logging:
 execution:
   # Which datasets to process
   process_datasets:
-    - "brain_tumor"
+    - "tb"
     - "lung_cancer"
   
   # Which operations to perform

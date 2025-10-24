@@ -35,10 +35,10 @@ class TestKaggleDataFetcher:
                     'description': 'CT scan images for lung cancer detection'
                 },
                 {
-                    'name': 'brain_tumor_mri',
-                    'dataset_id': 'masoudnickparvar/brain-tumor-mri-dataset',
-                    'download_path': 'data/raw/brain_tumor_mri',
-                    'description': 'Brain tumor MRI dataset'
+                    'name': 'tb',
+                    'dataset_id': 'tawsifurrahman/tuberculosis-tb-chest-xray-dataset',
+                    'download_path': 'data/raw/tb',
+                    'description': 'Tuberculosis TB Chest X-ray dataset'
                 }
             ],
             'api': {

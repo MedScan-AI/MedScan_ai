@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.data_preprocessing.baseline_synthetic_data_generator import (
     PatientDataGenerator,
-    BrainTumorDataGenerator,
+    TBDataGenerator,
     LungCancerDataGenerator,
     SyntheticDataPipeline
 )
@@ -54,7 +54,7 @@ class TestPatientDataGenerator:
                 'prob_no_medication': 0.2,
                 'prob_no_surgery': 0.5
             },
-            'brain_tumor': {
+            'tb': {
                 'examination_type': 'MRI',
                 'body_region': 'Head/Brain',
                 'presenting_symptoms': {
@@ -96,7 +96,7 @@ class TestPatientDataGenerator:
         assert patient_id == "7F8B3C2E1D4A5F6E9C8B7A6D5E4F3C2B"
         
         # Test with full path
-        full_path = "data/test_preprocessed/brain_tumor_mri/Training/glioma/A1B2C3D4E5F6.jpg"
+        full_path = "data/test_preprocessed/tb/train/Normal/A1B2C3D4E5F6.jpg"
         patient_id = generator.extract_patient_id_from_filename(full_path)
         assert patient_id == "A1B2C3D4E5F6"
     
@@ -150,8 +150,8 @@ class TestPatientDataGenerator:
         assert isinstance(surgeries, str)
 
 
-class TestBrainTumorDataGenerator:
-    """Test cases for BrainTumorDataGenerator."""
+class TestTBDataGenerator:
+    """Test cases for TBDataGenerator."""
     
     @pytest.fixture
     def config(self):
@@ -176,34 +176,32 @@ class TestBrainTumorDataGenerator:
                 'prob_no_medication': 0.2,
                 'prob_no_surgery': 0.5
             },
-            'brain_tumor': {
-                'examination_type': 'MRI',
-                'body_region': 'Head/Brain',
+            'tb': {
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
                 'presenting_symptoms': {
-                    'glioma': ['Persistent headaches', 'Seizures', 'Memory problems'],
-                    'meningioma': ['Headaches', 'Vision changes'],
-                    'pituitary': ['Headaches', 'Vision problems'],
-                    'notumor': ['Routine screening', 'None reported']
+                    'Tuberculosis': ['Persistent cough', 'Coughing up blood', 'Night sweats'],
+                    'Normal': ['Routine screening', 'None reported']
                 },
-                'current_medications': ['Dexamethasone (steroid)', 'Levetiracetam (anti-seizure)', 'None'],
-                'previous_surgeries': ['None', 'Craniotomy', 'Brain biopsy'],
+                'current_medications': ['Isoniazid (TB treatment)', 'Rifampin', 'None'],
+                'previous_surgeries': ['None', 'Lung biopsy'],
                 'urgency_levels': {'Routine': 0.6, 'Urgent': 0.3, 'Emergent': 0.1}
             }
         }
     
     @pytest.fixture
     def generator(self, config):
-        """Fixture providing BrainTumorDataGenerator instance."""
-        return BrainTumorDataGenerator(config)
+        """Fixture providing TBDataGenerator instance."""
+        return TBDataGenerator(config)
     
     def test_initialization(self, generator, config):
-        """Test brain tumor generator initializes correctly."""
-        assert generator.brain_config == config['brain_tumor']
+        """Test TB generator initializes correctly."""
+        assert generator.tb_config == config['tb']
     
     def test_generate_patient_record(self, generator):
         """Test generating a complete patient record."""
-        image_path = "data/test_preprocessed/brain_tumor_mri/Training/glioma/7F8B3C2E1D4A5F6E9C8B7A6D5E4F3C2B.jpg"
-        class_name = "glioma"
+        image_path = "data/test_preprocessed/tb/train/Normal/7F8B3C2E1D4A5F6E9C8B7A6D5E4F3C2B.jpg"
+        class_name = "Normal"
         
         record = generator.generate_patient_record(image_path, class_name)
         
@@ -227,9 +225,9 @@ class TestBrainTumorDataGenerator:
         assert record['Patient_ID'] == '7F8B3C2E1D4A5F6E9C8B7A6D5E4F3C2B'
         
         # Check specific values
-        assert record['Examination_Type'] == 'MRI'
-        assert record['Body_Region'] == 'Head/Brain'
-        assert record['Diagnosis_Class'] == 'glioma'
+        assert record['Examination_Type'] == 'X-ray'
+        assert record['Body_Region'] == 'Chest'
+        assert record['Diagnosis_Class'] == 'Normal'
         assert record['Image_Path'] == image_path
         
         # Check data types
@@ -329,16 +327,16 @@ class TestSyntheticDataPipeline:
     
     @pytest.fixture(scope='class')
     def test_data_setup(self):
-        """Set up test preprocessed data for both brain tumor and lung cancer."""
+        """Set up test preprocessed data for both TB and lung cancer."""
         # Define test data paths
         test_base = Path('data/test_preprocessed')
-        brain_base = test_base / 'brain_tumor_mri'
+        tb_base = test_base / 'tb'
         lung_base = test_base / 'lung_cancer_ct_scan'
         
-        # Brain tumor test structure
-        brain_classes = {
-            'Training': ['glioma', 'meningioma'],
-            'Testing': ['pituitary', 'notumor']
+        # TB test structure
+        tb_classes = {
+            'train': ['Normal', 'Tuberculosis'],
+            'test': ['Normal', 'Tuberculosis']
         }
         
         # Lung cancer test structure
@@ -347,17 +345,17 @@ class TestSyntheticDataPipeline:
             'test': ['benign']
         }
         
-        # Create test images for brain tumor
-        brain_patient_ids = []
-        for split, classes in brain_classes.items():
+        # Create test images for TB
+        tb_patient_ids = []
+        for split, classes in tb_classes.items():
             for class_name in classes:
-                output_dir = brain_base / split / class_name
+                output_dir = tb_base / split / class_name
                 output_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Create 3 test images per class
                 for i in range(3):
                     patient_id = uuid.uuid4().hex.upper()
-                    brain_patient_ids.append((patient_id, split, class_name))
+                    tb_patient_ids.append((patient_id, split, class_name))
                     
                     # Create a simple test image
                     img = Image.new('RGB', (224, 224), color=(100 + i*20, 100, 100))
@@ -382,9 +380,9 @@ class TestSyntheticDataPipeline:
                     img.save(img_path, 'JPEG')
         
         yield {
-            'brain_base': brain_base,
+            'tb_base': tb_base,
             'lung_base': lung_base,
-            'brain_patient_ids': brain_patient_ids,
+            'tb_patient_ids': tb_patient_ids,
             'lung_patient_ids': lung_patient_ids
         }
         
@@ -392,8 +390,8 @@ class TestSyntheticDataPipeline:
         if test_base.exists():
             shutil.rmtree(test_base)
     
-    def test_get_image_files_brain(self, test_data_setup):
-        """Test getting image files for brain tumor dataset."""
+    def test_get_image_files_tb(self, test_data_setup):
+        """Test getting image files for TB dataset."""
         from scripts.data_preprocessing.baseline_synthetic_data_generator import SyntheticDataPipeline
         
         # Create a temporary config file
@@ -401,7 +399,7 @@ class TestSyntheticDataPipeline:
         pipeline = SyntheticDataPipeline(config_path)
         
         # Get test image files
-        image_files = pipeline.get_image_files('data/test_preprocessed/brain_tumor_mri')
+        image_files = pipeline.get_image_files('data/test_preprocessed/tb')
         
         # Should have 12 images total (2 splits * 2 classes * 3 images)
         assert len(image_files) == 12
@@ -426,9 +424,9 @@ class TestSyntheticDataPipeline:
         # Should have 9 images total (2 splits with 2 classes + 1 split with 1 class) * 3 images
         assert len(image_files) == 9
     
-    def test_generate_brain_tumor_data(self, test_data_setup):
-        """Test generating synthetic data for brain tumor test images."""
-        from scripts.data_preprocessing.baseline_synthetic_data_generator import BrainTumorDataGenerator
+    def test_generate_tb_data(self, test_data_setup):
+        """Test generating synthetic data for tuberculosis test images."""
+        from scripts.data_preprocessing.baseline_synthetic_data_generator import TBDataGenerator
         
         config = {
             'output': {'format': 'csv', 'random_seed': 42, 'include_image_path': True},
@@ -446,27 +444,25 @@ class TestSyntheticDataPipeline:
                 'prob_no_medication': 0.2,
                 'prob_no_surgery': 0.5
             },
-            'brain_tumor': {
-                'examination_type': 'MRI',
-                'body_region': 'Head/Brain',
+            'tb': {
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
                 'presenting_symptoms': {
-                    'glioma': ['Persistent headaches', 'Seizures'],
-                    'meningioma': ['Headaches', 'Vision changes'],
-                    'pituitary': ['Headaches', 'Vision problems'],
-                    'notumor': ['Routine screening']
+                    'Tuberculosis': ['Persistent cough', 'Coughing up blood'],
+                    'Normal': ['Routine screening']
                 },
-                'current_medications': ['Dexamethasone (steroid)', 'None'],
-                'previous_surgeries': ['None', 'Craniotomy'],
+                'current_medications': ['Isoniazid (TB treatment)', 'None'],
+                'previous_surgeries': ['None', 'Lung biopsy'],
                 'urgency_levels': {'Routine': 0.6, 'Urgent': 0.3, 'Emergent': 0.1}
             }
         }
         
-        generator = BrainTumorDataGenerator(config)
+        generator = TBDataGenerator(config)
         
         # Generate records for test Patient IDs
         records = []
-        for patient_id, split, class_name in test_data_setup['brain_patient_ids'][:3]:
-            image_path = f"data/test_preprocessed/brain_tumor_mri/{split}/{class_name}/{patient_id}.jpg"
+        for patient_id, split, class_name in test_data_setup['tb_patient_ids'][:3]:
+            image_path = f"data/test_preprocessed/tb/{split}/{class_name}/{patient_id}.jpg"
             record = generator.generate_patient_record(image_path, class_name)
             records.append(record)
         
@@ -474,16 +470,16 @@ class TestSyntheticDataPipeline:
         assert len(records) == 3
         
         for i, record in enumerate(records):
-            patient_id, split, class_name = test_data_setup['brain_patient_ids'][i]
+            patient_id, split, class_name = test_data_setup['tb_patient_ids'][i]
             assert record['Patient_ID'] == patient_id
-            assert record['Examination_Type'] == 'MRI'
-            assert record['Body_Region'] == 'Head/Brain'
+            assert record['Examination_Type'] == 'X-ray'
+            assert record['Body_Region'] == 'Chest'
             assert record['Diagnosis_Class'] == class_name
     
     def test_csv_output(self, test_data_setup, tmp_path):
         """Test CSV output generation."""
         from scripts.data_preprocessing.baseline_synthetic_data_generator import (
-            BrainTumorDataGenerator,
+            TBDataGenerator,
             SyntheticDataPipeline
         )
         
@@ -503,14 +499,12 @@ class TestSyntheticDataPipeline:
                 'prob_no_medication': 0.2,
                 'prob_no_surgery': 0.5
             },
-            'brain_tumor': {
-                'examination_type': 'MRI',
-                'body_region': 'Head/Brain',
+            'tb': {
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
                 'presenting_symptoms': {
-                    'glioma': ['Headaches'],
-                    'meningioma': ['Headaches'],
-                    'pituitary': ['Headaches'],
-                    'notumor': ['Routine screening']
+                    'Tuberculosis': ['Persistent cough'],
+                    'Normal': ['Routine screening']
                 },
                 'current_medications': ['None'],
                 'previous_surgeries': ['None'],
@@ -518,14 +512,14 @@ class TestSyntheticDataPipeline:
             }
         }
         
-        generator = BrainTumorDataGenerator(config)
+        generator = TBDataGenerator(config)
         config_path = 'config/synthetic_data.yml'
         pipeline = SyntheticDataPipeline(config_path)
         
         # Generate a few test records
         records = []
-        for patient_id, split, class_name in test_data_setup['brain_patient_ids'][:2]:
-            image_path = f"data/test_preprocessed/brain_tumor_mri/{split}/{class_name}/{patient_id}.jpg"
+        for patient_id, split, class_name in test_data_setup['tb_patient_ids'][:2]:
+            image_path = f"data/test_preprocessed/tb/{split}/{class_name}/{patient_id}.jpg"
             record = generator.generate_patient_record(image_path, class_name)
             records.append(record)
         

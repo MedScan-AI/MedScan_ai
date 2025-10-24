@@ -132,13 +132,13 @@ TBD - Deployment instructions pending infrastructure setup
 ### Datasets Used
 
 - CT Scan Lung Cancer Dataset
-- Brain Tumor MRI Dataset
+- Tuberculosis TB Chest X-ray Dataset
 
 ### Vision Pipeline
 
 **Setup:**
 ```bash
-cd Data-Pipeline
+cd DataPipeline
 pip install -r requirements.txt
 ```
 
@@ -153,8 +153,8 @@ python scripts/data_acquisition/fetch_data.py --dataset lung_cancer_ct_scan
 
 **Data Preprocessing:**
 ```bash
-# Preprocess brain tumor MRI (reads from latest partition)
-python scripts/data_preprocessing/process_braintumor.py --config config/vision_pipeline.yml
+# Preprocess tuberculosis chest X-rays (reads from latest partition)
+python scripts/data_preprocessing/process_tb.py --config config/vision_pipeline.yml
 
 # Preprocess lung cancer CT scans (reads from latest partition)
 python scripts/data_preprocessing/process_lungcancer.py --config config/vision_pipeline.yml
@@ -191,7 +191,7 @@ pytest tests/
 pytest tests/data_acquisition/fetch_data_test.py -v
 
 # Data preprocessing tests
-pytest tests/data_preprocessing/preprocess_brain_tumor_test.py -v
+pytest tests/data_preprocessing/preprocess_tb_test.py -v
 pytest tests/data_preprocessing/preprocess_lung_cancer_test.py -v
 pytest tests/data_preprocessing/baseline_synthetic_data_generator_test.py -v
 ```
@@ -201,18 +201,18 @@ pytest tests/data_preprocessing/baseline_synthetic_data_generator_test.py -v
 Data-Pipeline/
 ├── data/
 │   ├── raw/                          # Raw downloaded data
-│   │   ├── brain_tumor_mri/
+│   │   ├── tb/
 │   │   │   └── YYYY/MM/DD/           # Partitioned by date
 │   │   └── lung_cancer_ct_scan/
 │   │       └── YYYY/MM/DD/
 │   ├── preprocessed/                 # Preprocessed images (224×224, JPEG)
-│   │   ├── brain_tumor_mri/
-│   │   │   └── YYYY/MM/DD/Training/{class}/*.jpg
+│   │   ├── tb/
+│   │   │   └── YYYY/MM/DD/train/{class}/*.jpg
 │   │   └── lung_cancer_ct_scan/
 │   │       └── YYYY/MM/DD/Training/{class}/*.jpg
 │   ├── synthetic_metadata/           # Patient metadata CSVs
 │   │   └── YYYY/MM/DD/
-│   │       ├── brain_tumor_mri_patients.csv
+│   │       ├── tb_patients.csv
 │   │       └── lung_cancer_ct_scan_patients.csv
 │   └── ge_outputs/                   # Validation, EDA, and drift reports
 │       ├── baseline/YYYY/MM/DD/      # Baseline statistics
@@ -234,7 +234,7 @@ Output: `data/raw/{dataset}/YYYY/MM/DD/`
 
 **Step 2: Preprocess Images**
 ```bash
-python scripts/data_preprocessing/process_braintumor.py --config config/vision_pipeline.yml
+python scripts/data_preprocessing/process_tb.py --config config/vision_pipeline.yml
 python scripts/data_preprocessing/process_lungcancer.py --config config/vision_pipeline.yml
 ```
 Output: `data/preprocessed/{dataset}/YYYY/MM/DD/`

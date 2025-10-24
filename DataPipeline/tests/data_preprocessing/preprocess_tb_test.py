@@ -1,6 +1,6 @@
 """
-Test suite for Brain Tumor MRI preprocessing module.
-Tests the BrainTumorPreprocessor class and related functionality.
+Test suite for Tuberculosis Chest X-ray preprocessing module.
+Tests the TBPreprocessor class and related functionality.
 """
 
 import pytest
@@ -15,9 +15,9 @@ import yaml
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts/data_preprocessing'))
 
-from process_braintumor import (
+from process_tb import (
     ImageProcessor,
-    BrainTumorPreprocessor,
+    TBPreprocessor,
     DatasetValidator
 )
 
@@ -33,7 +33,7 @@ def load_config():
 CONFIG = load_config()
 PREPROCESSING_CONFIG = CONFIG['data_preprocessing']
 COMMON_CONFIG = PREPROCESSING_CONFIG['common']
-BRAIN_TUMOR_CONFIG = PREPROCESSING_CONFIG['brain_tumor_mri']
+TB_CONFIG = PREPROCESSING_CONFIG['tb']
 
 
 class TestImageProcessor:
@@ -83,8 +83,8 @@ class TestImageProcessor:
         assert denormalized.size == target_size
 
 
-class TestBrainTumorPreprocessor:
-    """Test cases for BrainTumorPreprocessor class."""
+class TestTBPreprocessor:
+    """Test cases for TBPreprocessor class."""
     
     @pytest.fixture
     def temp_dirs(self):
@@ -104,9 +104,9 @@ class TestBrainTumorPreprocessor:
         raw_dir, _ = temp_dirs
         
         # Create directory structure from config
-        classes = BRAIN_TUMOR_CONFIG['classes']
-        splits = BRAIN_TUMOR_CONFIG['splits']
-        sample_images_per_class = BRAIN_TUMOR_CONFIG['test']['sample_images_per_class']
+        classes = TB_CONFIG['classes']
+        splits = TB_CONFIG['splits']
+        sample_images_per_class = TB_CONFIG['test']['sample_images_per_class']
         
         for split in splits:
             for class_name in classes:
@@ -122,12 +122,12 @@ class TestBrainTumorPreprocessor:
     
     @pytest.fixture
     def preprocessor(self, temp_dirs, create_sample_dataset):
-        """Fixture providing a BrainTumorPreprocessor instance."""
+        """Fixture providing a TBPreprocessor instance."""
         raw_dir, processed_dir = temp_dirs
         target_size = tuple(COMMON_CONFIG['target_size'])
         quality = COMMON_CONFIG['quality']
         
-        return BrainTumorPreprocessor(
+        return TBPreprocessor(
             raw_data_path=raw_dir,
             preprocessed_data_path=processed_dir,
             target_size=target_size,
@@ -135,11 +135,11 @@ class TestBrainTumorPreprocessor:
         )
     
     def test_initialization(self, preprocessor):
-        """Test BrainTumorPreprocessor initialization."""
+        """Test TBPreprocessor initialization."""
         target_size = tuple(COMMON_CONFIG['target_size'])
         quality = COMMON_CONFIG['quality']
-        classes = BRAIN_TUMOR_CONFIG['classes']
-        splits = BRAIN_TUMOR_CONFIG['splits']
+        classes = TB_CONFIG['classes']
+        splits = TB_CONFIG['splits']
         
         assert preprocessor.target_size == target_size
         assert preprocessor.quality == quality
@@ -158,8 +158,8 @@ class TestBrainTumorPreprocessor:
     
     def test_get_image_files(self, preprocessor):
         """Test image file retrieval."""
-        sample_images_per_class = BRAIN_TUMOR_CONFIG['test']['sample_images_per_class']
-        image_files = preprocessor.get_image_files('Training', 'glioma')
+        sample_images_per_class = TB_CONFIG['test']['sample_images_per_class']
+        image_files = preprocessor.get_image_files('train', 'Normal')
         assert len(image_files) == sample_images_per_class
         assert all(f.suffix == '.jpg' for f in image_files)
     
@@ -168,13 +168,13 @@ class TestBrainTumorPreprocessor:
         preprocessor.create_output_directories()
         target_size = tuple(COMMON_CONFIG['target_size'])
         
-        image_files = preprocessor.get_image_files('Training', 'glioma')
+        image_files = preprocessor.get_image_files('train', 'Normal')
         assert len(image_files) > 0
         
         input_path = image_files[0]
         # Generate UUID-based Patient ID for output filename
         patient_id = preprocessor.generate_patient_id()
-        output_path = preprocessor.preprocessed_data_path / 'Training' / 'glioma' / f'{patient_id}.jpg'
+        output_path = preprocessor.preprocessed_data_path / 'train' / 'Normal' / f'{patient_id}.jpg'
         
         success = preprocessor.preprocess_image(input_path, output_path)
         assert success is True
@@ -191,13 +191,13 @@ class TestBrainTumorPreprocessor:
     def test_process_class(self, preprocessor):
         """Test processing all images in a class with UUID filenames."""
         preprocessor.create_output_directories()
-        sample_images_per_class = BRAIN_TUMOR_CONFIG['test']['sample_images_per_class']
+        sample_images_per_class = TB_CONFIG['test']['sample_images_per_class']
         
-        processed_count = preprocessor.process_class('Training', 'glioma')
+        processed_count = preprocessor.process_class('train', 'Normal')
         assert processed_count == sample_images_per_class
         
         # Verify output files exist with UUID-based names
-        output_dir = preprocessor.preprocessed_data_path / 'Training' / 'glioma'
+        output_dir = preprocessor.preprocessed_data_path / 'train' / 'Normal'
         output_files = list(output_dir.glob('*.jpg'))
         assert len(output_files) == sample_images_per_class
         
@@ -211,9 +211,9 @@ class TestBrainTumorPreprocessor:
         """Test processing entire dataset with UUID filenames."""
         stats = preprocessor.process_all()
         
-        sample_images_per_class = BRAIN_TUMOR_CONFIG['test']['sample_images_per_class']
-        num_classes = len(BRAIN_TUMOR_CONFIG['classes'])
-        num_splits = len(BRAIN_TUMOR_CONFIG['splits'])
+        sample_images_per_class = TB_CONFIG['test']['sample_images_per_class']
+        num_classes = len(TB_CONFIG['classes'])
+        num_splits = len(TB_CONFIG['splits'])
         expected_total = sample_images_per_class * num_classes * num_splits
         
         # Should process sample_images * classes * splits
@@ -234,7 +234,7 @@ class TestBrainTumorPreprocessor:
                     assert all(c in '0123456789ABCDEF' for c in filename)
 
 
-class TestBrainTumorPreprocessingRealData:
+class TestTBPreprocessingRealData:
     """Test cases using actual raw data (if available)."""
     
     @pytest.fixture
@@ -243,8 +243,8 @@ class TestBrainTumorPreprocessingRealData:
         script_dir = Path(__file__).parent
         project_root = script_dir.parent.parent
         
-        raw_data_path = project_root / BRAIN_TUMOR_CONFIG['raw_data_path']
-        test_output_path = project_root / BRAIN_TUMOR_CONFIG['test_output_path']
+        raw_data_path = project_root / TB_CONFIG['raw_data_path']
+        test_output_path = project_root / TB_CONFIG['test_output_path']
         
         return raw_data_path, test_output_path
     
@@ -256,9 +256,9 @@ class TestBrainTumorPreprocessingRealData:
         raw_data_path, test_output_path = real_data_paths
         
         # Get config values
-        splits = BRAIN_TUMOR_CONFIG['splits']
-        classes = BRAIN_TUMOR_CONFIG['classes']
-        num_test_images = BRAIN_TUMOR_CONFIG['test']['num_test_images']
+        splits = TB_CONFIG['splits']
+        classes = TB_CONFIG['classes']
+        num_test_images = TB_CONFIG['test']['num_test_images']
         target_size = tuple(COMMON_CONFIG['target_size'])
         quality = COMMON_CONFIG['quality']
         
@@ -282,7 +282,7 @@ class TestBrainTumorPreprocessingRealData:
             pytest.skip("No images found in raw dataset")
         
         # Create preprocessor for test
-        preprocessor = BrainTumorPreprocessor(
+        preprocessor = TBPreprocessor(
             raw_data_path=str(raw_data_path),
             preprocessed_data_path=str(test_output_path),
             target_size=target_size,
@@ -331,8 +331,8 @@ class TestDatasetValidator:
         
         # Create sample structure from config
         target_size = tuple(COMMON_CONFIG['target_size'])
-        classes = BRAIN_TUMOR_CONFIG['classes'][:2]  # Use first 2 classes for testing
-        splits = BRAIN_TUMOR_CONFIG['splits']
+        classes = TB_CONFIG['classes']
+        splits = TB_CONFIG['splits']
         
         for split in splits:
             for class_name in classes:
@@ -357,8 +357,8 @@ class TestDatasetValidator:
     def test_validate_structure(self, temp_processed_dir):
         """Test structure validation."""
         validator = DatasetValidator(temp_processed_dir)
-        splits = BRAIN_TUMOR_CONFIG['splits']
-        classes = BRAIN_TUMOR_CONFIG['classes'][:2]  # First 2 classes used in fixture
+        splits = TB_CONFIG['splits']
+        classes = TB_CONFIG['classes']
         
         is_valid = validator.validate_structure(
             expected_splits=splits,
