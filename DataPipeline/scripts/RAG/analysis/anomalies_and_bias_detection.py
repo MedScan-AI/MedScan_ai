@@ -35,72 +35,62 @@ class AnomalyDetector:
         if 'word_count' in df.columns:
             for idx in df.index:
                 value = df.at[idx, 'word_count']
-                
-                # Check for anomalies
                 try:
                     if pd.isna(value) or np.isinf(value):
-                        anomalies.append({
-                            'expectation': 'word_count_out_of_bounds',
-                            'column': 'word_count',
-                            'index': idx,
-                            'value': value
-                        })
+                        reason = 'Word count is NaN or infinite'
                     elif value < self.LOW_WORD_THRESHOLD or value > self.HIGH_WORD_THRESHOLD:
-                        anomalies.append({
-                            'expectation': 'word_count_out_of_bounds',
-                            'column': 'word_count',
-                            'index': idx,
-                            'value': value
-                        })
+                        reason = 'Word count outside expected range (100–5000)'
+                    else:
+                        continue
                 except (TypeError, ValueError):
-                    # If comparison fails, it's an anomaly
-                    anomalies.append({
-                        'expectation': 'word_count_out_of_bounds',
-                        'column': 'word_count',
-                        'index': idx,
-                        'value': value
-                    })
-        
+                    reason = 'Invalid numeric type for word count'
+
+                anomalies.append({
+                    'type': 'word_count_out_of_bounds',
+                    'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
+                    'word_count': value,
+                    'reason': reason,
+                    'column': 'word_count',
+                    'index': idx,
+                    'value': value
+                })
+
         # Text anomalies
         if 'text' in df.columns:
             for idx in df.index:
                 value = df.at[idx, 'text']
-                
-                # Check for null
-                if value is None or (isinstance(value, float) and pd.isna(value)):
+                if value is None or (isinstance(value, float) and pd.isna(value)) or (
+                    isinstance(value, str) and value.strip() == ""
+                ):
                     anomalies.append({
-                        'expectation': 'text_null_or_blank',
+                        'type': 'text_null_or_blank',
+                        'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
+                        'word_count': df.at[idx, 'word_count'] if 'word_count' in df.columns else 'N/A',
+                        'reason': 'Text is null or blank',
                         'column': 'text',
                         'index': idx,
                         'value': value
                     })
-                # Check for blank string
-                elif isinstance(value, str) and value.strip() == "":
-                    anomalies.append({
-                        'expectation': 'text_null_or_blank',
-                        'column': 'text',
-                        'index': idx,
-                        'value': value
-                    })
-        
+
         # Topics anomalies
         if 'topics' in df.columns:
             for idx in df.index:
                 value = df.at[idx, 'topics']
-                is_valid = self._is_valid_topics_value(value)
-                
-                if not is_valid:
+                if not self._is_valid_topics_value(value):
                     anomalies.append({
-                        'expectation': 'topics_not_list_or_null',
+                        'type': 'topics_not_list_or_null',
+                        'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
+                        'word_count': df.at[idx, 'word_count'] if 'word_count' in df.columns else 'N/A',
+                        'reason': 'Topics field is not a list or is null',
                         'column': 'topics',
                         'index': idx,
                         'value': value
                     })
-        
+
         return {
             'dataset': dataset_name,
             'text_anomalies': anomalies,
-            'total_anomalies': len(anomalies),
+            'total_anomalies': len(anomalies)
         }
     
     def _is_valid_topics_value(self, value: Any) -> bool:

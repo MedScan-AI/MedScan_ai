@@ -87,37 +87,35 @@ def large_sample_df() -> pd.DataFrame:
 class TestAnomalyDetection:
     """Test suite for anomaly detection functionality."""
     
-    def test_detect_all_anomalies_basic(
-        self, 
-        sample_df: pd.DataFrame
-    ) -> None:
+    def test_detect_all_anomalies_basic(self, sample_df: pd.DataFrame) -> None:
         """Test basic anomaly detection functionality.
-        
+
         Args:
             sample_df: Sample DataFrame fixture.
         """
         detector = AnomalyDetector()
         results = detector.detect_all_anomalies(sample_df, "TestDataset")
-        
+
         assert isinstance(results, dict)
         assert "text_anomalies" in results
         assert isinstance(results["text_anomalies"], list)
         assert results["total_anomalies"] == len(results["text_anomalies"])
-        
+
         # Check that we detected the expected anomaly types
         anomaly_types = {
-            anomaly["expectation"] 
+            anomaly["type"]
             for anomaly in results["text_anomalies"]
         }
-        
+
         expected_types = {
             "word_count_out_of_bounds",
             "text_null_or_blank",
             "topics_not_list_or_null",
         }
-        
+
         # At least one expected type should be found
         assert len(anomaly_types & expected_types) > 0
+
     
     def test_word_count_anomalies(
         self, 
