@@ -381,7 +381,8 @@ class TestSchemaStatisticsManager:
         
         manager = SchemaStatisticsManager(config_file)
         
-        base_dir = "/test/output"
+        import tempfile
+        base_dir = tempfile.mkdtemp()
         timestamp = "2025-10-23T00:00:00"
         
         partition_path = manager._get_output_partition_path(base_dir, timestamp)
@@ -389,6 +390,10 @@ class TestSchemaStatisticsManager:
         assert "2025" in partition_path
         assert "10" in partition_path
         assert "23" in partition_path
+        
+        # Cleanup
+        import shutil
+        shutil.rmtree(base_dir, ignore_errors=True)
     
     def test_extract_schema_details(self, sample_config, sample_dataframe):
         """Test schema details extraction."""

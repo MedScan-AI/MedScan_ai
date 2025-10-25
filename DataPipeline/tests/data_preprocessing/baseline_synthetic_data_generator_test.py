@@ -11,6 +11,8 @@ import pytest
 import uuid
 import csv
 import shutil
+import tempfile
+import yaml
 from pathlib import Path
 from PIL import Image
 import numpy as np
@@ -55,10 +57,10 @@ class TestPatientDataGenerator:
                 'prob_no_surgery': 0.5
             },
             'tb': {
-                'examination_type': 'MRI',
-                'body_region': 'Head/Brain',
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
                 'presenting_symptoms': {
-                    'glioma': ['Persistent headaches', 'Seizures', 'Memory problems']
+                    'Tuberculosis': ['Persistent cough', 'Seizures', 'Memory problems']
                 },
                 'current_medications': ['Dexamethasone (steroid)', 'None'],
                 'previous_surgeries': ['None', 'Craniotomy'],
@@ -394,35 +396,114 @@ class TestSyntheticDataPipeline:
         """Test getting image files for TB dataset."""
         from scripts.data_preprocessing.baseline_synthetic_data_generator import SyntheticDataPipeline
         
-        # Create a temporary config file
-        config_path = 'config/synthetic_data.yml'
-        pipeline = SyntheticDataPipeline(config_path)
+        # Create mock config in /tmp to avoid Mac file lock
+        mock_config = {
+            'output': {'format': 'csv', 'random_seed': 42, 'include_image_path': True},
+            'faker': {'locale': 'en_US'},
+            'demographics': {
+                'age_range': {'min': 22, 'max': 85},
+                'weight_range': {'min': 45, 'max': 120},
+                'height_range': {'min': 150, 'max': 195},
+                'gender_distribution': {'Male': 0.48, 'Female': 0.48, 'Other': 0.04}
+            },
+            'general': {
+                'max_symptoms_per_patient': 3,
+                'max_medications_per_patient': 3,
+                'max_surgeries_per_patient': 2,
+                'prob_no_medication': 0.2,
+                'prob_no_surgery': 0.5
+            },
+            'tb': {
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
+                'presenting_symptoms': {'Tuberculosis': ['Cough'], 'Normal': ['Screening']},
+                'current_medications': ['None'],
+                'previous_surgeries': ['None'],
+                'urgency_levels': {'Routine': 1.0}
+            },
+            'lung_cancer': {
+                'examination_type': 'CT',
+                'body_region': 'Chest',
+                'presenting_symptoms': {'adenocarcinoma': ['Cough'], 'normal': ['Screening']},
+                'current_medications': ['None'],
+                'previous_surgeries': ['None'],
+                'urgency_levels': {'Routine': 1.0}
+            }
+        }
         
-        # Get test image files
-        image_files = pipeline.get_image_files('data/test_preprocessed/tb')
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+            yaml.dump(mock_config, f)
+            temp_config_path = f.name
         
-        # Should have 12 images total (2 splits * 2 classes * 3 images)
-        assert len(image_files) == 12
-        
-        # Check structure of returned data
-        for img_path, split, class_name in image_files:
-            assert isinstance(img_path, str)
-            assert isinstance(split, str)
-            assert isinstance(class_name, str)
-            assert '.jpg' in img_path
+        try:
+            pipeline = SyntheticDataPipeline(temp_config_path)
+            
+            # Get test image files
+            image_files = pipeline.get_image_files('data/test_preprocessed/tb')
+            
+            # Should have 12 images total (2 splits * 2 classes * 3 images)
+            assert len(image_files) == 12
+            
+            # Check structure of returned data
+            for img_path, split, class_name in image_files:
+                assert isinstance(img_path, str)
+                assert isinstance(split, str)
+                assert isinstance(class_name, str)
+                assert '.jpg' in img_path
+        finally:
+            os.unlink(temp_config_path)
     
     def test_get_image_files_lung(self, test_data_setup):
         """Test getting image files for lung cancer dataset."""
         from scripts.data_preprocessing.baseline_synthetic_data_generator import SyntheticDataPipeline
         
-        config_path = 'config/synthetic_data.yml'
-        pipeline = SyntheticDataPipeline(config_path)
+        # Create mock config in /tmp
+        mock_config = {
+            'output': {'format': 'csv', 'random_seed': 42, 'include_image_path': True},
+            'faker': {'locale': 'en_US'},
+            'demographics': {
+                'age_range': {'min': 22, 'max': 85},
+                'weight_range': {'min': 45, 'max': 120},
+                'height_range': {'min': 150, 'max': 195},
+                'gender_distribution': {'Male': 0.48, 'Female': 0.48, 'Other': 0.04}
+            },
+            'general': {
+                'max_symptoms_per_patient': 3,
+                'max_medications_per_patient': 3,
+                'max_surgeries_per_patient': 2,
+                'prob_no_medication': 0.2,
+                'prob_no_surgery': 0.5
+            },
+            'tb': {
+                'examination_type': 'X-ray',
+                'body_region': 'Chest',
+                'presenting_symptoms': {'Tuberculosis': ['Cough'], 'Normal': ['Screening']},
+                'current_medications': ['None'],
+                'previous_surgeries': ['None'],
+                'urgency_levels': {'Routine': 1.0}
+            },
+            'lung_cancer': {
+                'examination_type': 'CT',
+                'body_region': 'Chest',
+                'presenting_symptoms': {'adenocarcinoma': ['Cough'], 'normal': ['Screening']},
+                'current_medications': ['None'],
+                'previous_surgeries': ['None'],
+                'urgency_levels': {'Routine': 1.0}
+            }
+        }
         
-        # Get test image files
-        image_files = pipeline.get_image_files('data/test_preprocessed/lung_cancer_ct_scan')
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+            yaml.dump(mock_config, f)
+            temp_config_path = f.name
         
-        # Should have 9 images total (2 splits with 2 classes + 1 split with 1 class) * 3 images
-        assert len(image_files) == 9
+        try:
+            pipeline = SyntheticDataPipeline(temp_config_path)
+            image_files = pipeline.get_image_files('data/test_preprocessed/lung_cancer_ct_scan')
+            
+            # Should have 9 images total
+            assert len(image_files) == 9
+        finally:
+            os.unlink(temp_config_path)
     
     def test_generate_tb_data(self, test_data_setup):
         """Test generating synthetic data for tuberculosis test images."""
@@ -509,48 +590,68 @@ class TestSyntheticDataPipeline:
                 'current_medications': ['None'],
                 'previous_surgeries': ['None'],
                 'urgency_levels': {'Routine': 1.0}
+            },
+            'lung_cancer': {
+                'examination_type': 'CT',
+                'body_region': 'Chest',
+                'presenting_symptoms': {
+                    'adenocarcinoma': ['Cough'],
+                    'normal': ['Screening']
+                },
+                'current_medications': ['None'],
+                'previous_surgeries': ['None'],
+                'urgency_levels': {'Routine': 1.0}
             }
         }
         
         generator = TBDataGenerator(config)
-        config_path = 'config/synthetic_data.yml'
-        pipeline = SyntheticDataPipeline(config_path)
         
-        # Generate a few test records
-        records = []
-        for patient_id, split, class_name in test_data_setup['tb_patient_ids'][:2]:
-            image_path = f"data/test_preprocessed/tb/{split}/{class_name}/{patient_id}.jpg"
-            record = generator.generate_patient_record(image_path, class_name)
-            records.append(record)
+        # Create temp config file in /tmp (not mounted volume)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+            yaml.dump(config, f)
+            temp_config_path = f.name
         
-        # Save to CSV (disable partitioning for test)
-        output_file = tmp_path / "test_output.csv"
-        pipeline.save_records_csv(records, str(output_file), use_partitioning=False)
+        try:
+            pipeline = SyntheticDataPipeline(temp_config_path)
+            
+            # Generate a few test records
+            records = []
+            for patient_id, split, class_name in test_data_setup['tb_patient_ids'][:2]:
+                image_path = f"data/test_preprocessed/tb/{split}/{class_name}/{patient_id}.jpg"
+                record = generator.generate_patient_record(image_path, class_name)
+                records.append(record)
+            
+            # Save to CSV (disable partitioning for test)
+            output_file = tmp_path / "test_output.csv"
+            pipeline.save_records_csv(records, str(output_file), use_partitioning=False)
+            
+            # Verify CSV was created
+            assert output_file.exists()
+            
+            # Read and verify CSV contents
+            with open(output_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                csv_records = list(reader)
+            
+            assert len(csv_records) == 2
+            
+            # Verify headers
+            expected_headers = [
+                'Patient_Full_Name', 'Patient_ID', 'Presenting_Symptoms',
+                'Current_Medications', 'Previous_Relevant_Surgeries',
+                'Age_Years', 'Weight_KG', 'Height_CM', 'Gender',
+                'Examination_Type', 'Body_Region', 'Urgency_Level',
+                'Image_Path', 'Diagnosis_Class'
+            ]
+            
+            for header in expected_headers:
+                assert header in reader.fieldnames
         
-        # Verify CSV was created
-        assert output_file.exists()
-        
-        # Read and verify CSV contents
-        with open(output_file, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            csv_records = list(reader)
-        
-        assert len(csv_records) == 2
-        
-        # Verify headers
-        expected_headers = [
-            'Patient_Full_Name', 'Patient_ID', 'Presenting_Symptoms',
-            'Current_Medications', 'Previous_Relevant_Surgeries',
-            'Age_Years', 'Weight_KG', 'Height_CM', 'Gender',
-            'Examination_Type', 'Body_Region', 'Urgency_Level',
-            'Image_Path', 'Diagnosis_Class'
-        ]
-        
-        for header in expected_headers:
-            assert header in reader.fieldnames
+        finally:
+            # Cleanup temp file
+            os.unlink(temp_config_path)
 
 
 # Run tests
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

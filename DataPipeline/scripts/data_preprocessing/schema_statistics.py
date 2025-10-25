@@ -475,11 +475,11 @@ class SchemaStatisticsManager:
         
         self.logger.debug(f"Started MLflow run: {run_name} (ID: {run.info.run_id})")
         return run.info.run_id
-    
+
     def _end_mlflow_run(self):
         """End the current MLflow run."""
         mlflow.end_run()
-    
+
     def _log_artifact_file(self, file_path: str, artifact_path: str = None):
         """
         Log a file as an MLflow artifact.
@@ -491,15 +491,15 @@ class SchemaStatisticsManager:
         if os.path.exists(file_path):
             mlflow.log_artifact(file_path, artifact_path)
             self.logger.debug(f"Logged artifact: {file_path}")
-    
+
     def _log_params(self, params: Dict[str, Any]):
         """Log parameters to MLflow."""
         mlflow.log_params(params)
-    
+
     def _log_metrics(self, metrics: Dict[str, float]):
         """Log metrics to MLflow."""
         mlflow.log_metrics(metrics)
-    
+        
     def _clean_partition_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Remove partition metadata columns from DataFrame.

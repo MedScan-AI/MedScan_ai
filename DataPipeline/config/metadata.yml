@@ -273,7 +273,7 @@ mlmd:
   # Metadata store configuration
   store:
     type: "sqlite"  # sqlite or mysql
-    database_path: "data/mlflow_store/metadata.db"
+    database_path: "/tmp/mlflow/metadata.db"
     
   # Artifact types
   artifact_types:
