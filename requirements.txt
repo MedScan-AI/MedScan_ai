@@ -1,0 +1,20 @@
+# Core dependencies
+pyyaml
+kagglehub
+kaggle
+Pillow
+numpy
+Faker
+pandas
+numpy
+pyarrow
+
+
+# Data validation and metadata
+great-expectations
+scipy
+mlflow
+
+# Testing dependencies
+pytest
+
