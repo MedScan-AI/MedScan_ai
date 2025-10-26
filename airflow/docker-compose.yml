@@ -1,7 +1,6 @@
-#version: "3.8"
+version: "3.8"
 
-x-airflow-common:
-  &airflow-common
+x-airflow-common: &airflow-common
   build:
     context: ..
     dockerfile: airflow/Dockerfile
@@ -13,10 +12,12 @@ x-airflow-common:
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
-    PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline
-    MLFLOW_TRACKING_URI: 'file:///tmp/mlflow'
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: "true"
 
-    # Email configuration 
+    PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
+
+    MLFLOW_TRACKING_URI: "file:///tmp/mlflow"
+
     AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST}
     AIRFLOW__SMTP__SMTP_STARTTLS: "True"
     AIRFLOW__SMTP__SMTP_SSL: "False"
@@ -25,15 +26,21 @@ x-airflow-common:
     AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT}
     AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM}
 
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-service-account.json
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - ../DataPipeline:/opt/airflow/DataPipeline
-    - ../requirements.txt:/opt/airflow/requirements.txt 
+    - ../requirements.txt:/opt/airflow/requirements.txt
     - ../scripts:/opt/airflow/scripts
     - ../config:/opt/airflow/config
     - ../data:/opt/airflow/data
+    - ~/gcp-service-account.json:/opt/airflow/gcp-service-account.json:ro
+
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
   depends_on:
     - postgres
@@ -52,6 +59,7 @@ services:
       start_period: 10s
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+    restart: always
 
   airflow-init:
     <<: *airflow-common
@@ -59,6 +67,7 @@ services:
     command:
       - -c
       - |
+        echo "Initializing Airflow..."
         airflow db init
         airflow users create \
           --username ${AIRFLOW_USERNAME} \
@@ -66,14 +75,15 @@ services:
           --firstname ${AIRFLOW_FIRSTNAME} \
           --lastname ${AIRFLOW_LASTNAME} \
           --role Admin \
-          --email ${AIRFLOW_EMAIL}
+          --email ${AIRFLOW_EMAIL} || echo "User exists"
+        echo "✓ Airflow ready"
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
-      PYTHONPATH: /opt/airflow:/opt/airflow/scripts
+      PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
       AIRFLOW_USERNAME: ${AIRFLOW_USERNAME}
       AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD}
       AIRFLOW_FIRSTNAME: ${AIRFLOW_FIRSTNAME}
@@ -92,7 +102,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     restart: always
 
   scheduler:

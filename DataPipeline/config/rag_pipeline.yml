@@ -1,11 +1,14 @@
-# RAG Pipeline Configuration
+# RAG Pipeline Configuration - FIXED BASELINE APPROACH
 
 pipeline:
   name: rag_data_pipeline
   schedule: "0 10 * * *"  # Daily at 10 AM UTC
   enabled: true
+  max_retries: 2
+  retry_delay_minutes: 5
   
 scraping:
+  # Single source of truth for URLs
   urls:
     - "https://www.cdc.gov/tb/treatment/index.html"
     - "https://www.mayoclinic.org/diseases-conditions/lung-cancer/diagnosis-treatment/drc-20374627"
@@ -13,6 +16,21 @@ scraping:
     - "https://www.who.int/news-room/fact-sheets/detail/tuberculosis"
     - "https://ajronline.org/doi/full/10.2214/AJR.07.3896"
     - "https://pmc.ncbi.nlm.nih.gov/articles/PMC3876596/"
+    - "https://jphe.amegroups.org/article/view/3668/pdf"
+    - "https://journals.plos.org/plosone/article?id=10.1371%2Fjournal.pone.0161176"
+    - "https://jamanetwork.com/journals/jama/fullarticle/2777242"
+    - "https://pmc.ncbi.nlm.nih.gov/articles/PMC11003524/"
+    - "https://www.sciencedirect.com/science/article/pii/S2950162824000195"
+    - "https://www.mdpi.com/2075-4418/15/7/908"
+    - "https://pmc.ncbi.nlm.nih.gov/articles/PMC12000946/"
+    - "https://ascopubs.org/doi/10.1200/GO.21.00100"
+    - "https://ccts.amegroups.org/article/view/46726/html"
+    - "https://pmc.ncbi.nlm.nih.gov/articles/PMC8113854/"
+    - "https://bmccancer.biomedcentral.com/articles/10.1186/s12885-024-13350-y"
+    - "https://www.e-emj.org/journal/view.php?number=1607"
+    - "https://www.cancer.gov/about-cancer/treatment/types"
+    - "https://www.cancer.gov/about-cancer/treatment/types/photodynamic-therapy"
+    - "https://www.cancer.gov/about-cancer/treatment/types/immunotherapy"
   
   timeout: 60000
   max_retries: 3
@@ -30,8 +48,9 @@ indexing:
   dimension: 768
   
 validation:
-  enable: true
-  drift_threshold: 0.1
+  baseline_strategy: "fixed"
+  enable_tfdv: true
+  drift_threshold: 0.15
   
 dvc:
   remote_name: "rag"
@@ -40,4 +59,5 @@ dvc:
   
 gcs:
   bucket_name: "medscan-rag-data"
+  project_id: "medscanai-476203"
   preserve_versions: true
