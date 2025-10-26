@@ -1,12 +1,13 @@
-import pytest
 import json
 import os
-import numpy as np
+import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import MagicMock, mock_open, patch
+
+import numpy as np
+import pytest
 
 # Adjust path if necessary
-import sys
 sys.path.insert(0, './..')
 
 from scripts.RAG.embedding import ChunkEmbedder, EmbeddedChunk

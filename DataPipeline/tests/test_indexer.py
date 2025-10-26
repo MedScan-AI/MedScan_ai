@@ -1,16 +1,17 @@
-import pytest
-import numpy as np
-import faiss
-import pickle
-from pathlib import Path
 import os
+import pickle
+import sys
+from pathlib import Path
+
+import faiss
+import numpy as np
+import pytest
 
 # Adjust path if necessary
-import sys
 sys.path.insert(0, './..')
 
-from scripts.RAG.indexing import FAISSIndex
 from scripts.RAG.embedding import EmbeddedChunk
+from scripts.RAG.indexing import FAISSIndex
 
 # Fixture for a FAISSIndex instance
 @pytest.fixture

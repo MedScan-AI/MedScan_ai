@@ -1,40 +1,52 @@
-
-"""
-index.py - Create and manage FAISS index for document retrieval
-"""
+"""index.py - Create and manage FAISS index for document retrieval."""
 
 import logging
-import sys
 import pickle
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
-import numpy as np
-import faiss
-from .embedding import EmbeddedChunk, ChunkEmbedder
 
-# Configure logging
+import faiss
+import numpy as np
+
+from .embedding import ChunkEmbedder, EmbeddedChunk
+
+# Setup logging
+LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+log_file = LOG_DIR / f"indexing_{datetime.now().strftime('%Y-%m-%d')}.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('index.log'),
+        logging.FileHandler(log_file),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-INPUT_FILE = OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "index" / "embeddings.json"
-OUTPUT_FILE_INDEX = OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "index" / "index.bin"
-OUTPUT_FILE_DATA = OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "index" / "data.pkl"
+INPUT_FILE = OUTPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "index" / "embeddings.json"
+)
+OUTPUT_FILE_INDEX = OUTPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "index" / "index.bin"
+)
+OUTPUT_FILE_DATA = OUTPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "index" / "data.pkl"
+)
 
 
 class FAISSIndex:
-    """FAISS index manager for document retrieval"""
-    
+    """FAISS index manager for document retrieval."""
+
     def __init__(self, dimension: int, index_type: str = 'flat'):
-        """
-        Initialize FAISS index
-        
+        """Initialize FAISS index.
+
         Args:
             dimension: Dimension of the embeddings
             index_type: Type of index ('flat', 'ivf', 'hnsw')
@@ -43,17 +55,22 @@ class FAISSIndex:
         self.index_type = index_type
         self.index: Optional[faiss.Index] = None
         self.chunks: List[EmbeddedChunk] = []
-        logger.info(f"Initialized FAISSIndex with dimension={dimension}, type={index_type}")
+        logger.info(
+            f"Initialized FAISSIndex with "
+            f"dimension={dimension}, type={index_type}"
+        )
     
     def create_index(self, nlist: int = 100) -> None:
-        """
-        Create FAISS index based on index_type
-        
+        """Create FAISS index based on index_type.
+
         Args:
             nlist: Number of clusters for IVF index
         """
         try:
-            logger.info(f"Creating {self.index_type} index with dimension {self.dimension}")
+            logger.info(
+                f"Creating {self.index_type} index "
+                f"with dimension {self.dimension}"
+            )
             
             if self.index_type == 'flat':
                 # Flat L2 index - exact search, good for smaller datasets
@@ -81,15 +98,14 @@ class FAISSIndex:
             raise
     
     def normalize_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
-        """
-        Normalize embeddings for cosine similarity (if not already normalized)
-        
-        Note: BGE models already output normalized embeddings when 
+        """Normalize embeddings for cosine similarity.
+
+        Note: BGE models already output normalized embeddings when
         normalize_embeddings=True is used during encoding.
-        
+
         Args:
             embeddings: Array of embeddings
-            
+
         Returns:
             Normalized embeddings
         """
@@ -106,9 +122,8 @@ class FAISSIndex:
         return embeddings / norms
     
     def build_index(self, embedded_chunks: List[EmbeddedChunk]) -> None:
-        """
-        Build FAISS index from embedded chunks
-        
+        """Build FAISS index from embedded chunks.
+
         Args:
             embedded_chunks: List of EmbeddedChunk objects
         """
