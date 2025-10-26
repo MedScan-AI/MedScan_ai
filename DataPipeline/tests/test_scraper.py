@@ -1,28 +1,29 @@
-import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from datetime import datetime
 import json
+import sys
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 # Adjust path if necessary
-import sys
 sys.path.insert(0, './..')
 
 from scripts.RAG.scraper import (
-    is_likely_person_name,
-    filter_author_names,
-    strip_references,
+    GLOBAL_METRICS,
     clean_text,
     compute_token_stats,
     detect_country,
     extract_publish_date_from_html,
-    extract_topic_keywords,
     extract_text_markdown,
+    extract_topic_keywords,
     fetch_url_async,
+    filter_author_names,
+    is_likely_person_name,
     process_single_url,
     save_record_to_file,
+    strip_references,
     update_total_global_metrics,
-    GLOBAL_METRICS
 )
 
 @pytest.fixture

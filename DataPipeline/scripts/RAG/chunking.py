@@ -1,15 +1,23 @@
-import re
 import json
 import logging
 import os
-import tiktoken
-from pathlib import Path
-from typing import List, Dict, Tuple
+import re
+import sys
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import tiktoken
 
 # Configure paths
-INPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "raw_data" / "raw_data.jsonl"
-OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "chunked_data" / "chunks.json"
+INPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "raw_data" / "raw_data.jsonl"
+)
+OUTPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "chunked_data" / "chunks.json"
+)
 
 # Setup logging
 LOG_DIR = Path(__file__).parent.parent.parent / "logs"
@@ -18,10 +26,10 @@ log_file = LOG_DIR / f"chunking_{datetime.now().strftime('%Y-%m-%d')}.log"
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
@@ -29,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class HeaderDetector:
     """Detects headings in poorly-structured markdown."""
-    
+
     def __init__(self):
         self.heading_keywords = {
             'introduction', 'overview', 'background', 'summary', 'conclusion',
@@ -37,9 +45,15 @@ class HeaderDetector:
             'symptoms', 'treatment', 'diagnosis', 'causes', 'prevention',
             'what is', 'how to', 'why', 'when', 'where', 'section'
         }
-    
-    def is_likely_heading(self, line: str, next_line: str = "") -> Tuple[bool, int]:
-        """Determines if a line is likely a heading and returns (is_heading, level)."""
+
+    def is_likely_heading(
+        self, line: str, next_line: str = ""
+    ) -> Tuple[bool, int]:
+        """Determine if a line is likely a heading.
+
+        Returns:
+            Tuple of (is_heading, level)
+        """
         stripped = line.strip()
         
         if not stripped or re.match(r'^#{1,6}\s', stripped):
@@ -54,7 +68,9 @@ class HeaderDetector:
         
         # ALL CAPS (including single hyphenated words like WITH-HYPHENS)
         word_count = len(stripped.split())
-        if stripped.isupper() and ((word_count >= 2 and word_count <= 12) or (word_count == 1 and '-' in stripped)):
+        is_all_caps_multi = word_count >= 2 and word_count <= 12
+        is_single_hyphenated = word_count == 1 and '-' in stripped
+        if stripped.isupper() and (is_all_caps_multi or is_single_hyphenated):
             return True, 2
         
         # Short line followed by longer content (use word count)
@@ -114,15 +130,13 @@ class HeaderDetector:
 
 class RAGChunker:
     """Chunks markdown documents for RAG with header detection."""
-    
+
     def __init__(self):
         self.detector = HeaderDetector()
         self.token_counts = []  # Track token counts for statistics
-    
+
     def count_tokens(self, text: str) -> int:
-        """
-        Estimate token count using tiktoken.
-        """
+        """Estimate token count using tiktoken."""
         encoding = tiktoken.get_encoding("cl100k_base")
         tokens = encoding.encode(text)
         return len(tokens)

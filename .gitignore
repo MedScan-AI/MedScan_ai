@@ -6,4 +6,7 @@
 *.jpg
 *.jpeg
 *.png
-
+*.log
+__pycache__
+*.pkl
+*.bin

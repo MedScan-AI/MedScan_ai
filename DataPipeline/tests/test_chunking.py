@@ -1,17 +1,18 @@
-import pytest
 import json
 import os
 import re
+import sys
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import mock_open, patch
+
+import pytest
 
 # Assuming chunking.py and embedding.py are in the same directory
 # Adjust paths if necessary
-import sys
 sys.path.insert(0, './..')
 
-from scripts.RAG.chunking import RAGChunker, HeaderDetector
-from scripts.RAG.embedding import EmbeddedChunk, ChunkEmbedder # Import from embedding
+from scripts.RAG.chunking import HeaderDetector, RAGChunker
+from scripts.RAG.embedding import ChunkEmbedder, EmbeddedChunk
 
 # Mocking the tiktoken encoding for testing purposes
 class MockEncoding:
@@ -168,50 +169,6 @@ No headers here.
     assert rag_chunker.find_min_header_level(content3) == 3
     assert rag_chunker.find_min_header_level(content4) == 1 # Default to 1 if no headers
 
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_chunk_by_headers_basic(rag_chunker):
-#     content = """
-# # Introduction
-# This is the introduction.
-# It spans multiple lines.
-
-# ## Section 1
-# Content of section 1.
-
-# ### Subsection 1.1
-# Content of subsection 1.1.
-
-# ## Section 2
-# Content of section 2.
-
-# # Conclusion
-# This is the conclusion.
-# """
-#     chunks = rag_chunker.chunk_by_headers(content)
-
-#     assert len(chunks) == 5
-#     assert chunks[0]['header'] == 'Introduction'
-#     assert chunks[0]['level'] == 1
-#     assert "This is the introduction.\nIt spans multiple lines." in chunks[0]['content']
-
-#     assert chunks[1]['header'] == 'Section 1'
-#     assert chunks[1]['level'] == 2
-#     assert "Content of section 1." in chunks[1]['content']
-#     assert "### Subsection 1.1\nContent of subsection 1.1." in chunks[1]['content'] # Subsection included
-
-#     assert chunks[2]['header'] == 'Subsection 1.1'
-#     assert chunks[2]['level'] == 3
-#     assert "Content of subsection 1.1." in chunks[2]['content']
-
-#     assert chunks[3]['header'] == 'Section 2'
-#     assert chunks[3]['level'] == 2
-#     assert "Content of section 2." in chunks[3]['content']
-
-#     assert chunks[4]['header'] == 'Conclusion'
-#     assert chunks[4]['level'] == 1
-#     assert "This is the conclusion." in chunks[4]['content']
-
-
 def test_chunk_by_headers_no_headers(rag_chunker):
     content = """
 This is some content without any markdown headers.
@@ -230,94 +187,6 @@ def test_chunk_by_headers_empty_content(rag_chunker):
     content = ""
     chunks = rag_chunker.chunk_by_headers(content)
     assert len(chunks) == 0
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_process_file_with_existing_headers(rag_chunker, mock_tiktoken_get_encoding):
-#     record = {
-#         'link': 'http://example.com/doc1',
-#         'title': 'Document One',
-#         'markdown_text': """
-# # Introduction
-# This is the intro.
-
-# ## Methods
-# These are the methods.
-# """,
-#         'text': 'Cleaned text content',
-#         'markdown_title': 'Markdown Title',
-#         'word_count': 100,
-#         'token_count': 50,
-#         'source_type': 'Journal',
-#         'authors': ['Author A'],
-#         'publish_date': '2023-01-01',
-#         'country': 'USA',
-#         'topics': ['Topic1'],
-#         'accessed_at': '2023-01-02'
-#     }
-
-#     chunks = rag_chunker.process_file(record)
-
-#     assert len(chunks) == 2
-#     assert chunks[0]['section_header'] == 'Introduction'
-#     assert 'This is the intro.' in chunks[0]['content']
-#     assert chunks[0]['link'] == 'http://example.com/doc1'
-#     assert chunks[0]['title'] == 'Document One'
-#     assert chunks[0]['source_type'] == 'Journal'
-#     assert chunks[0]['authors'] == ['Author A']
-#     assert chunks[0]['chunk_token_count'] >= 0 # Check token count is added
-
-#     assert chunks[1]['section_header'] == 'Methods'
-#     assert 'These are the methods.' in chunks[1]['content']
-#     assert chunks[1]['link'] == 'http://example.com/doc1' # Ensure metadata is propagated
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_process_file_without_existing_headers(rag_chunker, mock_tiktoken_get_encoding):
-#     record = {
-#         'link': 'http://example.com/doc2',
-#         'title': 'Document Two',
-#         'markdown_text': """
-# Article Title
-
-# Summary:
-# This is the summary.
-
-# Details:
-# Here are the details.
-
-# Conclusion.
-# Final thoughts here.
-# """,
-#         'text': 'Cleaned text content without headers.',
-#         'markdown_title': 'Markdown Title Two',
-#         'word_count': 150,
-#         'token_count': 75,
-#         'source_type': 'Website',
-#         'authors': [],
-#         'publish_date': None,
-#         'country': 'UK',
-#         'topics': ['Topic2', 'Topic3'],
-#         'accessed_at': '2023-01-03'
-#     }
-
-#     chunks = rag_chunker.process_file(record)
-
-#     assert len(chunks) >= 3 # Expecting at least Intro, Summary, Details
-#     assert chunks[0]['section_header'] == 'Introduction' # Default intro chunk
-#     assert 'Article Title' in chunks[0]['content']
-
-#     summary_chunk = next((c for c in chunks if c['section_header'] == 'Summary:'), None)
-#     assert summary_chunk is not None
-#     assert 'This is the summary.' in summary_chunk['content']
-#     assert summary_chunk['link'] == 'http://example.com/doc2'
-#     assert summary_chunk['chunk_token_count'] >= 0
-
-#     details_chunk = next((c for c in chunks if c['section_header'] == 'Details:'), None)
-#     assert details_chunk is not None
-#     assert 'Here are the details.' in details_chunk['content']
-
-#     # Conclusion might or might not be a header depending on detector logic
-#     conclusion_chunk = next((c for c in chunks if 'Final thoughts here.' in c['content']), None)
-#     assert conclusion_chunk is not None
 
 def test_process_file_empty_content(rag_chunker, mock_tiktoken_get_encoding):
     record = {
@@ -485,215 +354,6 @@ Content of section 1.
     assert chunks[0]['header'] == 'Introduction'
     assert 'Leading content before the first header.' in chunks[0]['content']
     assert chunks[1]['header'] == 'Section 1'
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_chunk_by_headers_trailing_content(rag_chunker):
-#     content = """
-# # Section 1
-# Content of section 1.
-
-# Trailing content after the last header.
-# """
-#     chunks = rag_chunker.chunk_by_headers(content)
-#     assert len(chunks) == 2
-#     assert chunks[0]['header'] == 'Section 1'
-#     assert chunks[1]['header'] == 'Introduction' # Trailing content gets default header
-#     assert 'Trailing content after the last header.' in chunks[1]['content']
-
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_chunk_by_headers_consecutive_headers(rag_chunker):
-#     content = """
-# # Header 1
-# # Header 2
-# # Header 3
-# Content.
-# """
-#     chunks = rag_chunker.chunk_by_headers(content)
-#     assert len(chunks) == 4 # H1, H2, H3, and trailing content
-#     assert chunks[0]['header'] == 'Header 1'
-#     assert chunks[0]['content'] == '' # No content under Header 1
-#     assert chunks[1]['header'] == 'Header 2'
-#     assert chunks[1]['content'] == '' # No content under Header 2
-#     assert chunks[2]['header'] == 'Header 3'
-#     assert 'Content.' in chunks[2]['content']
-
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_chunk_by_headers_only_headers(rag_chunker):
-#     content = """
-# # Header 1
-# ## Header 1.1
-# # Header 2
-# """
-#     chunks = rag_chunker.chunk_by_headers(content)
-#     assert len(chunks) == 3 # H1, H1.1, H2
-#     assert chunks[0]['header'] == 'Header 1'
-#     assert '## Header 1.1' in chunks[0]['content'] # Sub-header included in parent chunk
-#     assert chunks[1]['header'] == 'Header 1.1'
-#     assert chunks[1]['content'] == '' # No content under H1.1
-#     assert chunks[2]['header'] == 'Header 2'
-#     assert chunks[2]['content'] == '' # No content under H2
-
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_chunk_by_headers_respects_min_header_level(rag_chunker):
-#     content = """
-# # H1 (Should not be a chunk boundary if min level is 2)
-# Content for H1.
-# ## H2 (Should be a chunk boundary)
-# Content for H2.
-# ### H3 (Should be a chunk boundary)
-# Content for H3.
-# #### H4 (Should NOT be a chunk boundary)
-# Content for H4.
-# """
-#     # Force chunking at level 2
-#     rag_chunker.find_min_header_level = lambda x: 2
-
-#     chunks = rag_chunker.chunk_by_headers(content)
-
-#     assert len(chunks) == 2 # Should chunk by H2 and H3, but H1 becomes intro
-#     assert chunks[0]['header'] == 'Introduction' # H1 is now just content
-#     assert 'Content for H1.' in chunks[0]['content']
-#     assert '## H2' in chunks[0]['content'] # H2 is also content in the 'intro' chunk
-#                                           # This might be unexpected behavior and should be reviewed.
-#                                           # The current logic adds the header line itself to the content.
-#                                           # Let's refine this test to check the intended behavior.
-#     assert 'Content for H2.' in chunks[0]['content']
-#     assert '### H3' in chunks[0]['content']
-#     assert 'Content for H3.' in chunks[0]['content']
-#     assert '#### H4' in chunks[0]['content']
-#     assert 'Content for H4.' in chunks[0]['content']
-
-#     assert chunks[1]['header'] == 'H2'
-#     assert 'Content for H2.' in chunks[1]['content']
-#     assert '### H3' in chunks[1]['content'] # H3 is below chunk level 2, included as content
-#     assert 'Content for H3.' in chunks[1]['content']
-#     assert '#### H4' in chunks[1]['content'] # H4 is below chunk level 2, included as content
-#     assert 'Content for H4.' in chunks[1]['content']
-
-#     assert chunks[2]['header'] == 'H3'
-#     assert 'Content for H3.' in chunks[2]['content']
-#     assert '#### H4' in chunks[2]['content'] # H4 is below chunk level 3, included as content
-#     assert 'Content for H4.' in chunks[2]['content']
-
-#     # This shows the chunking logic correctly includes lower-level headers as content.
-#     # The original intent of the instruction might have been to test filtering
-#     # by a specified minimum header level, which the current implementation
-#     # uses the *minimum* found level. Let's add a test that simulates
-#     # a scenario where only H2 and H3 exist, so the min level is 2.
-
-#     rag_chunker = RAGChunker() # Fresh instance
-#     content = """
-# Some leading content.
-
-# ## H2 (Min level detected will be 2)
-# Content for H2.
-# ### H3 (Below min level, included as content)
-# Content for H3.
-# #### H4 (Below min level, included as content)
-# Content for H4.
-
-# ## Another H2
-# Content for Another H2.
-# """
-#     chunks = rag_chunker.chunk_by_headers(content) # Min level detected will be 2
-
-#     assert len(chunks) == 3 # Leading content, first H2, second H2
-#     assert chunks[0]['header'] == 'Introduction'
-#     assert 'Some leading content.' in chunks[0]['content']
-#     assert '## H2' in chunks[0]['content'] # Current behavior appends the header line to prev chunk
-#     assert 'Content for H2.' in chunks[0]['content']
-#     assert '### H3' in chunks[0]['content']
-#     assert 'Content for H3.' in chunks[0]['content']
-#     assert '#### H4' in chunks[0]['content']
-#     assert 'Content for H4.' in chunks[0]['content']
-#     assert '## Another H2' in chunks[0]['content']
-#     assert 'Content for Another H2.' in chunks[0]['content']
-
-
-# # Add a test for metadata propagation in process_file with multiple chunks
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_process_file_metadata_propagation(rag_chunker, mock_tiktoken_get_encoding):
-#     record = {
-#         'link': 'http://example.com/metadata',
-#         'title': 'Metadata Test',
-#         'markdown_text': """
-# # Section 1
-# Content 1.
-
-# ## Section 1.1
-# Content 1.1.
-
-# # Section 2
-# Content 2.
-# """,
-#         'text': 'Cleaned text.',
-#         'markdown_title': 'MD Title',
-#         'word_count': 200,
-#         'token_count': 100,
-#         'source_type': 'Blog',
-#         'authors': ['Author B', 'Author C'],
-#         'publish_date': '2024-01-01',
-#         'country': 'Canada',
-#         'topics': ['Topic X', 'Topic Y'],
-#         'accessed_at': '2024-01-02'
-#     }
-
-#     chunks = rag_chunker.process_file(record)
-
-#     assert len(chunks) == 3 # Section 1, Section 1.1, Section 2
-
-#     # Check metadata is present and correct in all chunks
-#     for chunk in chunks:
-#         assert chunk['link'] == 'http://example.com/metadata'
-#         assert chunk['title'] == 'Metadata Test'
-#         assert chunk['source_type'] == 'Blog'
-#         assert chunk['authors'] == ['Author B', 'Author C']
-#         assert chunk['publish_date'] == '2024-01-01'
-#         assert chunk['country'] == 'Canada'
-#         assert chunk['topics'] == ['Topic X', 'Topic Y']
-#         assert chunk['accessed_at'] == '2024-01-02'
-#         assert 'chunk_token_count' in chunk and chunk['chunk_token_count'] >= 0
-#         assert 'section_header' in chunk
-#         assert 'section_level' in chunk
-
-# # Add a test for handling records with only 'text' and no 'markdown_text'
-# @pytest.mark.skip(reason="Requires every-header chunking (Issue #4) - parked for future")
-# def test_process_file_only_text(rag_chunker, mock_tiktoken_get_encoding):
-#     record = {
-#         'link': 'http://example.com/onlytext',
-#         'title': 'Only Text Test',
-#         'text': """
-# Introduction
-# This is the introduction in plain text.
-
-# Methods
-# These are the methods.
-# """,
-#         'markdown_title': '',
-#         'word_count': 80,
-#         'token_count': 40,
-#         'source_type': 'Plain',
-#         'authors': [],
-#         'publish_date': None,
-#         'country': 'Unknown',
-#         'topics': [],
-#         'accessed_at': '2024-01-03'
-#     }
-#     chunks = rag_chunker.process_file(record)
-#     # Expecting the header detector to add headers based on lines like "Introduction", "Methods"
-#     # and then chunk based on those.
-#     assert len(chunks) >= 2 # At least Intro and Methods
-
-#     intro_chunk = next((c for c in chunks if 'This is the introduction' in c['content']), None)
-#     assert intro_chunk is not None
-#     assert intro_chunk['section_header'] in ['Introduction', '# Introduction']
-
-#     methods_chunk = next((c for c in chunks if 'These are the methods' in c['content']), None)
-#     assert methods_chunk is not None
-#     assert methods_chunk['section_header'] in ['Methods', '# Methods']
-
 
 # Add a test for handling empty lists in metadata fields
 def test_process_file_empty_lists(rag_chunker, mock_tiktoken_get_encoding):

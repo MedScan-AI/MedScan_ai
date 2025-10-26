@@ -1,40 +1,59 @@
+import argparse
 import asyncio
-import re
 import json
-import tiktoken
 import logging
+import os
 import re
 import ssl
-import warnings
-import os
-import argparse
-import trafilatura
 import sys
+import warnings
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
 import aiohttp
 import nltk
-nltk.set_proxy('')
+import tiktoken
+import trafilatura
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from newspaper import Article
 from nltk import ne_chunk, pos_tag, word_tokenize
 from nltk.tree import Tree
-from datetime import datetime
-from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-from newspaper import Article
-from markdownify import markdownify as md
-from urllib.parse import urlparse
-from pathlib import Path
+
+nltk.set_proxy('')
 
 warnings.filterwarnings('ignore', category=UserWarning, module='nltk')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-OUT_FILE = INPUT_DIR = Path(__file__).parent.parent.parent / "data" / "RAG" / "raw_data" / "raw_data.jsonl"
+OUT_FILE = INPUT_DIR = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "raw_data" / "raw_data.jsonl"
+)
+
+# Setup logging
+LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+log_file = LOG_DIR / f"scraper_{datetime.utcnow().strftime('%Y-%m-%d')}.log"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
+logger = logging.getLogger(__name__)
 
-REFERENCE_HEADINGS = ["references", "bibliography", "works cited", "reference", "literature cited"]
+REFERENCE_HEADINGS = [
+    "references",
+    "bibliography",
+    "works cited",
+    "reference",
+    "literature cited"
+]
 
 COUNTRY_TLD_MAP = {
     "us": "United States",
@@ -63,21 +82,61 @@ GLOBAL_METRICS = {
 }
 
 TOPIC_KEYWORDS = {
-    "lung cancer": ["lung cancer", "nsclc", "small cell carcinoma", "adenocarcinoma", "large cell carcinoma", "squamous cell carcinoma"],
+    "lung cancer": [
+        "lung cancer",
+        "nsclc",
+        "small cell carcinoma",
+        "adenocarcinoma",
+        "large cell carcinoma",
+        "squamous cell carcinoma"
+    ],
     "tuberculosis": ["tuberculosis", "tb bacteria"],
-    "general cancer": ["what is cancer", "cancer overview", "chest x-ray", "ct scans"],
-    "treatment": ["chemotherapy", "immunotherapy", "hyperthermia", "targeted-therapies", "surgery", "transplant", "radiation-therapy", "treatment options"],
+    "general cancer": [
+        "what is cancer",
+        "cancer overview",
+        "chest x-ray",
+        "ct scans"
+    ],
+    "treatment": [
+        "chemotherapy",
+        "immunotherapy",
+        "hyperthermia",
+        "targeted-therapies",
+        "surgery",
+        "transplant",
+        "radiation-therapy",
+        "treatment options"
+    ],
     "causes": [
-        "risk factors", "carcinogens", "etiology", "genetic predisposition", "oncogenes", "tumor suppressor gene mutation",
-        "smoking", "tobacco exposure", "asbestos", "air pollution",
-        "occupational exposure", "radon", "secondhand smoke", "viral infection", "hpv",
-        "immune suppression", "chronic inflammation", "radiation exposure"
+        "risk factors",
+        "carcinogens",
+        "etiology",
+        "genetic predisposition",
+        "oncogenes",
+        "tumor suppressor gene mutation",
+        "smoking",
+        "tobacco exposure",
+        "asbestos",
+        "air pollution",
+        "occupational exposure",
+        "radon",
+        "secondhand smoke",
+        "viral infection",
+        "hpv",
+        "immune suppression",
+        "chronic inflammation",
+        "radiation exposure"
     ]
 }
 
 RE_BRACKET_CITATION = re.compile(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]")
-RE_AUTHOR_YEAR = re.compile(r"\([A-Za-z]+(?:\s+et\s+al)?(?:,\s*\d{4})\)")
-RE_FIG_TABLE = re.compile(r"^(figure|fig\.|table)\s*\d+", re.IGNORECASE | re.MULTILINE)
+RE_AUTHOR_YEAR = re.compile(
+    r"\([A-Za-z]+(?:\s+et\s+al)?(?:,\s*\d{4})\)"
+)
+RE_FIG_TABLE = re.compile(
+    r"^(figure|fig\.|table)\s*\d+",
+    re.IGNORECASE | re.MULTILINE
+)
 
 
 def log(message):
@@ -159,7 +218,10 @@ def is_likely_person_name(text):
         # Multi-word heuristic
         if 2 <= len(words) <= 4:
             if all(w[0].isupper() for w in words if w):
-                titles = ['dr', 'dr.', 'prof', 'prof.', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.']
+                titles = [
+                    'dr', 'dr.', 'prof', 'prof.', 'mr', 'mr.',
+                    'mrs', 'mrs.', 'ms', 'ms.'
+                ]
                 if any(w.lower() in titles for w in words):
                     return True
                 if 2 <= len(words) <= 3:
@@ -173,10 +235,13 @@ def is_likely_person_name(text):
             w = words[0]
             if w[0].isupper() and w.isalpha() and len(w) > 1:
                 return True
-        elif 2 <= len(words) <= 4 and all(w and w[0].isupper() for w in words):
-            common_non_names = ['for', 'with', 'by', 'the', 'and', 'cancer', 'disease']
-            if not any(word.lower() in common_non_names for word in words):
-                return True
+        elif 2 <= len(words) <= 4:
+            if all(w and w[0].isupper() for w in words):
+                common_non_names = [
+                    'for', 'with', 'by', 'the', 'and', 'cancer', 'disease'
+                ]
+                if not any(word.lower() in common_non_names for word in words):
+                    return True
         return False
 
 
@@ -195,6 +260,7 @@ def filter_author_names(authors):
     return filtered
 
 def update_total_global_metrics(record):
+    """Update global metrics based on the scraped record."""
     GLOBAL_METRICS["total_urls"] += 1
     if "error" not in record:
         GLOBAL_METRICS["successfully_fetched"] += 1
@@ -205,7 +271,8 @@ def update_total_global_metrics(record):
         if record.get("country"):
             GLOBAL_METRICS["with_country"] += 1
             country = record["country"]
-            GLOBAL_METRICS["country_count"][country] = GLOBAL_METRICS["country_count"].get(country, 0) + 1
+            current_count = GLOBAL_METRICS["country_count"].get(country, 0)
+            GLOBAL_METRICS["country_count"][country] = current_count + 1
 
 
 def save_record_to_file(record, filename=""):
@@ -220,21 +287,19 @@ def save_record_to_file(record, filename=""):
         log(f"Failed to save record: {e}")
 
 def extract_text_markdown(html):
-  article_html = trafilatura.extract(
-      html,
-      output_format="html",
-      include_formatting=True,
-      include_links=True,
-      include_images=False,
-      include_tables=True
-  )
-  metadata = trafilatura.extract_metadata(html)
-  # title = metadata.get("title", "")
-  title = metadata.title if metadata else ""
-  markdown_txt = md(article_html, heading_style="ATX")
-  return title, markdown_txt
-
-  
+    """Extract text and title from HTML as markdown."""
+    article_html = trafilatura.extract(
+        html,
+        output_format="html",
+        include_formatting=True,
+        include_links=True,
+        include_images=False,
+        include_tables=True
+    )
+    metadata = trafilatura.extract_metadata(html)
+    title = metadata.title if metadata else ""
+    markdown_txt = md(article_html, heading_style="ATX")
+    return title, markdown_txt
 
 def detect_source_type(url):
     """
@@ -311,7 +376,8 @@ def detect_source_type(url):
     for source_type, patterns in source_mappings.items():
         for pattern in patterns:
             if pattern in domain or pattern in url_lower:
-                # Special case for NIH - distinguish between PubMed Central and other NIH
+                # Special case for NIH - distinguish between
+                # PubMed Central and other NIH
                 if source_type == "NIH/PubMed":
                     if "pmc" in url_lower or "/articles/PMC" in url:
                         return "PubMed Central"
@@ -323,7 +389,8 @@ def detect_source_type(url):
 
     # Additional pattern matching for specific cases
     if "/articles/" in url_lower or "/article/" in url_lower:
-        if any(journal in domain for journal in ["plos", "biomedcentral", "mdpi", "nature", "springer"]):
+        journals = ["plos", "biomedcentral", "mdpi", "nature", "springer"]
+        if any(journal in domain for journal in journals):
             return "Open Access Journal"
 
     # Default fallback
@@ -482,7 +549,13 @@ async def process_single_url(url):
         text = strip_references(text)
         text = clean_text(text)
 
-        title = article.title if article.title else (soup.find("h1").get_text().strip() if soup.find("h1") else "Untitled")
+        if article.title:
+            title = article.title
+        elif soup.find("h1"):
+            title = soup.find("h1").get_text().strip()
+        else:
+            title = "Untitled"
+
         if title == 'Untitled':
             title = markdown_title
 
@@ -512,51 +585,69 @@ async def process_single_url(url):
         log(f"Error processing URL {url}: {e}")
         return record
 
-async def main(urls, out_name = OUT_FILE, method = 'W'):
+async def main(urls, out_name=OUT_FILE, method='W'):
+    """Main scraping function."""
     # download_nltk_resources()
     if method == 'W' or method == 'w':
-      if os.path.exists(out_name):
-        os.remove(out_name)
-    
+        if os.path.exists(out_name):
+            os.remove(out_name)
+
     try:
-      for url in urls:
-        record = await process_single_url(url)
-        save_record_to_file(record, out_name) #"scraped_data_baseline.jsonl"
-        update_total_global_metrics(record)
+        for url in urls:
+            record = await process_single_url(url)
+            save_record_to_file(record, out_name)
+            update_total_global_metrics(record)
 
     except Exception as e:
-        logging.error(f"Error running tasks: {e}")
+        logger.error(f"Error running tasks: {e}")
 
-    logging.info("GLOBAL METRICS")
-    logging.info(f"Total URLs: {GLOBAL_METRICS['total_urls']}")
-    logging.info(f"Successfully fetched: {GLOBAL_METRICS['successfully_fetched']}")
-    logging.info(f"With authors: {GLOBAL_METRICS['with_authors']}")
-    logging.info(f"With publish date: {GLOBAL_METRICS['with_publish_date']}")
-    logging.info(f"With country: {GLOBAL_METRICS['with_country']}")
-    logging.info(f"Country counts: {GLOBAL_METRICS['country_count']}")
+    logger.info("GLOBAL METRICS")
+    logger.info(f"Total URLs: {GLOBAL_METRICS['total_urls']}")
+    logger.info(f"Successfully fetched: {GLOBAL_METRICS['successfully_fetched']}")
+    logger.info(f"With authors: {GLOBAL_METRICS['with_authors']}")
+    logger.info(f"With publish date: {GLOBAL_METRICS['with_publish_date']}")
+    logger.info(f"With country: {GLOBAL_METRICS['with_country']}")
+    logger.info(f"Country counts: {GLOBAL_METRICS['country_count']}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description = "Provide the URL List, output file name, restart or append option"
+        description=(
+            "Provide the URL List, output file name, "
+            "restart or append option"
+        )
     )
     parser.add_argument(
-        "-u", "--url", nargs="+", type = str, default = [], required = True, help = "List of URLs to process"
+        "-u", "--url",
+        nargs="+",
+        type=str,
+        default=[],
+        required=True,
+        help="List of URLs to process"
     )
     parser.add_argument(
-        "-o", "--output", type = str, required = True, default = 'raw_data.jsonl' , help = "Output file name"
+        "-o", "--output",
+        type=str,
+        required=True,
+        default='raw_data.jsonl',
+        help="Output file name"
     )
     parser.add_argument(
-        "-m", "--method", type = str, required = True, default = 'W', help = "W - for rewrite, A - for append to existing knowledgebase"
+        "-m", "--method",
+        type=str,
+        required=True,
+        default='W',
+        help="W - for rewrite, A - for append to existing knowledgebase"
     )
 
     args = parser.parse_args()
-    # urls = args.url
     urls = [u.strip("[]") for u in args.url]
     output_file = args.output
     method = args.method
-    if urls == None or urls == "":
+    if urls is None or urls == "":
         urls = []
     else:
         if method not in ["W", "A"]:
-            raise ValueError("Invalid method. Use 'W' for rewrite or 'A' for append.")
+            raise ValueError(
+                "Invalid method. Use 'W' for rewrite or 'A' for append."
+            )
         asyncio.run(main(urls, output_file, method))

@@ -1,32 +1,44 @@
-"""
-embedding.py - Generate embeddings for document chunks using sentence transformers
-"""
+"""Embedding module for generating embeddings using sentence transformers."""
+
 import json
 import logging
 import sys
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-# Configure logging
+# Setup logging
+LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+log_file = LOG_DIR / f"embedding_{datetime.now().strftime('%Y-%m-%d')}.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('embedding.log'),
+        logging.FileHandler(log_file),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-INPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "chunked_data" / "chunks.json"
-OUTPUT_FILE = Path(__file__).parent.parent.parent / "data" / "RAG" / "index" / "embeddings.json"
+INPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "chunked_data" / "chunks.json"
+)
+OUTPUT_FILE = (
+    Path(__file__).parent.parent.parent / "data" / "RAG" /
+    "index" / "embeddings.json"
+)
+
 
 @dataclass
 class EmbeddedChunk:
-    """Data class for a chunk with its embedding"""
+    """Data class for a chunk with its embedding."""
     chunk_id: str
     title: str
     content: str
@@ -34,25 +46,24 @@ class EmbeddedChunk:
     metadata: Dict[str, Any]
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization"""
+        """Convert to dictionary for serialization."""
         d = asdict(self)
-        d['embedding'] = self.embedding.tolist()  # Convert numpy array to list
+        d['embedding'] = self.embedding.tolist()
         return d
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EmbeddedChunk':
-        """Create from dictionary"""
+        """Create from dictionary."""
         data['embedding'] = np.array(data['embedding'])
         return cls(**data)
 
 
 class ChunkEmbedder:
-    """Generate embeddings for document chunks"""
-    
+    """Generate embeddings for document chunks."""
+
     def __init__(self, model_name: str = 'BAAI/llm-embedder'):
-        """
-        Initialize the embedder with a sentence transformer model
-        
+        """Initialize the embedder with a sentence transformer model.
+
         Args:
             model_name: Name of the sentence transformer model to use
         """
@@ -61,11 +72,15 @@ class ChunkEmbedder:
         logger.info(f"Initializing ChunkEmbedder with model: {model_name}")
         
     def load_model(self) -> None:
-        """Load the sentence transformer model"""
+        """Load the sentence transformer model."""
         try:
             logger.info(f"Loading model: {self.model_name}")
             self.model = SentenceTransformer(self.model_name)
-            logger.info(f"Model loaded successfully. Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
+            embedding_dim = self.model.get_sentence_embedding_dimension()
+            logger.info(
+                f"Model loaded successfully. "
+                f"Embedding dimension: {embedding_dim}"
+            )
         except Exception as e:
             logger.error(f"Failed to load model {self.model_name}: {str(e)}")
             raise
