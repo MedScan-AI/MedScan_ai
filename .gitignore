@@ -1,12 +1,100 @@
+# OS Files
 .DS_STORE
-*.md
-*.json
-*.jsonl
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Data & Outputs
+data/
+Data-Pipeline/data/
+*/data/
+
+# Logs
+logs/
+*.log
+Data-Pipeline/logs/
+*/logs/
+
+# MLflow
+mlruns/
+Data-Pipeline/mlruns/
+*/mlruns/
+mlflow_store/
+Data-Pipeline/mlflow_store/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Distribution / Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Models & Large Files
+*.h5
+*.pkl
+*.pth
+*.onnx
+*.pt
+*.safetensors
+
+# Documentation builds
+docs/_build/
+
+# Data Files
 *.csv
 *.jpg
 *.jpeg
 *.png
-*.log
-__pycache__
-*.pkl
+*.md
+*.json
+*.jsonl
 *.bin
