@@ -88,3 +88,13 @@ wheels/
 
 # Documentation builds
 docs/_build/
+
+# Data Files
+*.csv
+*.jpg
+*.jpeg
+*.png
+*.md
+*.json
+*.jsonl
+*.bin
