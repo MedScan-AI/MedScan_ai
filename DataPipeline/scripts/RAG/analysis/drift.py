@@ -82,17 +82,6 @@ class DriftDetector:
                 abs(std_ratio - 1.0) > self.DRIFT_THRESHOLD or
                 ks_p < 0.05
             )
-
-            if drift_info['has_drift']:
-                if ks_p < 0.01 or mean_shift > 0.5:
-                    drift_info['severity'] = 'HIGH'
-                elif ks_p < 0.05 or mean_shift > 0.3:
-                    drift_info['severity'] = 'MEDIUM'
-                else:
-                    drift_info['severity'] = 'LOW'
-            else:
-                drift_info['severity'] = 'NONE'
-
             return drift_info
 
         except Exception as e:

@@ -1,16 +1,15 @@
 """
-Integration tests for the complete data pipeline.
+Integration tests for the complete data pipeline - TFDV style.
 
-This module provides comprehensive integration tests for the data quality
-analysis pipeline, including validation, drift detection, and the main
-analyzer components.
+Tests the complete workflow: baseline analysis, new data analysis,
+and all components working together.
 """
 
 import os
 import sys
-from datetime import datetime, timedelta
+import json
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
 
 import pandas as pd
 import pytest
@@ -23,302 +22,91 @@ sys.path.insert(
 
 from main import DataQualityAnalyzer
 from validator import DataValidator
+from anomalies_and_bias_detection import AnomalyDetector
 from drift import DriftDetector
 
 
 @pytest.fixture
 def sample_baseline_data() -> pd.DataFrame:
-    """Create sample baseline data for testing.
-    
-    Returns:
-        pd.DataFrame: A DataFrame containing two sample records with
-            all required fields for baseline analysis.
-    """
+    """Create sample baseline data for testing."""
     current_time = datetime.now()
-    data = [
-        {
-            "title": "Title 1",
-            "text": "Some text",
-            "link": "http://a.com",
-            "word_count": 100,
-            "token_count": 120,
-            "authors": ["Alice"],
-            "publish_date": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "country": "US",
-            "topics": ["tech"],
-            "source_type": "blog",
-            "accessed_at": current_time
-        },
-        {
-            "title": "Title 2",
-            "text": "Another text",
-            "link": "http://b.com",
-            "word_count": 200,
-            "token_count": 210,
-            "authors": ["Bob"],
-            "publish_date": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "country": "UK",
-            "topics": ["science"],
-            "source_type": "news",
-            "accessed_at": current_time
-        },
-    ]
+    data = []
+    
+    for i in range(20):
+        data.append({
+            "title": f"Sample Title {i}",
+            "text": f"This is sample text content number {i} " * 10,
+            "link": f"http://example.com/{i}",
+            "word_count": 150 + i * 10,
+            "token_count": 180 + i * 12,
+            "authors": [f"Author{i}"],
+            "publish_date": current_time.strftime("%Y-%m-%d"),
+            "country": "US" if i % 3 == 0 else "UK",
+            "topics": ["tech", "ai"] if i % 2 == 0 else ["science"],
+            "source_type": "news" if i % 2 == 0 else "blog"
+        })
+    
     return pd.DataFrame(data)
 
 
 @pytest.fixture
 def sample_new_data() -> pd.DataFrame:
-    """Create sample new data for testing drift detection.
-    
-    Returns:
-        pd.DataFrame: A DataFrame containing two sample records with
-            slightly different characteristics for drift testing.
-    """
+    """Create sample new data with some drift."""
     current_time = datetime.now()
-    data = [
-        {
-            "title": "Title 3",
-            "text": "New text",
-            "link": "http://c.com",
-            "word_count": 150,
-            "token_count": 180,
-            "authors": ["Charlie"],
-            "publish_date": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "country": "US",
-            "topics": ["tech"],
-            "source_type": "blog",
-            "accessed_at": current_time
-        },
-        {
-            "title": "Title 4",
-            "text": "Another new text",
-            "link": "http://d.com",
-            "word_count": 250,
-            "token_count": 260,
-            "authors": ["Dana"],
-            "publish_date": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "country": "CA",
-            "topics": ["health"],
-            "source_type": "news",
-            "accessed_at": current_time
-        },
-    ]
+    data = []
+    
+    for i in range(10):
+        data.append({
+            "title": f"New Title {i}",
+            "text": f"This is new text content number {i} " * 12,
+            "link": f"http://newsite.com/{i}",
+            "word_count": 200 + i * 15,
+            "token_count": 240 + i * 18,
+            "authors": [f"NewAuthor{i}"],
+            "publish_date": current_time.strftime("%Y-%m-%d"),
+            "country": "US" if i % 2 == 0 else "CA",  # CA is new
+            "topics": ["tech", "ml"] if i % 2 == 0 else ["health"],
+            "source_type": "news"
+        })
+    
     return pd.DataFrame(data)
 
 
-class TestDataValidator:
-    """Test suite for the DataValidator class."""
-    
-    def test_validator_detects_types(
-        self,
-        sample_baseline_data: pd.DataFrame
-    ) -> None:
-        """Test that validator correctly identifies data types.
-        
-        Args:
-            sample_baseline_data: Fixture providing sample data.
-        """
-        validator = DataValidator()
-        issues = validator.validate_data_types(
-            sample_baseline_data,
-            dataset_name="Test Dataset"
-        )
-        
-        # There should be no type issues in this valid sample
-        assert issues == {}
-    
-    def test_validator_detects_missing_column(
-        self,
-        sample_baseline_data: pd.DataFrame
-    ) -> None:
-        """Test validator behavior with missing columns.
-        
-        Args:
-            sample_baseline_data: Fixture providing sample data.
-        """
-        df = sample_baseline_data.drop(columns=["title"])
-        validator = DataValidator()
-        issues = validator.validate_data_types(
-            df,
-            dataset_name="Test Dataset"
-        )
-        
-        # Missing column should not raise error in current validator
-        assert "title" not in issues
-
-
-class TestDriftDetector:
-    """Test suite for the DriftDetector class."""
-    
-    def test_drift_detector_numeric(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        sample_new_data: pd.DataFrame
-    ) -> None:
-        """Test drift detection for numeric features.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            sample_new_data: New data fixture for comparison.
-        """
-        detector = DriftDetector()
-        drift_info = detector.calculate_numerical_drift(
-            sample_baseline_data["word_count"],
-            sample_new_data["word_count"]
-        )
-        
-        assert drift_info is not None
-        assert "has_drift" in drift_info
-        assert "mean_shift" in drift_info
-        assert "baseline_mean" in drift_info
-        assert "new_mean" in drift_info
-    
-    def test_drift_detector_categorical(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        sample_new_data: pd.DataFrame
-    ) -> None:
-        """Test drift detection for categorical features.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            sample_new_data: New data fixture for comparison.
-        """
-        detector = DriftDetector()
-        drift_info = detector.calculate_categorical_drift(
-            sample_baseline_data["country"],
-            sample_new_data["country"]
-        )
-        
-        assert drift_info is not None
-        assert "has_drift" in drift_info
-        assert "new_categories" in drift_info
-        assert "missing_categories" in drift_info
-        
-        # CA should be detected as a new category
-        assert "CA" in drift_info["new_categories"]
-
-
 class TestDataQualityAnalyzer:
-    """Test suite for the main DataQualityAnalyzer class."""
-    
-    def test_data_quality_analyzer_baseline(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        tmp_path: Path
-    ) -> None:
-        """Test baseline analysis functionality.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            tmp_path: Pytest fixture providing temporary directory.
-        """
-        # Save temporary baseline file
+    """Test suite for DataQualityAnalyzer."""
+
+    def test_load_jsonl(
+        self, sample_baseline_data, tmp_path
+    ):
+        """Test JSONL loading."""
         baseline_file = tmp_path / "baseline.jsonl"
         sample_baseline_data.to_json(
             baseline_file,
             orient="records",
             lines=True
         )
-        
-        analyzer = DataQualityAnalyzer(is_baseline=True)
-        analyzer.BASELINE_FILE = str(baseline_file)
-        
-        results = analyzer.analyze_baseline()
-        
-        assert results is not None
-        assert results["is_baseline"] is True
-        assert "type_issues" in results
-        assert "total_records" in results
-        assert results["total_records"] == len(sample_baseline_data)
-    
-    def test_data_quality_analyzer_new_data(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        sample_new_data: pd.DataFrame,
-        tmp_path: Path
-    ) -> None:
-        """Test new data analysis with drift detection.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            sample_new_data: New data fixture.
-            tmp_path: Pytest fixture providing temporary directory.
-        """
-        baseline_file = tmp_path / "baseline.jsonl"
-        new_file = tmp_path / "new.jsonl"
-        
-        # Save test data to temporary files
-        sample_baseline_data.to_json(
-            baseline_file,
-            orient="records",
-            lines=True
-        )
-        sample_new_data.to_json(
-            new_file,
-            orient="records",
-            lines=True
-        )
-        
-        analyzer = DataQualityAnalyzer(is_baseline=False)
-        analyzer.BASELINE_FILE = str(baseline_file)
-        analyzer.NEW_DATA_FILE = str(new_file)
-        
-        # Pre-save baseline stats to simulate prior run
-        baseline_stats = {
-            "total_records": len(sample_baseline_data),
-            "train_records": len(sample_baseline_data),
-            "validation_records": 0,
-            "schema": analyzer.infer_schema(sample_baseline_data),
-            "type_issues": {},
-            "anomalies": {},
-            "validation": {},
-            "bias": {},
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        analyzer._save_baseline_stats(baseline_stats)
-        
-        results = analyzer.analyze_new_data()
-        
-        assert results is not None
-        assert results["is_baseline"] is False
-        assert "drift_results" in results
-        assert "total_records" in results
-        assert results["total_records"] == len(sample_new_data)
-    
-    def test_analyzer_with_empty_data(
-        self,
-        tmp_path: Path
-    ) -> None:
-        """Test analyzer behavior with empty datasets.
-        
-        Args:
-            tmp_path: Pytest fixture providing temporary directory.
-        """
-        # Create empty JSONL file
-        empty_file = tmp_path / "empty.jsonl"
-        empty_file.touch()
-        
-        analyzer = DataQualityAnalyzer(is_baseline=True)
-        analyzer.BASELINE_FILE = str(empty_file)
-        
-        results = analyzer.analyze_baseline()
-        
-        # Should handle empty file gracefully
-        assert results is None or results["total_records"] == 0
-    
-    def test_schema_inference(
-        self,
-        sample_baseline_data: pd.DataFrame
-    ) -> None:
-        """Test automatic schema inference.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-        """
-        analyzer = DataQualityAnalyzer(is_baseline=True)
-        schema = analyzer.infer_schema(sample_baseline_data)
-        
+
+        analyzer = DataQualityAnalyzer()
+        df = analyzer.load_jsonl(str(baseline_file))
+
+        assert len(df) == len(sample_baseline_data)
+        assert "link" in df.columns
+        assert "text" in df.columns
+
+    def test_split_data(self, sample_baseline_data):
+        """Test data splitting."""
+        analyzer = DataQualityAnalyzer()
+        train_df, val_df = analyzer.split_data(sample_baseline_data)
+
+        assert len(train_df) > 0
+        assert len(val_df) > 0
+        assert len(train_df) + len(val_df) == len(sample_baseline_data)
+
+    def test_infer_schema(self, sample_baseline_data):
+        """Test schema inference."""
+        analyzer = DataQualityAnalyzer()
+        schema = analyzer._infer_schema(sample_baseline_data)
+
         assert isinstance(schema, dict)
         assert "word_count" in schema
         assert schema["word_count"]["type"] == "int"
@@ -326,69 +114,47 @@ class TestDataQualityAnalyzer:
         assert schema["text"]["type"] == "str"
         assert "topics" in schema
         assert schema["topics"]["type"] == "list"
-    
-    def test_baseline_stats_persistence(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test saving and loading of baseline statistics.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            tmp_path: Pytest fixture providing temporary directory.
-            monkeypatch: Pytest fixture for patching.
-        """
-        # Change working directory to temp path for stats file
+
+    def test_baseline_analysis(
+        self, sample_baseline_data, tmp_path, monkeypatch
+    ):
+        """Test baseline analysis."""
         monkeypatch.chdir(tmp_path)
-        
+
+        baseline_file = tmp_path / "baseline.jsonl"
+        sample_baseline_data.to_json(
+            baseline_file,
+            orient="records",
+            lines=True
+        )
+
         analyzer = DataQualityAnalyzer(is_baseline=True)
-        
-        test_stats = {
-            "total_records": 100,
-            "train_records": 70,
-            "validation_records": 30,
-            "schema": {"test": "schema"},
-            "timestamp": "2024-01-01 00:00:00"
-        }
-        
-        # Save stats
-        analyzer._save_baseline_stats(test_stats)
-        
-        # Load stats
-        loaded_stats = analyzer._load_baseline_stats()
-        
-        assert loaded_stats is not None
-        assert loaded_stats["total_records"] == 100
-        assert loaded_stats["train_records"] == 70
-        assert loaded_stats["schema"] == {"test": "schema"}
+        analyzer.BASELINE_FILE = str(baseline_file)
+        analyzer.BASELINE_STATS_FILE = str(tmp_path / "baseline_stats.json")
 
+        # Should complete without errors
+        analyzer.analyze_baseline()
 
-class TestIntegrationFlow:
-    """End-to-end integration tests for the complete pipeline."""
-    
-    def test_complete_pipeline_flow(
-        self,
-        sample_baseline_data: pd.DataFrame,
-        sample_new_data: pd.DataFrame,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test the complete analysis pipeline from baseline to drift.
-        
-        Args:
-            sample_baseline_data: Baseline data fixture.
-            sample_new_data: New data fixture.
-            tmp_path: Pytest fixture providing temporary directory.
-            monkeypatch: Pytest fixture for patching.
-        """
-        # Setup test environment
+        # Check that baseline stats were saved
+        assert os.path.exists(analyzer.BASELINE_STATS_FILE)
+
+        # Load and verify stats
+        with open(analyzer.BASELINE_STATS_FILE, 'r') as f:
+            saved_stats = json.load(f)
+
+        assert 'stats' in saved_stats
+        assert 'schema' in saved_stats
+        assert len(saved_stats['stats']) > 0
+
+    def test_new_data_analysis(
+        self, sample_baseline_data, sample_new_data, tmp_path, monkeypatch
+    ):
+        """Test new data analysis."""
         monkeypatch.chdir(tmp_path)
-        
+
         baseline_file = tmp_path / "baseline.jsonl"
         new_file = tmp_path / "new.jsonl"
-        
+
         sample_baseline_data.to_json(
             baseline_file,
             orient="records",
@@ -399,26 +165,26 @@ class TestIntegrationFlow:
             orient="records",
             lines=True
         )
-        
-        # Phase 1: Baseline analysis
-        baseline_analyzer = DataQualityAnalyzer(is_baseline=True)
-        baseline_analyzer.BASELINE_FILE = str(baseline_file)
-        baseline_results = baseline_analyzer.analyze_baseline()
-        
-        assert baseline_results is not None
-        assert baseline_results["is_baseline"] is True
-        
-        # Phase 2: New data analysis
-        new_analyzer = DataQualityAnalyzer(is_baseline=False)
-        new_analyzer.BASELINE_FILE = str(baseline_file)
-        new_analyzer.NEW_DATA_FILE = str(new_file)
-        new_results = new_analyzer.analyze_new_data()
-        
-        assert new_results is not None
-        assert new_results["is_baseline"] is False
-        assert "drift_results" in new_results
-        
-        # Check drift was detected for country (CA is new)
-        if "country" in new_results["drift_results"]:
-            country_drift = new_results["drift_results"]["country"]
-            assert "CA" in country_drift.get("new_categories", [])
+
+        # First run baseline
+        analyzer_baseline = DataQualityAnalyzer(is_baseline=True)
+        analyzer_baseline.BASELINE_FILE = str(baseline_file)
+        analyzer_baseline.BASELINE_STATS_FILE = str(
+            tmp_path / "baseline_stats.json"
+        )
+        analyzer_baseline.analyze_baseline()
+
+        # Then run new data analysis
+        analyzer_new = DataQualityAnalyzer(is_baseline=False)
+        analyzer_new.BASELINE_FILE = str(baseline_file)
+        analyzer_new.NEW_DATA_FILE = str(new_file)
+        analyzer_new.BASELINE_STATS_FILE = str(
+            tmp_path / "baseline_stats.json"
+        )
+
+        # Should complete without errors
+        analyzer_new.analyze_new_data()
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])

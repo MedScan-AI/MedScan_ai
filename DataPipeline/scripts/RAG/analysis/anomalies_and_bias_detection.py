@@ -1,8 +1,7 @@
-"""Anomaly and bias detection module"""
+"""Simple TFDV-style anomaly detection using baseline statistics."""
 
 import logging
-from typing import Dict, List, Optional, Any
-
+from typing import Dict, List
 import pandas as pd
 import numpy as np
 
@@ -10,226 +9,362 @@ logger = logging.getLogger(__name__)
 
 
 class AnomalyDetector:
-    """Detect anomalies and biases using pandas only."""
-    
-    LOW_WORD_THRESHOLD = 100
-    HIGH_WORD_THRESHOLD = 5000
-    
-    def detect_all_anomalies(
-        self, 
-        df: pd.DataFrame, 
-        dataset_name: str
-    ) -> Dict:
-        """Detect anomalies in a DataFrame using simple rules.
-        
-        Args:
-            df: DataFrame to analyze
-            dataset_name: Name of the dataset for logging
-            
-        Returns:
-            Dictionary containing anomaly information
-        """
-        anomalies = []
-        
-        # Word count anomalies
-        if 'word_count' in df.columns:
-            for idx in df.index:
-                value = df.at[idx, 'word_count']
-                try:
-                    if pd.isna(value) or np.isinf(value):
-                        reason = 'Word count is NaN or infinite'
-                    elif value < self.LOW_WORD_THRESHOLD or value > self.HIGH_WORD_THRESHOLD:
-                        reason = 'Word count outside expected range (100–5000)'
-                    else:
-                        continue
-                except (TypeError, ValueError):
-                    reason = 'Invalid numeric type for word count'
+    """Detect anomalies by comparing against baseline statistics."""
 
-                anomalies.append({
-                    'type': 'word_count_out_of_bounds',
-                    'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
-                    'word_count': value,
-                    'reason': reason,
-                    'column': 'word_count',
-                    'index': idx,
-                    'value': value
+    def __init__(self):
+        """Initialize with hardcoded word_count thresholds."""
+        self.min_word_count = 100
+        self.max_word_count = 10000
+
+    def compute_baseline_stats(self, df: pd.DataFrame) -> Dict:
+        """Compute baseline statistics for each column.
+
+        Args:
+            df: Training DataFrame
+
+        Returns:
+            Dict with stats for each column (min, max, lengths, null %)
+        """
+        stats = {}
+
+        for col in df.columns:
+            if col == 'error':
+                continue
+
+            col_stats = {}
+
+            # Numeric columns
+            if pd.api.types.is_numeric_dtype(df[col]):
+                non_null = df[col].dropna()
+                if len(non_null) > 0:
+                    col_stats = {
+                        "type": "numeric",
+                        "min": float(non_null.min()),
+                        "max": float(non_null.max()),
+                        "mean": float(non_null.mean()),
+                        "std": float(non_null.std(ddof=0)),
+                        "null_pct": float((df[col].isna().sum() / len(df)) * 100)
+                    }
+
+            # Datetime columns
+            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                non_null = df[col].dropna()
+                if len(non_null) > 0:
+                    col_stats = {
+                        "type": "datetime",
+                        "min": str(non_null.min()),
+                        "max": str(non_null.max()),
+                        "null_pct": float(
+                            (df[col].isna().sum() / len(df)) * 100
+                        )
+                    }
+
+            # Object columns
+            elif pd.api.types.is_object_dtype(df[col]):
+                non_null = df[col].dropna()
+                if len(non_null) > 0:
+                    sample = non_null.iloc[0]
+
+                    # List columns
+                    if isinstance(sample, list):
+                        list_lengths = [
+                            len(v) for v in non_null if isinstance(v, list)
+                        ]
+                        col_stats = {
+                            "type": "list",
+                            "min_len": int(min(list_lengths))
+                            if list_lengths else 0,
+                            "max_len": int(max(list_lengths))
+                            if list_lengths else 0,
+                            "avg_len": float(np.mean(list_lengths))
+                            if list_lengths else 0,
+                            "null_pct": float(
+                                (df[col].isna().sum() / len(df)) * 100
+                            )
+                        }
+
+                    # Text columns
+                    else:
+                        str_lengths = [len(str(v)) for v in non_null]
+                        col_stats = {
+                            "type": "text",
+                            "min_len": int(min(str_lengths))
+                            if str_lengths else 0,
+                            "max_len": int(max(str_lengths))
+                            if str_lengths else 0,
+                            "avg_len": float(np.mean(str_lengths))
+                            if str_lengths else 0,
+                            "null_pct": float(
+                                (df[col].isna().sum() / len(df)) * 100
+                            )
+                        }
+
+            if col_stats:
+                stats[col] = col_stats
+
+        return stats
+
+    def detect_anomalous_records(
+        self,
+        df: pd.DataFrame,
+        baseline_stats: Dict,
+        dataset_name: str
+    ) -> List[Dict]:
+        """Find records that violate baseline statistics.
+
+        Args:
+            df: DataFrame to check (validation or new data)
+            baseline_stats: Stats from training data
+            dataset_name: Name for logging
+
+        Returns:
+            List of anomalous records with violations
+        """
+        anomalous_records = []
+
+        for idx in df.index:
+            violations = []
+            link = df.at[idx, 'link'] if 'link' in df.columns else 'N/A'
+
+            # Check each column against baseline
+            for col, stats in baseline_stats.items():
+                if col not in df.columns:
+                    continue
+
+                value = df.at[idx, col]
+                col_type = stats.get('type')
+
+                # Numeric columns
+                if col_type == 'numeric':
+                    if pd.notna(value):
+                        if value < stats['min']:
+                            violations.append(
+                                f"{col}={value:.2f} < min={stats['min']:.2f}"
+                            )
+                        elif value > stats['max']:
+                            violations.append(
+                                f"{col}={value:.2f} > max={stats['max']:.2f}"
+                            )
+                    else:
+                        if stats['null_pct'] < 5.0:
+                            violations.append(
+                                f"{col} is null "
+                                f"(baseline {stats['null_pct']:.1f}% nulls)"
+                            )
+
+                # Text columns
+                elif col_type == 'text':
+                    is_null = (
+                        value is None or
+                        (isinstance(value, float) and pd.isna(value))
+                    )
+
+                    if not is_null:
+                        length = len(str(value))
+                        if length < stats['min_len'] * 0.5:
+                            violations.append(
+                                f"{col} length={length} < "
+                                f"min={stats['min_len']}"
+                            )
+                        elif length > stats['max_len'] * 2:
+                            violations.append(
+                                f"{col} length={length} > "
+                                f"max={stats['max_len']}"
+                            )
+                    else:
+                        if stats['null_pct'] < 5.0:
+                            violations.append(
+                                f"{col} is null "
+                                f"(baseline {stats['null_pct']:.1f}% nulls)"
+                            )
+
+                # List columns
+                elif col_type == 'list':
+                    if isinstance(value, list):
+                        length = len(value)
+                        if (stats['max_len'] > 0 and
+                                length > stats['max_len'] * 2):
+                            violations.append(
+                                f"{col} has {length} items > "
+                                f"max={stats['max_len']}"
+                            )
+                    else:
+                        is_null = (
+                            value is None or
+                            (isinstance(value, float) and pd.isna(value))
+                        )
+                        if is_null and stats['null_pct'] < 5.0:
+                            violations.append(
+                                f"{col} is null "
+                                f"(baseline {stats['null_pct']:.1f}% nulls)"
+                            )
+
+            # Check hardcoded word_count thresholds
+            if 'word_count' in df.columns:
+                word_count = df.at[idx, 'word_count']
+                if pd.notna(word_count):
+                    if word_count < self.min_word_count:
+                        violations.append(
+                            f"word_count={word_count} < "
+                            f"min_threshold={self.min_word_count}"
+                        )
+                    elif word_count > self.max_word_count:
+                        violations.append(
+                            f"word_count={word_count} > "
+                            f"max_threshold={self.max_word_count}"
+                        )
+
+            # Add record if it has violations
+            if violations:
+                anomalous_records.append({
+                    'index': int(idx),
+                    'link': link,
+                    'violations': violations
                 })
 
-        # Text anomalies
-        if 'text' in df.columns:
-            for idx in df.index:
-                value = df.at[idx, 'text']
-                if value is None or (isinstance(value, float) and pd.isna(value)) or (
-                    isinstance(value, str) and value.strip() == ""
-                ):
-                    anomalies.append({
-                        'type': 'text_null_or_blank',
-                        'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
-                        'word_count': df.at[idx, 'word_count'] if 'word_count' in df.columns else 'N/A',
-                        'reason': 'Text is null or blank',
-                        'column': 'text',
-                        'index': idx,
-                        'value': value
-                    })
+        logger.info(
+            f"{dataset_name}: Found {len(anomalous_records)} "
+            f"anomalous records"
+        )
+        return anomalous_records
 
-        # Topics anomalies
-        if 'topics' in df.columns:
-            for idx in df.index:
-                value = df.at[idx, 'topics']
-                if not self._is_valid_topics_value(value):
-                    anomalies.append({
-                        'type': 'topics_not_list_or_null',
-                        'link': df.at[idx, 'link'] if 'link' in df.columns else 'N/A',
-                        'word_count': df.at[idx, 'word_count'] if 'word_count' in df.columns else 'N/A',
-                        'reason': 'Topics field is not a list or is null',
-                        'column': 'topics',
-                        'index': idx,
-                        'value': value
-                    })
+    def detect_completeness_issues(
+        self,
+        df: pd.DataFrame,
+        dataset_name: str
+    ) -> Dict:
+        """Detect missing/empty critical fields (topics, text, title).
 
-        return {
-            'dataset': dataset_name,
-            'text_anomalies': anomalies,
-            'total_anomalies': len(anomalies)
+        Args:
+            df: DataFrame to check
+            dataset_name: Name for logging
+
+        Returns:
+            Dict with lists of records for each issue type
+        """
+        issues = {}
+
+        # Only check: topics, text, title
+        checks = {
+            'topics': 'MISSING_TOPICS',
+            'text': 'EMPTY_TEXT',
+            'title': 'MISSING_TITLE'
         }
-    
-    def _is_valid_topics_value(self, value: Any) -> bool:
-        """Check if a topics value is valid (list or array).
-        
-        Args:
-            value: The value to check
-            
-        Returns:
-            True if value is a valid list/array, False otherwise
-        """
-        # Lists and arrays are valid (even if empty)
-        if isinstance(value, (list, np.ndarray)):
-            return True
-        
-        # None is invalid
-        if value is None:
-            return False
-        
-        # NaN is invalid
-        try:
-            if isinstance(value, float) and pd.isna(value):
-                return False
-        except:
-            pass
-        
-        # Everything else is invalid
-        return False
-    
-    def remove_detected_anomalies(
-        self, 
-        df: pd.DataFrame, 
-        anomalies: Dict
-    ) -> pd.DataFrame:
-        """Remove rows flagged as anomalies.
-        
-        Args:
-            df: Original DataFrame
-            anomalies: Dictionary containing anomaly information
-            
-        Returns:
-            DataFrame with anomalous rows removed
-        """
-        if not anomalies or 'rows' not in anomalies:
-            return df
-        
-        return df.drop(index=anomalies['rows']).reset_index(drop=True)
-    
+
+        for col, issue_type in checks.items():
+            if col not in df.columns:
+                continue
+
+            missing = []
+            for idx in df.index:
+                value = df.at[idx, col]
+                link = (
+                    df.at[idx, 'link'] if 'link' in df.columns else 'N/A'
+                )
+
+                is_null = (
+                    value is None or
+                    (isinstance(value, float) and pd.isna(value))
+                )
+
+                if is_null:
+                    missing.append({
+                        'index': int(idx),
+                        'link': link,
+                        'reason': f'{col} is null'
+                    })
+                elif isinstance(value, str) and len(value.strip()) == 0:
+                    missing.append({
+                        'index': int(idx),
+                        'link': link,
+                        'reason': f'{col} is empty'
+                    })
+                elif isinstance(value, list) and len(value) == 0:
+                    missing.append({
+                        'index': int(idx),
+                        'link': link,
+                        'reason': f'{col} is empty list'
+                    })
+
+            if missing:
+                issues[issue_type] = missing
+
+        return issues
+
     def detect_bias(self, df: pd.DataFrame) -> Dict:
-        """Simple bias detection using pandas.
-        
+        """Detect bias in the data.
+
         Args:
-            df: DataFrame to analyze for bias
-            
+            df: DataFrame to analyze
+
         Returns:
-            Dictionary containing bias metrics
+            Dict containing bias metrics
         """
         bias = {}
-        
-        # Country bias detection
+
+        # Country bias
         if 'country' in df.columns:
             counts = df['country'].value_counts(normalize=True) * 100
             if not counts.empty:
                 bias['country_bias'] = {
                     'dominant': counts.idxmax(),
-                    'percentage': counts.iloc[0]
+                    'percentage': float(counts.iloc[0])
                 }
-        
-        # Source type bias detection
+
+        # Source type bias
         if 'source_type' in df.columns:
             counts = df['source_type'].value_counts(normalize=True) * 100
             if not counts.empty:
                 bias['source_bias'] = {
                     'dominant': counts.idxmax(),
-                    'percentage': counts.iloc[0]
+                    'percentage': float(counts.iloc[0])
                 }
-        
-        # Topics analysis
+
+        # Topics
         if 'topics' in df.columns:
             all_topics = []
-            
             for idx in df.index:
                 value = df.at[idx, 'topics']
-                
-                # Skip None values
-                if value is None:
-                    continue
-                
-                # Handle lists
                 if isinstance(value, list):
                     all_topics.extend(value)
-                # Handle numpy arrays
-                elif isinstance(value, np.ndarray):
-                    all_topics.extend(value.tolist())
-                # Skip NaN values
-                elif isinstance(value, float):
-                    try:
-                        if pd.isna(value):
-                            continue
-                    except:
-                        continue
-                    # If it's a non-NaN float, that's weird but add it
-                    all_topics.append(value)
-                else:
-                    # For any other single value
-                    all_topics.append(value)
-            
+
             if all_topics:
                 topic_series = pd.Series(all_topics)
                 bias['top_topics'] = (
-                    topic_series.value_counts()
-                    .head(5)
-                    .to_dict()
+                    topic_series.value_counts().head(5).to_dict()
                 )
-        
+
         # Temporal distribution
         if 'publish_date' in df.columns:
-            valid_dates = pd.to_datetime(
-                df['publish_date'], 
-                errors='coerce'
-            ).dropna()
-            
-            if not valid_dates.empty:
-                now = pd.Timestamp.now()
-                days_diff = (now - valid_dates).dt.days
-                
-                bias['temporal_distribution'] = {
-                    'total_with_dates': len(valid_dates),
-                    'last_30_days': int((days_diff <= 30).sum()),
-                    'last_90_days': int((days_diff <= 90).sum()),
-                    'last_year': int((days_diff <= 365).sum()),
-                    'older': int((days_diff > 365).sum())
-                }
-                
-                # Check for temporal bias
-                recent_pct = (days_diff <= 30).sum() / len(valid_dates) * 100
-                if recent_pct > 80:
-                    bias['temporal_bias'] = {
-                        'recent_percentage': float(recent_pct)
+            try:
+                # Parse and clean dates
+                date_series = pd.to_datetime(
+                    df['publish_date'],
+                    errors='coerce'
+                )
+                valid_dates = date_series.dropna()
+
+                if len(valid_dates) > 0:
+                    # Remove timezone if present
+                    if valid_dates.dt.tz is not None:
+                        valid_dates = valid_dates.dt.tz_localize(None)
+                    
+                    # Get current time as timezone-naive
+                    now = pd.Timestamp.now()
+                    
+                    # Calculate days difference
+                    days_diff = (now - valid_dates).dt.days
+
+                    bias['temporal_distribution'] = {
+                        'total_with_dates': int(len(valid_dates)),
+                        'last_30_days': int((days_diff <= 30).sum()),
+                        'last_90_days': int((days_diff <= 90).sum()),
+                        'last_year': int((days_diff <= 365).sum()),
+                        'older': int((days_diff > 365).sum())
                     }
-        
+            except Exception as e:
+                logger.debug(
+                    f"Skipping temporal distribution: {e}"
+                )
+
         return bias

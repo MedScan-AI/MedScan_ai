@@ -118,7 +118,6 @@ class TestNumericalDrift:
         assert 'baseline_std' in drift, "Missing 'baseline_std' key"
         assert 'new_std' in drift, "Missing 'new_std' key"
         assert 'has_drift' in drift, "Missing 'has_drift' key"
-        assert 'severity' in drift, "Missing 'severity' key"
         assert 'percent_mean_change' in drift, "Missing 'percent_mean_change' key"
 
     
@@ -142,7 +141,6 @@ class TestNumericalDrift:
         drift = detector.calculate_numerical_drift(sample_data['word_count'], high_drift_data['word_count'])
         
         assert drift['has_drift'] == True
-        assert drift['severity'] in ['HIGH', 'MEDIUM']
 
     def test_numerical_drift_no_drift(self, sample_data):
         """Test numerical drift when data is identical."""
