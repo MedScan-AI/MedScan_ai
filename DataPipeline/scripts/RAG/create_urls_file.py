@@ -1,15 +1,11 @@
-"""
-This file is for LOCAL TESTING ONLY.
-"""
+"""Creates urls.txt in GCS."""
+import os
+from google.cloud import storage
+from pathlib import Path
 
-import asyncio
-import sys
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(Path.home() / "gcp-service-account.json")
 
-from .chunking import main as chunker
-from .embedding import main as embedder
-from .indexing import main as indexer
-from .scraper import main as scraper
-
+# All URLs
 urls = [
     "https://www.cdc.gov/tb/treatment/index.html",
     "https://www.mayoclinic.org/diseases-conditions/lung-cancer/diagnosis-treatment/drc-20374627",
@@ -67,35 +63,24 @@ urls = [
     "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
     "https://www.maxhealthcare.in/our-specialities/cancer-care-oncology/conditions-treatments/lung-cancer?utm_source=chatgpt.com",
     "https://pmc.ncbi.nlm.nih.gov/articles/PMC9082420/",
-    "https://www.medicalnewstoday.com/articles/323701",
-    "https://go2.org/what-is-lung-cancer/types-of-lung-cancer/",
-    "https://www.uptodate.com/contents/overview-of-the-initial-treatment-and-prognosis-of-lung-cancer",
-    "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
-    "https://www.sciencedirect.com/topics/pharmacology-toxicology-and-pharmaceutical-science/tuberculosis",
-    "https://www.cdc.gov/infection-control/hcp/core-practices/index.html",
-    "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/"
+    "https://www.medicalnewstoday.com/articles/323701"
 ]
 
-try:
-    asyncio.run(scraper(urls))
-except Exception as e:
-    print(e)
-    sys.exit(1)
 
-try:
-    chunker()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+# Create local file
+local_file = Path("urls.txt")
+with open(local_file, 'w') as f:
+    for url in urls:
+        f.write(url + '\n')
 
-try:
-    embedder()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+# Upload to GCS
+client = storage.Client(project="medscanai-476203")
+bucket = client.bucket("medscan-rag-data")
+blob = bucket.blob("RAG/config/urls.txt")
+blob.upload_from_filename(str(local_file))
 
-try:
-    indexer()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+print(f"✅ Uploaded {len(urls)} URLs to GCS")
+print(f"   gs://medscan-rag-data/RAG/config/urls.txt")
+
+# Cleanup
+local_file.unlink()

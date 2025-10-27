@@ -1,42 +1,59 @@
-#version: "3.8"
-
-x-airflow-common:
-  &airflow-common
+x-airflow-common: &airflow-common
   build:
     context: ..
     dockerfile: airflow/Dockerfile
   env_file:
     - ./.env
   environment:
+    # Airflow core
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
-    PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline
-    MLFLOW_TRACKING_URI: 'file:///tmp/mlflow'
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: "true"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
 
-    # Email configuration 
-    AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST}
+    # Python path
+    PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
+
+    # MLflow
+    MLFLOW_TRACKING_URI: "file:///tmp/mlflow"
+
+    # Email configuration
+    AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
     AIRFLOW__SMTP__SMTP_STARTTLS: "True"
     AIRFLOW__SMTP__SMTP_SSL: "False"
-    AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER}
-    AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD}
-    AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT}
-    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM}
+    AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER:-noreply@medscan.ai}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD:-dummy}
+    AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT:-587}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM:-noreply@medscan.ai}
+
+    # GCP/GCS for RAG
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-service-account.json
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID:-medscanai-476203}
+    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-medscan-rag-data}
 
   volumes:
+    # Airflow directories
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+
+    # Project directories
     - ../DataPipeline:/opt/airflow/DataPipeline
-    - ../requirements.txt:/opt/airflow/requirements.txt 
+    - ../requirements.txt:/opt/airflow/requirements.txt
     - ../scripts:/opt/airflow/scripts
     - ../config:/opt/airflow/config
     - ../data:/opt/airflow/data
+
+    # GCP credentials
+    - ~/gcp-service-account.json:/opt/airflow/gcp-service-account.json:ro
+
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
   depends_on:
-    - postgres
+    postgres:
+      condition: service_healthy
 
 services:
   postgres:
@@ -52,6 +69,9 @@ services:
       start_period: 10s
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+    restart: always
+    ports:
+      - "5432:5432"
 
   airflow-init:
     <<: *airflow-common
@@ -59,28 +79,40 @@ services:
     command:
       - -c
       - |
-        airflow db init
+        # Wait for postgres
+        while ! pg_isready -h postgres -U airflow 2>/dev/null; do
+          sleep 1
+        done
+
+        echo "✓ Postgres ready"
+        echo ""
+
+        # Initialize database
+        airflow db migrate 2>/dev/null || airflow db init
+
+        # Create user (ignore if exists)
         airflow users create \
-          --username ${AIRFLOW_USERNAME} \
-          --password ${AIRFLOW_PASSWORD} \
-          --firstname ${AIRFLOW_FIRSTNAME} \
-          --lastname ${AIRFLOW_LASTNAME} \
+          --username ${AIRFLOW_USERNAME:-airflow} \
+          --password ${AIRFLOW_PASSWORD:-airflow123} \
+          --firstname ${AIRFLOW_FIRSTNAME:-Admin} \
+          --lastname ${AIRFLOW_LASTNAME:-User} \
           --role Admin \
-          --email ${AIRFLOW_EMAIL}
+          --email ${AIRFLOW_EMAIL:-admin@medscan.ai} 2>/dev/null || echo "User already exists"
+
+        echo "Access Airflow at: http://localhost:8080"
+        echo "Login: ${AIRFLOW_USERNAME:-airflow} / ${AIRFLOW_PASSWORD:-airflow123}"
+        echo ""
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
-      PYTHONPATH: /opt/airflow:/opt/airflow/scripts
-      AIRFLOW_USERNAME: ${AIRFLOW_USERNAME}
-      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD}
-      AIRFLOW_FIRSTNAME: ${AIRFLOW_FIRSTNAME}
-      AIRFLOW_LASTNAME: ${AIRFLOW_LASTNAME}
-      AIRFLOW_EMAIL: ${AIRFLOW_EMAIL}
+      PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   webserver:
     <<: *airflow-common
@@ -92,13 +124,34 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 
   scheduler:
     <<: *airflow-common
     command: scheduler
     restart: always
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "airflow",
+          "jobs",
+          "check",
+          "--job-type",
+          "SchedulerJob",
+          "--hostname",
+          "$${HOSTNAME}",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres-db-volume:
