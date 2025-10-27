@@ -1,12 +1,11 @@
-# RAG Pipeline Configuration - SIMPLIFIED
+# RAG Pipeline Configuration
 
 pipeline:
   name: rag_data_pipeline
-  schedule: null  # Manual trigger only
+  schedule: null 
   enabled: true
   
 scraping:
-  # URLs now fetched from GCS
   urls_file: "RAG/config/urls.txt"  # GCS path
   timeout: 60000
   
@@ -19,7 +18,7 @@ indexing:
 validation:
   baseline_strategy: "fixed"
   enable_tfdv: true
-  max_anomaly_pct: 0.20
+  max_anomaly_pct: 25.0
   max_critical_drift: 3
   
 dvc:

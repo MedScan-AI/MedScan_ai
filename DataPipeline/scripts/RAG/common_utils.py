@@ -1,4 +1,4 @@
-"""Common utilities for RAG pipeline — hardened against hangs and supports versioned uploads."""
+"""Common utilities for RAG pipeline."""
 import logging
 from pathlib import Path
 from google.cloud import storage
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class GCSManager:
-    """Manage GCS operations (timeout-safe) for RAG pipeline."""
+    """Manage GCS operations for RAG pipeline."""
 
     def __init__(self, bucket_name: str, credentials_path: str = None):
         if credentials_path and os.path.exists(credentials_path):
@@ -22,7 +22,7 @@ class GCSManager:
         self.bucket_name = bucket_name
         logger.info(f"GCSManager initialized for bucket: {bucket_name}")
 
-    # ----------------------------------------------------------------------
+
     def blob_exists(self, gcs_path: str, timeout: int = 10) -> bool:
         """Check if blob exists with timeout + error handling."""
         start = time.time()
@@ -45,7 +45,7 @@ class GCSManager:
         finally:
             socket.setdefaulttimeout(None)
 
-    # ----------------------------------------------------------------------
+
     def download_file(self, gcs_path: str, local_path: str, timeout: int = 30) -> bool:
         """Download file from GCS with timeout."""
         try:
@@ -72,7 +72,7 @@ class GCSManager:
         finally:
             socket.setdefaulttimeout(None)
 
-    # ----------------------------------------------------------------------
+
     def upload_file(self, local_path: str, gcs_path: str) -> bool:
         """Upload file to GCS."""
         try:
@@ -85,7 +85,7 @@ class GCSManager:
             logger.error(f"Upload failed: {e}")
             return False
 
-    # ----------------------------------------------------------------------
+
     def list_blobs(self, prefix: str) -> list:
         """List blobs with prefix."""
         try:
@@ -95,7 +95,7 @@ class GCSManager:
             logger.error(f"List failed for prefix={prefix}: {e}")
             return []
 
-    # ----------------------------------------------------------------------
+
     def get_latest_version(self, prefix: str, pattern: str = "v") -> int:
         """Get latest version number."""
         try:
@@ -114,7 +114,6 @@ class GCSManager:
             return 0
 
 
-# --------------------------------------------------------------------------
 def upload_with_versioning(
     gcs_manager: GCSManager,
     local_file: str,

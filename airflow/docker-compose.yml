@@ -79,13 +79,8 @@ services:
     command:
       - -c
       - |
-        echo "=========================================="
-        echo "Initializing Airflow Database"
-        echo "=========================================="
-
         # Wait for postgres
         while ! pg_isready -h postgres -U airflow 2>/dev/null; do
-          echo "Waiting for postgres..."
           sleep 1
         done
 
@@ -104,11 +99,6 @@ services:
           --role Admin \
           --email ${AIRFLOW_EMAIL:-admin@medscan.ai} 2>/dev/null || echo "User already exists"
 
-        echo ""
-        echo "=========================================="
-        echo "✓ Airflow Initialized Successfully"
-        echo "=========================================="
-        echo ""
         echo "Access Airflow at: http://localhost:8080"
         echo "Login: ${AIRFLOW_USERNAME:-airflow} / ${AIRFLOW_PASSWORD:-airflow123}"
         echo ""

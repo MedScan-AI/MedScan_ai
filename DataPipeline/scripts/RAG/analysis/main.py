@@ -1,4 +1,4 @@
-"""Simple data quality analysis - TFDV style."""
+"""Data quality analysis - TFDV style."""
 
 import json
 import logging
@@ -37,12 +37,7 @@ class DataQualityAnalyzer:
     TRAIN_SPLIT_RATIO = 0.7
 
     def __init__(self, gcs_manager=None, is_baseline: bool = True):
-        """Initialize analyzer.
-        
-        Args:
-            gcs_manager: GCSManager instance for downloading/uploading
-            is_baseline: Whether this is baseline generation
-        """
+        """Initialize analyzer."""
         self.validator = DataValidator()
         self.anomaly_detector = AnomalyDetector()
         self.drift_detector = DriftDetector()
@@ -86,15 +81,7 @@ class DataQualityAnalyzer:
         return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
 
     def generate_baseline_stats(self, baseline_df: pd.DataFrame) -> Dict:
-        """Generate and save baseline statistics.
-        
-        Args:
-            baseline_df: Baseline DataFrame
-            
-        Returns:
-            Dictionary with stats and schema
-        """
-        print("📊 Computing baseline statistics...")
+        """Generate and save baseline statistics."""
         
         train_df, val_df = self.split_data(baseline_df)
         print(f"Training: {len(train_df)} | Validation: {len(val_df)}")
@@ -122,27 +109,18 @@ class DataQualityAnalyzer:
         with open(self.LOCAL_STATS, 'w') as f:
             json.dump(baseline_data, f, indent=2, default=str)
         
-        print(f"✅ Stats saved to {self.LOCAL_STATS}")
+        print(f"Stats saved to {self.LOCAL_STATS}")
         
         # Upload to GCS if manager available
         if self.gcs:
             self.gcs.upload_file(str(self.LOCAL_STATS), self.GCS_BASELINE_STATS_PATH)
-            print(f"✅ Stats uploaded to GCS: {self.GCS_BASELINE_STATS_PATH}")
-        
+            
         return baseline_data
 
     def validate_against_baseline(self, new_df: pd.DataFrame) -> Dict:
-        """Validate new data against baseline.
-        
-        Args:
-            new_df: New data DataFrame
-            
-        Returns:
-            Validation results dictionary
-        """
+        """Validate new data against baseline."""
         # Download baseline stats if not present
         if not self.LOCAL_STATS.exists() and self.gcs:
-            print("📥 Downloading baseline stats from GCS...")
             success = self.gcs.download_file(
                 self.GCS_BASELINE_STATS_PATH, 
                 str(self.LOCAL_STATS)
@@ -164,16 +142,12 @@ class DataQualityAnalyzer:
         baseline_stats = baseline_data['stats']
         schema = baseline_data['schema']
         
-        print(f"Loaded baseline stats for {len(baseline_stats)} columns")
-        print()
-        
         # Schema validation
-        print("SCHEMA VALIDATION")
         schema_val = self.validator.validate_schema_completeness(new_df, schema)
         if not schema_val.get('has_issues'):
-            print("✅ Schema matches baseline")
+            print("Schema matches baseline")
         else:
-            print("⚠️ Schema issues detected:")
+            print("Schema issues detected:")
             if schema_val.get('missing_columns'):
                 print(f"  Missing: {', '.join(schema_val['missing_columns'])}")
             if schema_val.get('extra_columns'):
@@ -184,11 +158,11 @@ class DataQualityAnalyzer:
         print("DATA TYPE VALIDATION")
         type_issues = self.validator.validate_data_types(new_df, "New Data", schema)
         if type_issues:
-            print("⚠️ Type issues found:")
+            print("Type issues found:")
             for col, issue in type_issues.items():
                 print(f"  {col}: {issue}")
         else:
-            print("✅ No type issues")
+            print("No type issues")
         print()
         
         # Anomaly detection
@@ -216,7 +190,6 @@ class DataQualityAnalyzer:
         # Drift detection (need baseline data)
         print("DRIFT DETECTION")
         if self.gcs and self.gcs.blob_exists(self.GCS_BASELINE_PATH):
-            print("📥 Downloading baseline data for drift comparison...")
             self.gcs.download_file(self.GCS_BASELINE_PATH, str(self.LOCAL_BASELINE))
             baseline_df = self.load_jsonl(self.LOCAL_BASELINE)
             train_df, _ = self.split_data(baseline_df)
@@ -225,7 +198,7 @@ class DataQualityAnalyzer:
             drift_features = [f for f, d in drift_results.items() if d and d.get('has_drift')]
             print(f"Drift detected in {len(drift_features)} features")
         else:
-            print("⚠️ Baseline data not available for drift detection")
+            print("Baseline data not available for drift detection")
             drift_results = {}
         print()
         

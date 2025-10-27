@@ -1,7 +1,5 @@
 """
-WARNING: This file is for LOCAL TESTING ONLY.
-Do NOT use this in Airflow DAG.
-Use individual modules (scraper, chunking, embedding, indexing) directly in DAG tasks.
+This file is for LOCAL TESTING ONLY.
 """
 
 import asyncio

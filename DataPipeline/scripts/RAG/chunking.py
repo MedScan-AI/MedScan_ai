@@ -1,7 +1,6 @@
 """Chunking module for RAG pipeline."""
 import json
 import logging
-import os
 import re
 import sys
 from datetime import datetime
@@ -250,48 +249,70 @@ class RAGChunker:
             List of dictionaries with metadata and content chunks
         """
         try:
-            # Step 1 & 6: Extract metadata
+            # Step 1: Extract content and document title
             content_body = record.get('markdown_text', record.get('text', ''))
-            excluded_keys = ['markdown_title', 'markdown_text', 'text', 'word_count', 'token_count']
-            metadata = {k: v for k,v in record.items() if k not in excluded_keys}
+            
+            # Try to get the best title
+            doc_title = (
+                record.get('markdown_title') or 
+                record.get('title') or 
+                'Untitled'
+            )
+            
             doc_link = record.get('link', 'N/A')
-            if content_body == "":
+            
+            # Step 2: Extract metadata (exclude text fields to avoid duplication)
+            excluded_keys = {
+                'markdown_title', 'markdown_text', 'text', 
+                'word_count', 'token_count', 'title'
+            }
+            metadata = {k: v for k, v in record.items() if k not in excluded_keys}
+            
+            # Validate we have content
+            if not content_body or content_body.strip() == "":
                 logger.error(f"No text found for {doc_link}")
                 return []
             
-            # Step 2: Check if headers exist
+            # Step 3: Check if headers exist
             has_headers = self.has_headers(content_body)
             
-            # Step 3: Add headers if missing
+            # Step 4: Add headers if missing
             if not has_headers:
                 logger.info(f"Adding headers to: {doc_link}")
                 content_body = self.detector.process_markdown(content_body)
             else:
                 logger.info(f"  ✓ Headers found in: {doc_link}")
             
-            # Step 4: Chunk by headers
+            # Step 5: Chunk by headers
             chunks = self.chunk_by_headers(content_body)
             
-            # Step 5: Create JSON with metadata and chunks (flattened)
+            if not chunks:
+                logger.warning(f"No chunks generated for {doc_link}")
+                return []
+            
+            # Step 6: Create chunk objects with all metadata
             result = []
             for i, chunk in enumerate(chunks):
                 chunk_data = {
                     'chunk_id': i,
+                    'title': doc_title,  # CRITICAL: Document title for embeddings
                     'section_header': chunk['header'],
                     'section_level': chunk['level'],
                     'content': chunk['content'],
                     'chunk_token_count': chunk.get('token_count', 0),
-                    **metadata  # Expand metadata into the main structure
+                    **metadata  # Spread metadata into chunk
                 }
                 result.append(chunk_data)
-
             
-            logger.info(f"Generated {len(result)} chunks")
+            logger.info(
+                f"Generated {len(result)} chunks from: {doc_link} "
+                f"(title: '{doc_title[:50]}...')"
+            )
             return result
             
         except Exception as e:
             doc_link = record.get('link', 'N/A')
-            logger.error(f"Error processing {doc_link}: {e}")
+            logger.error(f"Error processing {doc_link}: {e}", exc_info=True)
             return []
     
     def process_jsonl(self, input_path: Path) -> List[Dict]:
@@ -307,25 +328,52 @@ class RAGChunker:
         logger.info(f"Starting chunking process...")
         logger.info(f"Input file: {input_path}")
         
+        if not input_path.exists():
+            logger.error(f"Input file does not exist: {input_path}")
+            return []
+        
         all_chunks = []
         
-        with open(input_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            logger.info(f"Found {len(lines)} records\n")
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
+        try:
+            with open(input_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                logger.info(f"Found {len(lines)} records\n")
+                
+                for line_num, line in enumerate(lines, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
                     
-                record = json.loads(line)
-                logger.info(f"Processing: {record.get('link', 'N/A')}")
-                chunks = self.process_file(record)
-                all_chunks.extend(chunks)
+                    try:
+                        record = json.loads(line)
+                        
+                        # Skip error records
+                        if 'error' in record:
+                            logger.warning(f"Skipping record {line_num} with error")
+                            continue
+                        
+                        logger.info(f"Processing record {line_num}: {record.get('link', 'N/A')}")
+                        chunks = self.process_file(record)
+                        all_chunks.extend(chunks)
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON at line {line_num}: {e}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error processing line {line_num}: {e}", exc_info=True)
+                        continue
+        
+        except Exception as e:
+            logger.error(f"Failed to read input file: {e}", exc_info=True)
+            return []
         
         logger.info(f"\n{'='*60}")
-        logger.info(f"COMPLETE!")
+        logger.info(f"CHUNKING COMPLETE!")
         logger.info(f"Processed {len(all_chunks)} chunks from {len(lines)} records")
+        
+        if all_chunks:
+            logger.info(f"Sample chunk keys: {list(all_chunks[0].keys())}")
+        
         logger.info(f"{'='*60}")
         
         return all_chunks
@@ -338,11 +386,15 @@ class RAGChunker:
             chunks: List of chunk dictionaries
             output_path: Path to output file
         """
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(chunks, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"Saved to: {output_path}")
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(chunks, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Saved {len(chunks)} chunks to: {output_path}")
+        except Exception as e:
+            logger.error(f"Failed to save chunks: {e}", exc_info=True)
+            raise
 
 
 def main():
@@ -360,11 +412,13 @@ def main():
         if chunks:
             logger.info("\nSample chunk:")
             logger.info(json.dumps(chunks[0], indent=2))
-            token_counts = chunker.token_counts
-            logger.info(f"\nToken count statistics across chunks:")
-            logger.info(f"  - Min tokens: {min(token_counts)}")
-            logger.info(f"  - Max tokens: {max(token_counts)}")
-            logger.info(f"  - Avg tokens: {sum(token_counts)/len(token_counts):.2f}")
+            
+            if chunker.token_counts:
+                token_counts = chunker.token_counts
+                logger.info(f"\nToken count statistics across chunks:")
+                logger.info(f"  - Min tokens: {min(token_counts)}")
+                logger.info(f"  - Max tokens: {max(token_counts)}")
+                logger.info(f"  - Avg tokens: {sum(token_counts)/len(token_counts):.2f}")
     else:
         logger.error(f"Input File not found: {INPUT_FILE}")
 

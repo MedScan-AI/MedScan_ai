@@ -1,4 +1,4 @@
-"""GCP configuration for RAG pipeline - SIMPLIFIED."""
+"""GCP configuration for RAG pipeline"""
 import os
 from pathlib import Path
 import yaml

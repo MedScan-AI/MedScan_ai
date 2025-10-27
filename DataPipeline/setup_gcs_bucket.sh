@@ -1,9 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=========================================="
 echo "GCS Setup for RAG"
-echo "=========================================="
 
 export GOOGLE_APPLICATION_CREDENTIALS=~/gcp-service-account.json
 
@@ -20,7 +18,7 @@ except:
     bucket = client.create_bucket(bucket_name, location="us-central1")
     print(f"✓ Created: {bucket_name}")
 
-# Simplified folder structure
+# Folder structure
 folders = [
     "RAG/config/",
     "RAG/raw_data/baseline/",

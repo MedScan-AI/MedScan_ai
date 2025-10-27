@@ -77,17 +77,24 @@ class ChunkEmbedder:
             raise
     
     def create_combined_text(self, chunk: Dict[str, Any]) -> str:
-        """
-        Combine title and content for embedding
+        """Combine title and content for embedding."""
+        # Try different field names for title
+        title = (
+            chunk.get('title') or 
+            chunk.get('section_header') or 
+            chunk.get('markdown_title') or 
+            ''
+        ).strip()
         
-        Args:
-            chunk: Dictionary containing chunk data
-            
-        Returns:
-            Combined text string
-        """
-        title = chunk.get('title', '').strip()
         content = chunk.get('content', '').strip()
+        
+        # If no content, log warning
+        if not content:
+            return title if title else ''
+        
+        # If no title, just use content
+        if not title:
+            return content
         
         # Weight title more heavily by including it twice
         combined = f"{title}. {title}. {content}"

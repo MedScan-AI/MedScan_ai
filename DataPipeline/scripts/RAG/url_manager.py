@@ -7,15 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 def read_urls_from_gcs(gcs_manager, gcs_path: str) -> list:
-    """Read URLs from GCS text file.
-    
-    Args:
-        gcs_manager: GCSManager instance
-        gcs_path: Path to urls.txt in GCS
-        
-    Returns:
-        List of URLs
-    """
     logger.info(f"Reading URLs from GCS: {gcs_path}")
     
     # Download to temp location
@@ -52,13 +43,6 @@ def get_default_urls() -> list:
 
 
 def upload_urls_to_gcs(gcs_manager, urls: list, gcs_path: str):
-    """Upload URLs list to GCS.
-    
-    Args:
-        gcs_manager: GCSManager instance
-        urls: List of URLs
-        gcs_path: GCS path to save urls.txt
-    """
     local_temp = Path("/opt/airflow/data/RAG/temp/urls_upload.txt")
     local_temp.parent.mkdir(parents=True, exist_ok=True)
     
