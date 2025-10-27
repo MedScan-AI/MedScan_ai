@@ -29,7 +29,7 @@ DATA_DIR = PROJECT_ROOT / "data" / "RAG"
 LOCAL_PATHS = {
     "raw_data": DATA_DIR / "raw_data",
     "validation": DATA_DIR / "validation",
-    "temp": DATA_DIR / "temp",  # For intermediate processing
+    "temp": DATA_DIR / "temp",
     "index": DATA_DIR / "index",
 }
 
@@ -62,3 +62,11 @@ def get_validation_config():
 def get_dvc_tracked_items():
     """Get items to track with DVC."""
     return config['dvc']['track_items']
+
+def get_alert_config():
+    """Get alert configuration."""
+    return config.get('alerts', {})
+
+def get_alert_thresholds():
+    """Get alert thresholds."""
+    return config.get('alerts', {}).get('thresholds', {})
