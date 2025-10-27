@@ -1,45 +1,33 @@
-# RAG Pipeline Configuration - FIXED BASELINE APPROACH
+# RAG Pipeline Configuration - SIMPLIFIED
 
 pipeline:
   name: rag_data_pipeline
-  schedule: null
+  schedule: null  # Manual trigger only
   enabled: true
-  max_retries: 2
-  retry_delay_minutes: 5
   
 scraping:
-  # Single source of truth for URLs
-  urls:
-    - "https://www.cdc.gov/tb/treatment/index.html"
-    - "https://www.mayoclinic.org/diseases-conditions/lung-cancer/diagnosis-treatment/drc-20374627"
-    
-  
+  # URLs now fetched from GCS
+  urls_file: "RAG/config/urls.txt"  # GCS path
   timeout: 60000
-  max_retries: 3
-  
-chunking:
-  max_chunk_tokens: 512
-  overlap_tokens: 50
   
 embedding:
   model_name: "BAAI/llm-embedder"
-  batch_size: 32
   
 indexing:
   index_type: "flat"
-  dimension: 768
   
 validation:
   baseline_strategy: "fixed"
   enable_tfdv: true
-  drift_threshold: 0.15
+  max_anomaly_pct: 0.20
+  max_critical_drift: 3
   
 dvc:
   remote_name: "rag"
-  auto_commit: true
-  auto_push: true
+  track_items:
+    - "raw_data/incremental"
+    - "index"
   
 gcs:
   bucket_name: "medscan-rag-data"
   project_id: "medscanai-476203"
-  preserve_versions: true

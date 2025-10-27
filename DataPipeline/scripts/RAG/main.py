@@ -1,3 +1,9 @@
+"""
+WARNING: This file is for LOCAL TESTING ONLY.
+Do NOT use this in Airflow DAG.
+Use individual modules (scraper, chunking, embedding, indexing) directly in DAG tasks.
+"""
+
 import asyncio
 import sys
 
@@ -70,7 +76,8 @@ urls = [
     "https://www.sciencedirect.com/topics/pharmacology-toxicology-and-pharmaceutical-science/tuberculosis",
     "https://www.cdc.gov/infection-control/hcp/core-practices/index.html",
     "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/"
-    ]
+]
+
 try:
     asyncio.run(scraper(urls))
 except Exception as e:
@@ -88,6 +95,7 @@ try:
 except Exception as e:
     print(e)
     sys.exit(1)
+
 try:
     indexer()
 except Exception as e:

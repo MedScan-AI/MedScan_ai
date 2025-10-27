@@ -13,7 +13,7 @@ import numpy as np
 from .embedding import ChunkEmbedder, EmbeddedChunk
 
 # Setup logging
-LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR = Path("/opt/airflow/logs")
 LOG_DIR.mkdir(exist_ok=True)
 log_file = LOG_DIR / f"indexing_{datetime.now().strftime('%Y-%m-%d')}.log"
 
@@ -26,19 +26,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-INPUT_FILE = OUTPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "index" / "embeddings.json"
-)
-OUTPUT_FILE_INDEX = OUTPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "index" / "index.bin"
-)
-OUTPUT_FILE_DATA = OUTPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "index" / "data.pkl"
-)
 
 
 class FAISSIndex:
@@ -252,12 +239,15 @@ class FAISSIndex:
 
 
 def main():
-    """Example usage"""
+    """Example usage - for standalone testing only."""
+    INPUT_FILE = Path("/opt/airflow/data/RAG/index/embeddings.json")
+    OUTPUT_FILE_INDEX = Path("/opt/airflow/data/RAG/index/index.bin")
+    OUTPUT_FILE_DATA = Path("/opt/airflow/data/RAG/index/data.pkl")
+    
     try:
         # Load embeddings
-        embeddings_path = INPUT_FILE
         logger.info("Loading embeddings...")
-        embedded_chunks = ChunkEmbedder.load_embeddings(embeddings_path)
+        embedded_chunks = ChunkEmbedder.load_embeddings(INPUT_FILE)
         
         if not embedded_chunks:
             logger.error("No embeddings found")
@@ -277,14 +267,12 @@ def main():
         logger.info(f"Index stats: {stats}")
         
         # Save index
-        index_path = OUTPUT_FILE_INDEX
-        chunks_path = OUTPUT_FILE_DATA
-        faiss_index.save_index(index_path, chunks_path)
+        faiss_index.save_index(OUTPUT_FILE_INDEX, OUTPUT_FILE_DATA)
         
         # Verify by loading
         logger.info("Verifying by loading index...")
         verify_index = FAISSIndex(dimension=embedding_dim, index_type='flat')
-        verify_index.load_index(index_path, chunks_path)
+        verify_index.load_index(OUTPUT_FILE_INDEX, OUTPUT_FILE_DATA)
         
         verify_stats = verify_index.get_index_stats()
         logger.info(f"Verification stats: {verify_stats}")

@@ -1,3 +1,4 @@
+"""Chunking module for RAG pipeline."""
 import json
 import logging
 import os
@@ -9,18 +10,8 @@ from typing import Dict, List, Tuple
 
 import tiktoken
 
-# Configure paths
-INPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "raw_data" / "raw_data.jsonl"
-)
-OUTPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "chunked_data" / "chunks.json"
-)
-
 # Setup logging
-LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR = Path("/opt/airflow/logs")
 LOG_DIR.mkdir(exist_ok=True)
 log_file = LOG_DIR / f"chunking_{datetime.now().strftime('%Y-%m-%d')}.log"
 
@@ -303,53 +294,67 @@ class RAGChunker:
             logger.error(f"Error processing {doc_link}: {e}")
             return []
     
-    def process_directory(self, input_file: Path, output_file: Path):
+    def process_jsonl(self, input_path: Path) -> List[Dict]:
         """
-        Process all markdown files in a directory and save to JSON.
+        Process JSONL file and return all chunks.
         
         Args:
-            input_dir: Directory containing .md files
-            output_file: Path to output JSON file
+            input_path: Path to input JSONL file
+            
+        Returns:
+            List of all chunks
         """
         logger.info(f"Starting chunking process...")
-        logger.info(f"Input file: {input_file}")
-        logger.info(f"Output file: {output_file}")
+        logger.info(f"Input file: {input_path}")
         
         all_chunks = []
-
-        with open(input_file, 'r', encoding='utf-8') as f:
+        
+        with open(input_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            logger.info(f"Found {len(lines)} markdown files\n")
-            # records = json.load(f)
+            logger.info(f"Found {len(lines)} records\n")
+            
             for line in lines:
                 line = line.strip()
+                if not line:
+                    continue
+                    
                 record = json.loads(line)
                 logger.info(f"Processing: {record.get('link', 'N/A')}")
                 chunks = self.process_file(record)
                 all_chunks.extend(chunks)
         
-        # Save to JSON
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(all_chunks, f, indent=2, ensure_ascii=False)
-        
         logger.info(f"\n{'='*60}")
         logger.info(f"COMPLETE!")
-        logger.info(f"Processed {len(all_chunks)} chunks from Raw data")
-        logger.info(f"Saved to: {output_file}")
+        logger.info(f"Processed {len(all_chunks)} chunks from {len(lines)} records")
         logger.info(f"{'='*60}")
         
         return all_chunks
+    
+    def save_chunks(self, chunks: List[Dict], output_path: Path):
+        """
+        Save chunks to JSON file.
+        
+        Args:
+            chunks: List of chunk dictionaries
+            output_path: Path to output file
+        """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(chunks, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Saved to: {output_path}")
 
 
 def main():
-    """Main execution function."""
-    # Initialize chunker
+    """Main execution function - for standalone testing only."""
+    INPUT_FILE = Path("/opt/airflow/data/RAG/raw_data/raw_data.jsonl")
+    OUTPUT_FILE = Path("/opt/airflow/data/RAG/chunked_data/chunks.json")
+    
     chunker = RAGChunker()
     
-    # Process all files
-    if os.path.exists(INPUT_FILE):
-        chunks = chunker.process_directory(INPUT_FILE, OUTPUT_FILE)
+    if INPUT_FILE.exists():
+        chunks = chunker.process_jsonl(INPUT_FILE)
+        chunker.save_chunks(chunks, OUTPUT_FILE)
         
         # Print sample chunk for verification
         if chunks:
@@ -362,7 +367,6 @@ def main():
             logger.info(f"  - Avg tokens: {sum(token_counts)/len(token_counts):.2f}")
     else:
         logger.error(f"Input File not found: {INPUT_FILE}")
-        logger.error("Please create the directory and add markdown files.")
 
 
 if __name__ == "__main__":
