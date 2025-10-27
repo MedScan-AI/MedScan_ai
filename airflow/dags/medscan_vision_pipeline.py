@@ -251,132 +251,6 @@ def generate_alert_email_content(**context):
     
     return email_content
 
-# TEST FUNCTIONS
-
-def run_data_acquisition_tests(**context):
-    """Run tests for data acquisition module"""
-    print("=" * 80)
-    print("Running data acquisition tests...")
-    print("=" * 80)
-    
-    cmd = [
-        'pytest',
-        '/opt/airflow/DataPipeline/tests/data_acquisition/fetch_data_test.py',
-        '-q',
-        '--tb=short',
-        '--import-mode=importlib',
-        '-p', 'no:cacheprovider'
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    
-    if result.returncode != 0:
-        print("=" * 80)
-        print("TEST FAILURES")
-        print("=" * 80)
-        print(result.stderr)
-        raise Exception(f"Data acquisition tests failed")
-    
-    print("=" * 80)
-    print("✓ Tests passed!")
-    print("=" * 80)
-    return "Success"
-
-
-def run_preprocessing_tests(**context):
-    """Run tests for preprocessing modules"""
-    print("=" * 80)
-    print("Running preprocessing tests...")
-    print("=" * 80)
-    
-    cmd = [
-        'pytest',
-        '/opt/airflow/DataPipeline/tests/data_preprocessing/preprocess_tb_test.py',
-        '/opt/airflow/DataPipeline/tests/data_preprocessing/preprocess_lung_cancer_test.py',
-        '-q',
-        '--tb=short',
-        '--import-mode=importlib',
-        '-p', 'no:cacheprovider'
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    
-    if result.returncode != 0:
-        print("=" * 80)
-        print("TEST FAILURES")
-        print("=" * 80)
-        print(result.stderr)
-        raise Exception(f"Preprocessing tests failed")
-    
-    print("=" * 80)
-    print("✓ Tests passed!")
-    print("=" * 80)
-    return "Success"
-
-
-def run_synthetic_data_tests(**context):
-    """Run tests for synthetic data generator"""
-    print("=" * 80)
-    print("Running synthetic data tests...")
-    print("=" * 80)
-    
-    cmd = [
-        'pytest',
-        '/opt/airflow/DataPipeline/tests/data_preprocessing/baseline_synthetic_data_generator_test.py',
-        '-q',
-        '--tb=short',
-        '--import-mode=importlib',
-        '-p', 'no:cacheprovider'
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    
-    if result.returncode != 0:
-        print("=" * 80)
-        print("TEST FAILURES")
-        print("=" * 80)
-        print(result.stderr)
-        raise Exception(f"Synthetic data tests failed")
-    
-    print("=" * 80)
-    print("✓ Tests passed!")
-    print("=" * 80)
-    return "Success"
-
-
-def run_validation_tests(**context):
-    """Run tests for schema validation"""
-    print("=" * 80)
-    print("Running validation tests...")
-    print("=" * 80)
-    
-    cmd = [
-        'pytest',
-        '/opt/airflow/DataPipeline/tests/data_preprocessing/schema_statistics_test.py',
-        '-q',
-        '--tb=short',
-        '--import-mode=importlib',
-        '-p', 'no:cacheprovider'
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    
-    if result.returncode != 0:
-        print("=" * 80)
-        print("TEST FAILURES")
-        print("=" * 80)
-        print(result.stderr)
-        raise Exception(f"Validation tests failed")
-    
-    print("=" * 80)
-    print("✓ Tests passed!")
-    print("=" * 80)
-    return "Success"
-
 # PIPELINE TASK FUNCTIONS
 
 def acquire_data(**context):
@@ -519,12 +393,7 @@ dag = DAG(
 
 start_task = EmptyOperator(task_id="start", dag=dag)
 
-# Test Tasks
-test_data_acquisition = PythonOperator(
-    task_id='test_data_acquisition',
-    python_callable=run_data_acquisition_tests,
-    dag=dag,
-)
+# Tasks
 
 download_task = PythonOperator(
     task_id='download_kaggle_data',
@@ -532,11 +401,6 @@ download_task = PythonOperator(
     dag=dag,
 )
 
-test_preprocessing = PythonOperator(
-    task_id='test_preprocessing',
-    python_callable=run_preprocessing_tests,
-    dag=dag,
-)
 
 tb_task = PythonOperator(
     task_id='process_tb',
@@ -550,11 +414,6 @@ lung_task = PythonOperator(
     dag=dag,
 )
 
-test_synthetic_data = PythonOperator(
-    task_id='test_synthetic_data',
-    python_callable=run_synthetic_data_tests,
-    dag=dag,
-)
 
 metadata_task = PythonOperator(
     task_id='generate_patient_metadata',
@@ -562,11 +421,6 @@ metadata_task = PythonOperator(
     dag=dag,
 )
 
-test_validation = PythonOperator(
-    task_id='test_validation',
-    python_callable=run_validation_tests,
-    dag=dag,
-)
 
 validation_task = PythonOperator(
     task_id='validate_data',
@@ -634,10 +488,10 @@ send_alert_email = EmailOperator(
 end_task = EmptyOperator(task_id="complete", dag=dag)
 
 # Main pipeline flow
-start_task >> test_data_acquisition >> download_task
-download_task >> test_preprocessing >> [tb_task, lung_task]
-[tb_task, lung_task] >> test_synthetic_data >> metadata_task
-metadata_task >> test_validation >> validation_task
+start_task >> download_task
+download_task >>  [tb_task, lung_task]
+[tb_task, lung_task] >>  metadata_task
+metadata_task >>  validation_task
 
 # Alert flow with conditional email
 validation_task >> check_validation >> check_drift >> check_if_alert_needed

@@ -18,42 +18,102 @@ git clone <your-repo-url>
 cd MedScan_ai
 ```
 
-### 2. Checkout the Airflow Branch
+### 2. Checkout the Correct Branch
 ```bash
+# For latest development version
 git checkout vision_pipeline
+
+# OR for stable version
+git checkout main
 ```
 
 ### 3. Pull Data with DVC
 ```bash
-# Pull the data (1.2 GB)
+# Install DVC if not already installed
+pip install dvc
+
+# Pull the data (1.2 GB - takes 2-5 minutes)
 dvc pull
 
 # Verify data exists
 ls -la DataPipeline/data/
+# Should show: raw/, preprocessed/, synthetic_metadata/, etc.
 ```
 
-### 4. Configure Email Alerts (Optional)
+### 4. Create Environment Configuration File
 
-If you want to receive email alerts:
+**CRITICAL:** Airflow requires a `.env` file with security keys. This file is not in Git for security reasons.
 ```bash
 cd airflow
+
+# Generate security keys
+FERNET_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+
+# Create .env file
+cat > .env << EOF
+# Airflow UID
+AIRFLOW_UID=50000
+
+# Database Connection
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+
+# Security Keys (REQUIRED - DO NOT USE THESE DUMMY VALUES)
+AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+AIRFLOW__WEBSERVER__SECRET_KEY=${SECRET_KEY}
+
+# Admin User
+AIRFLOW_USERNAME=admin
+AIRFLOW_PASSWORD=admin
+AIRFLOW_FIRSTNAME=Admin
+AIRFLOW_LASTNAME=User
+AIRFLOW_EMAIL=admin@example.com
+
+# SMTP Configuration (Leave empty to disable email alerts)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_MAIL_FROM=
+
+# MLflow
+MLFLOW_TRACKING_URI=file:///tmp/mlflow
+EOF
+
+echo "✅ .env file created successfully!"
+```
+
+**What each variable does:**
+- `FERNET_KEY`: Encrypts passwords in Airflow database (REQUIRED)
+- `SECRET_KEY`: Secures web sessions (REQUIRED)
+- `SQL_ALCHEMY_CONN`: Database connection string (REQUIRED)
+- `SMTP_*`: Email configuration (OPTIONAL - only needed for alerts)
+
+### 5. Configure Email Alerts (Optional)
+
+If you want to receive email alerts for anomalies/drift:
+```bash
 nano .env
 ```
 
-Update these values:
+Update these lines with your Gmail credentials:
 ```bash
 SMTP_USER=your-gmail@gmail.com
-SMTP_PASSWORD=your-app-password
-ALERT_EMAIL_RECIPIENTS=your-email@gmail.com,teammate@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+SMTP_MAIL_FROM=your-gmail@gmail.com
 ```
 
-**To get Gmail App Password:**
-1. Go to Google Account → Security
-2. Enable 2-Factor Authentication
-3. Generate App Password for "Mail"
-4. Use that 16-character password in `.env`
+**How to get Gmail App Password:**
+1. Go to https://myaccount.google.com/security
+2. Enable **2-Step Verification** (if not already enabled)
+3. Search for **"App passwords"**
+4. Select **"Mail"** and your device
+5. Copy the **16-character password** (format: `xxxx xxxx xxxx xxxx`)
+6. Paste it as `SMTP_PASSWORD` in `.env` (**remove spaces**)
 
-### 5. Start Airflow
+**Important:** Use App Password, NOT your regular Gmail password!
+
+### 6. Start Airflow
 ```bash
 cd airflow
 
@@ -67,206 +127,109 @@ sleep 60
 docker compose ps
 ```
 
-You should see:
+**Expected output:**
 ```
-NAME                STATUS
-airflow-init        exited (0)
-airflow-postgres    running
-airflow-scheduler   running
-airflow-webserver   running
+NAME                  STATUS
+airflow-postgres-1    Up (healthy)
+airflow-init-1        Exited (0)
+airflow-scheduler-1   Up
+airflow-webserver-1   Up (healthy)
 ```
 
-### 6. Access Airflow UI
+**Note:** `airflow-init-1` should show `Exited (0)` - this is normal. It runs once to initialize the database.
+
+### 7. Access Airflow UI
 
 Open browser: http://localhost:8080
 
-**Login:**
+**Login credentials:**
 - Username: `admin`
 - Password: `admin`
 
-## Running the Pipeline
+**First login takes 10-20 seconds to load.**
 
-### Step 1: Enable the DAG
-
-1. In Airflow UI, find `medscan_vision_pipeline`
-2. Toggle the switch on the left to **ON** (blue)
-
-### Step 2: Trigger the Pipeline
-
-1. Click the **Play button** ▶️ on the right
-2. Click **"Trigger DAG"**
-3. Click on the DAG name to watch progress
-
-### Step 3: Monitor Execution
-
-Switch to **Graph View** to see visual progress:
-
-- ⚪ Gray = Queued
-- 🟡 Yellow = Running
-- 🟢 Green = Success
-- 🔴 Red = Failed
-
-**Expected Runtime:** ~8-10 minutes (with cached data)
-
-### Step 4: Check Results
-
-After completion:
-- Check `DataPipeline/data/ge_outputs/reports/` for HTML reports
-- Check email for alerts (if configured)
-- View logs in Airflow UI by clicking task boxes
-
-## Pipeline Stages
-```
-start
-  ↓
-test_data_acquisition (pytest)
-  ↓
-download_kaggle_data (fetch TB & Lung Cancer datasets)
-  ↓
-test_preprocessing
-  ↓
-[process_tb || process_lung_cancer] (parallel processing)
-  ↓
-test_synthetic_data
-  ↓
-generate_patient_metadata (Faker data)
-  ↓
-test_validation
-  ↓
-validate_data (Great Expectations + Bias Detection)
-  ↓
-check_validation_results → check_drift_results
-  ↓
-check_if_alert_needed (conditional gate)
-  ↓
-generate_alert_email → send_alert_email (if issues found)
-  ↓
-complete
-```
+---
 
 ## Troubleshooting
 
-### Pipeline Fails on First Run
+### Problem: "Could not parse SQLAlchemy URL from string ''"
 
-**Problem:** "No module named 'great_expectations'" or similar
+**Cause:** `.env` file is missing or not being read.
 
-**Solution:** Rebuild Docker image
+**Solution:**
 ```bash
 cd airflow
-docker compose down
-docker compose build --no-cache
+# Check if .env exists
+ls -la .env
+
+# If missing, recreate using Step 4 above
+# If exists, verify it has content:
+cat .env | grep FERNET_KEY
+# Should show a long random string, not empty
+```
+
+### Problem: Webserver shows "unhealthy"
+
+**Cause:** Missing security keys in `.env`.
+
+**Solution:**
+```bash
+cd airflow
+# Regenerate keys and recreate .env (see Step 4)
+docker compose down -v
 docker compose up -d
 ```
 
-### MLflow Errors in Logs
+### Problem: "Permission denied" or "Cannot connect to Docker daemon"
 
-**Problem:** "OSError: Resource deadlock avoided"
+**Cause:** Docker Desktop not running.
 
-**Solution:** Already fixed! Using `/tmp` storage in Docker.
-If still occurs, check `DataPipeline/config/metadata.yml`:
-```yaml
-mlmd:
-  store:
-    database_path: "/tmp/mlflow/metadata.db"  # Should be /tmp, not data/
+**Solution:**
+1. Open Docker Desktop application
+2. Wait for it to fully start (icon in menu bar should be steady)
+3. Try again: `docker compose up -d`
+
+### Problem: Port 8080 already in use
+
+**Cause:** Another service using port 8080.
+
+**Solution:**
+```bash
+# Find what's using port 8080
+lsof -i :8080
+
+# Kill the process or change Airflow port in docker-compose.yml:
+# Change "8080:8080" to "8081:8080"
+# Then access at http://localhost:8081
 ```
 
-### Email Alerts Not Working
-
-**Problem:** No emails received
+### Problem: Email alerts not working
 
 **Check:**
-1. `.env` file has correct SMTP credentials
-2. Gmail App Password (not regular password)
+1. `.env` has valid Gmail credentials
+2. Using App Password (not regular password)
 3. Check Airflow logs: `docker compose logs webserver | grep -i smtp`
 
-### Container Out of Memory
+---
 
-**Problem:** Docker containers crash
+## Important Notes
 
-**Solution:** Increase Docker memory
-1. Docker Desktop → Settings → Resources
-2. Set Memory to at least 4GB
-3. Restart Docker Desktop
+### Security
+- **Never commit `.env` to Git** - it contains sensitive credentials
+- The `.env` file is in `.gitignore` for security
+- Each team member must create their own `.env` file
 
-### Data Not Found
+### Data Storage
+- Data pulled via DVC is stored in `DataPipeline/data/`
+- MLflow data stored in `/tmp/mlflow` inside Docker (lost on container restart)
+- Postgres data persists in Docker volume `postgres-db-volume`
 
-**Problem:** "FileNotFoundError: data/raw/..."
-
-**Solution:** Pull data with DVC
-```bash
-cd ~/Documents/MedScan_ai
-dvc pull
-ls DataPipeline/data/raw/  # Should show folders
-```
-
-## Viewing Logs
+### Clean Restart
+If you need to start completely fresh:
 ```bash
 cd airflow
-
-# View all logs
-docker compose logs
-
-# View specific service
-docker compose logs scheduler
-docker compose logs webserver
-
-# Follow logs in real-time
-docker compose logs -f scheduler
-
-# View logs for specific task in Airflow UI:
-# Click task box → Click "Log" button
-```
-
-## Stopping Airflow
-```bash
-cd airflow
-
-# Stop services (keeps data)
-docker compose down
-
-# Stop and remove all data
-docker compose down -v
-```
-
-## Restarting After Changes
-
-If you modify the DAG or code:
-```bash
-cd airflow
-
-# Restart scheduler to pick up changes
-docker compose restart scheduler
-
-# Or restart everything
-docker compose restart
-```
-
-## Project Structure
-```
-airflow/
-├── dags/
-│   └── medscan_vision_pipeline.py    # Main DAG definition
-├── docker-compose.yml                 # Docker services config
-├── Dockerfile                         # Custom Airflow image
-├── .env                              # Configuration (SMTP, emails)
-└── README.md                         # This file
-```
-
-## Data Pipeline Outputs
-
-After successful run:
-```
-DataPipeline/data/
-├── raw/                              # Downloaded Kaggle data
-├── preprocessed/                     # Processed 224x224 images  
-├── synthetic_metadata/               # Generated patient CSVs
-├── synthetic_metadata_mitigated/     # Bias-corrected data
-├── ge_outputs/                       # Validation reports
-│   ├── reports/                      # HTML visualizations
-│   ├── bias_analysis/                # Bias detection results
-│   ├── eda/                          # Exploratory data analysis
-│   └── drift/                        # Drift detection results
-└── mlflow_store/                     # Experiment tracking (in /tmp in Docker)
+docker compose down -v  # -v removes volumes (deletes database)
+# Then follow setup steps again from Step 4
 ```
 
 ## Testing Individual Scripts (Without Airflow)
@@ -286,32 +249,6 @@ python scripts/data_preprocessing/schema_statistics.py --config config/metadata.
 
 # Run all tests
 pytest tests/ -v
-```
-
-## macOS Specific Notes
-
-If you're on macOS and encounter file locking issues:
-- ✅ Already handled! Using `/tmp` storage fixes Docker Desktop osxfs issues
-- Only affects MLflow, rest of pipeline unaffected
-
-## Team Collaboration
-
-**Before making changes:**
-```bash
-git pull origin vision_pipeline
-dvc pull
-```
-
-**After making changes:**
-```bash
-# If you regenerated data
-dvc add DataPipeline/data/
-dvc push
-
-# Commit code
-git add .
-git commit -m "Your changes"
-git push origin vision_pipeline
 ```
 
 ## Help & Support
