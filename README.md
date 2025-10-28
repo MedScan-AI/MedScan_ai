@@ -49,7 +49,6 @@ TBD - Environment variables will be documented upon implementation
 ## Project Structure
 
 ```
-medscan-ai/
 ├── DataPipeline
 │   ├── README.md
 │   ├── config
@@ -127,7 +126,8 @@ medscan-ai/
 ├── docs
 │   ├── DVC.md
 │   └── Scoping.pdf
-├── requirements-pipel
+├── requirements-pipeline.txt
+└── requirements.txt
 ```
 
 ### High Level Architecture
