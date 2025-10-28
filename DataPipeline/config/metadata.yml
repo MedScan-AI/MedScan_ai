@@ -420,3 +420,31 @@ execution:
     baseline_partition: "second_most_recent"  # Use second most recent partition as baseline
     new_partition: "most_recent"  # Use most recent partition as new data
 
+# MLflow Tracking Configuration
+mlflow:
+  # MLflow tracking URI (MUST be writable path)
+  tracking_uri: "file:///tmp/mlflow/metadata/mlruns"
+  
+  # Experiment name
+  experiment_name: "MedScan_Data_Validation"
+  
+  # Enable MLflow tracking
+  enable: true
+  
+  # Log artifacts to MLflow
+  log_artifacts: true
+  
+  # Artifact location
+  artifact_location: "/tmp/mlflow/metadata/artifacts"
+  
+  # What to log
+  log_params: true
+  log_metrics: true
+  log_artifacts: true
+  
+  # Auto-log configuration
+  autolog:
+    enable: true
+    log_models: false  # We're not training models here
+    log_input_examples: false
+    log_model_signatures: false
