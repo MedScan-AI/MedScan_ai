@@ -36,7 +36,6 @@ import great_expectations as gx
 
 # MLflow imports
 import mlflow
-import mlflow.data
 from mlflow.tracking import MlflowClient
 
 # Fairness and bias detection imports
@@ -44,8 +43,6 @@ try:
     from fairlearn.metrics import MetricFrame
     from fairlearn.metrics import demographic_parity_difference, demographic_parity_ratio
     from fairlearn.metrics import equalized_odds_difference, equalized_odds_ratio
-    from fairlearn.postprocessing import ThresholdOptimizer
-    from fairlearn.preprocessing import CorrelationRemover
     FAIRLEARN_AVAILABLE = True
 except ImportError:
     FAIRLEARN_AVAILABLE = False
@@ -226,12 +223,11 @@ class SchemaStatisticsManager:
     
     def _setup_mlflow(self):
         """Setup MLflow tracking."""
-        # Set MLflow tracking URI
-        mlflow_uri = self.config['mlmd']['store']['database_path'].replace('.db', '')
-        mlflow_tracking_dir = os.path.join(mlflow_uri, 'mlruns')
+        # Set MLflow tracking URI (UPDATED to use /opt/airflow/mlflow)
+        mlflow_tracking_dir = "/opt/airflow/mlflow/mlruns"
         os.makedirs(mlflow_tracking_dir, exist_ok=True)
         
-        mlflow.set_tracking_uri(f"file:///{os.path.abspath(mlflow_tracking_dir)}")
+        mlflow.set_tracking_uri(f"file:///{mlflow_tracking_dir}")
         self.mlflow_client = MlflowClient()
         
         # Set experiment name
@@ -1079,7 +1075,7 @@ class SchemaStatisticsManager:
             self.logger.info(f"Schema comparison: {schema_changes['summary']}")
             
             if schema_changes['has_changes']:
-                self.logger.warning(f"⚠️  Schema changes detected!")
+                self.logger.warning(f"  Schema changes detected!")
                 if schema_changes['added_columns']:
                     self.logger.warning(f"  Added columns: {', '.join(schema_changes['added_columns'])}")
                 if schema_changes['removed_columns']:
@@ -2104,10 +2100,10 @@ class SchemaStatisticsManager:
         
         # General recommendations
         if bias_analysis['bias_detected']:
-            recommendations.append("⚠️ BIAS DETECTED: Immediate attention required for model fairness")
+            recommendations.append(" BIAS DETECTED: Immediate attention required for model fairness")
             recommendations.append("Consider implementing bias mitigation strategies before model deployment")
         else:
-            recommendations.append("✅ No significant bias detected across all analysis methods")
+            recommendations.append(" No significant bias detected across all analysis methods")
             recommendations.append("Continue monitoring bias metrics as new data arrives")
         
         # SliceFinder specific recommendations
@@ -2670,7 +2666,7 @@ class SchemaStatisticsManager:
             # Statistical tests
             stat_tests_html = ""
             for test_name, test_results in slice_info.get('statistical_tests', {}).items():
-                status = "⚠️ Significant" if test_results.get('significant', False) else "✓ Not significant"
+                status = " Significant" if test_results.get('significant', False) else "✓ Not significant"
                 stat_tests_html += f"""
                 <tr>
                     <td>{test_name.replace('_', ' ').title()}</td>
@@ -2679,7 +2675,7 @@ class SchemaStatisticsManager:
                 </tr>
                 """
             
-            bias_status = "⚠️ BIAS DETECTED" if slice_info.get('has_bias', False) else "✓ No Bias"
+            bias_status = " BIAS DETECTED" if slice_info.get('has_bias', False) else "✓ No Bias"
             bias_class = "bias" if slice_info.get('has_bias', False) else "no-bias"
             
             slice_tables += f"""
@@ -2728,7 +2724,7 @@ class SchemaStatisticsManager:
                 dpd = metrics.get('demographic_parity_difference', 0)
                 dpr = metrics.get('demographic_parity_ratio', 0)
                 is_fair = metrics.get('is_fair', False)
-                status = "✓ Fair" if is_fair else "⚠️ Unfair"
+                status = "✓ Fair" if is_fair else " Unfair"
                 status_class = "no-bias" if is_fair else "bias"
                 
                 fairlearn_rows += f"""
@@ -2851,7 +2847,7 @@ class SchemaStatisticsManager:
             """
         
         # Generate HTML
-        overall_status = "⚠️ BIAS DETECTED" if bias_analysis.get('bias_detected', False) else "✓ NO BIAS DETECTED"
+        overall_status = " BIAS DETECTED" if bias_analysis.get('bias_detected', False) else "✓ NO BIAS DETECTED"
         status_class = "invalid" if bias_analysis.get('bias_detected', False) else "valid"
         
         html = f"""

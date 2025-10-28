@@ -6,9 +6,9 @@ pipeline:
   enabled: true
   
 scraping:
-  urls_file: "RAG/config/urls.txt"  # GCS path
+  urls_file: "RAG/config/urls.txt"  # GCS path in bucket
   timeout: 60000
-  min_success_rate: 0.7  # Alert if below 70%
+  min_success_rate: 0.7
   
 embedding:
   model_name: "BAAI/llm-embedder"
@@ -29,17 +29,16 @@ dvc:
     - "index"
   
 gcs:
-  bucket_name: "medscan-rag-data"
+  bucket_name: "medscan-data"
   project_id: "medscanai-476203"
 
-# Simple Alert Configuration
+# Alert thresholds
 alerts:
   enabled: true
   email_recipients:
-    - "data-team@medscan.ai"
-    - "engineering@medscan.ai"
+    - "harshitha8.shekar@gmail.com"
+    - "kothari.sau@northeastern.edu"
   
-  # Thresholds that trigger alerts
   thresholds:
     scraping_min_success_rate: 0.7
     validation_max_anomaly_pct: 25.0
