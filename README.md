@@ -63,8 +63,6 @@ medscan-ai/
 │   │   └── schema_statistics.md
 │   ├── experiment
 │   │   └── md_modification.ipynb
-│   ├── htmlcov
-│   ├── logs
 │   ├── requirements.txt
 │   ├── scripts
 │   │   ├── RAG
