@@ -77,7 +77,7 @@ def check_validation_results(**context):
     
     if anomalies_found:
         print("=" * 80)
-        print(f"⚠️  ALERT: {total_anomalies} total anomalies found!")
+        print(f"ALERT: {total_anomalies} total anomalies found!")
         print("=" * 80)
         
         context['task_instance'].xcom_push(key='anomalies', value=anomalies_found)
@@ -140,7 +140,7 @@ def check_drift_results(**context):
     
     if drift_found:
         print("=" * 80)
-        print(f"⚠️  DRIFT ALERT: {total_drifted_features} features drifted!")
+        print(f"DRIFT ALERT: {total_drifted_features} features drifted!")
         print("=" * 80)
         
         context['task_instance'].xcom_push(key='drift_details', value=drift_found)
@@ -149,7 +149,7 @@ def check_drift_results(**context):
         return {'drift_detected': True, 'total_drifted': total_drifted_features}
     else:
         print("=" * 80)
-        print("✓ No drift detected")
+        print("No drift detected")
         print("=" * 80)
         return {'drift_detected': False}
 
@@ -173,12 +173,12 @@ def should_send_alert(**context):
     
     if has_anomalies or has_drift:
         print("=" * 80)
-        print("🚨 ALERT NEEDED - Anomalies or drift detected")
+        print("ALERT NEEDED - Anomalies or drift detected")
         print("=" * 80)
         return True  # Email will be sent
     else:
         print("=" * 80)
-        print("✓ No alerts needed - All validations passed")
+        print("No alerts needed - All validations passed")
         print("=" * 80)
         return False  # Email task will be SKIPPED
 
@@ -202,7 +202,7 @@ def generate_alert_email_content(**context):
     
     if anomalies:
         email_lines.extend([
-            "🚨 DATA VALIDATION ALERTS",
+            "DATA VALIDATION ALERTS",
             "=" * 60,
             f"Total Anomalies Detected: {total_anomalies}",
             ""
@@ -218,7 +218,7 @@ def generate_alert_email_content(**context):
     
     if drift_details:
         email_lines.extend([
-            "⚠️  DATA DRIFT ALERTS",
+            "DATA DRIFT ALERTS",
             "=" * 60,
             f"Total Drifted Features: {total_drifted}",
             ""
@@ -279,7 +279,7 @@ def run_data_acquisition_tests(**context):
         raise Exception(f"Data acquisition tests failed")
     
     print("=" * 80)
-    print("✓ Tests passed!")
+    print("Tests passed!")
     print("=" * 80)
     return "Success"
 
@@ -311,7 +311,7 @@ def run_preprocessing_tests(**context):
         raise Exception(f"Preprocessing tests failed")
     
     print("=" * 80)
-    print("✓ Tests passed!")
+    print("Tests passed!")
     print("=" * 80)
     return "Success"
 
@@ -342,7 +342,7 @@ def run_synthetic_data_tests(**context):
         raise Exception(f"Synthetic data tests failed")
     
     print("=" * 80)
-    print("✓ Tests passed!")
+    print("Tests passed!")
     print("=" * 80)
     return "Success"
 
@@ -373,7 +373,7 @@ def run_validation_tests(**context):
         raise Exception(f"Validation tests failed")
     
     print("=" * 80)
-    print("✓ Tests passed!")
+    print("Tests passed!")
     print("=" * 80)
     return "Success"
 
@@ -399,7 +399,7 @@ def acquire_data(**context):
     
     print(result.stdout)
     print("=" * 80)
-    print("✓ Data acquisition completed successfully!")
+    print("Data acquisition completed successfully!")
     print("=" * 80)
     return "Success"
 
@@ -424,7 +424,7 @@ def preprocess_tb(**context):
     
     print(result.stdout)
     print("=" * 80)
-    print("✓ TB preprocessing completed successfully!")
+    print("TB preprocessing completed successfully!")
     print("=" * 80)
     return "Success"
 
@@ -449,7 +449,7 @@ def preprocess_lung_cancer(**context):
     
     print(result.stdout)
     print("=" * 80)
-    print("✓ Lung cancer preprocessing completed successfully!")
+    print("Lung cancer preprocessing completed successfully!")
     print("=" * 80)
     return "Success"
 
@@ -474,7 +474,7 @@ def generate_synthetic_metadata(**context):
     
     print(result.stdout)
     print("=" * 80)
-    print("✓ Synthetic metadata generation completed successfully!")
+    print("Synthetic metadata generation completed successfully!")
     print("=" * 80)
     return "Success"
 
@@ -499,7 +499,7 @@ def run_data_validation(**context):
     
     print(result.stdout)
     print("=" * 80)
-    print("✓ Data validation completed successfully!")
+    print("Data validation completed successfully!")
     print("=" * 80)
     return "Success"
 
@@ -603,7 +603,7 @@ generate_email = PythonOperator(
 send_alert_email = EmailOperator(
     task_id='send_alert_email',
     to=ALERT_EMAILS,
-    subject='🚨 MedScan AI Pipeline Alert - {{ execution_date.strftime("%Y-%m-%d %H:%M") }}',
+    subject='MedScan AI Pipeline Alert - {{ execution_date.strftime("%Y-%m-%d %H:%M") }}',
     html_content="""
     <!DOCTYPE html>
     <html>
@@ -617,7 +617,7 @@ send_alert_email = EmailOperator(
     </head>
     <body>
         <div class="header">
-            <h1>🚨 MedScan AI Pipeline Alert</h1>
+            <h1>MedScan AI Pipeline Alert</h1>
         </div>
         <div class="content">
             <pre>{{ task_instance.xcom_pull(task_ids='generate_alert_email', key='email_body') }}</pre>
