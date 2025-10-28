@@ -73,7 +73,36 @@ urls = [
     "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
     "https://www.sciencedirect.com/topics/pharmacology-toxicology-and-pharmaceutical-science/tuberculosis",
     "https://www.cdc.gov/infection-control/hcp/core-practices/index.html",
-    "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/"
+    "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/",
+    # new urls
+    "https://www.cdc.gov/tb/about/index.html",
+    "https://www.cdc.gov/tb/signs-symptoms/index.html",
+    "https://www.cdc.gov/tb/treatment/active-tuberculosis-disease.html",
+    "https://www.cdc.gov/tb/hcp/clinical-overview/index.html",
+    "https://www.cdc.gov/tb/hcp/treatment/tuberculosis-disease.html",
+    "https://www.cdc.gov/mmwr/volumes/69/rr/rr6901a1.htm", 
+
+    "https://www.mayoclinic.org/diseases-conditions/tuberculosis/symptoms-causes/syc-20351250",
+    "https://www.mayoclinic.org/diseases-conditions/tuberculosis/diagnosis-treatment/drc-20351256",
+    "https://communityhealth.mayoclinic.org/featured-stories/tuberculosis"
+
+    "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
+    "https://www.who.int/health-topics/tuberculosis",
+    "https://www.who.int/publications/i/item/9789240096196",
+    "https://www.who.int/publications/i/item/9789240048126",
+    "https://www.who.int/publications/i/item/9789240063129",
+    "https://www.who.int/publications/i/item/9789240107243",
+    "https://www.who.int/publications-detail-redirect/9789240007048",
+
+    "https://jamanetwork.com/journals/jama/fullarticle/2804324",
+    "https://jamanetwork.com/journals/jama/fullarticle/2800774",
+    "https://jamanetwork.com/journals/jama/fullarticle/2804320",
+
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6857485/",
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8176349/",
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8886963/",
+
+    "https://www.maxhealthcare.in/blogs/understanding-tuberculosis"
 ]
 
 try:

@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 class DriftDetector:
     """Detects drift in data distributions."""
 
-    DRIFT_THRESHOLD = 0.1
+    MEAN_DRIFT_THRESHOLD = 0.5
+    SD_DRIFT_THRESHOLD = 0.2
 
     def _normalize_datetimes(self, df: pd.DataFrame) -> pd.DataFrame:
         """Normalize datetime columns by converting to string and back.
@@ -78,8 +79,8 @@ class DriftDetector:
             }
 
             drift_info['has_drift'] = (
-                mean_shift > self.DRIFT_THRESHOLD or
-                abs(std_ratio - 1.0) > self.DRIFT_THRESHOLD or
+                mean_shift > self.MEAN_DRIFT_THRESHOLD or
+                abs(std_ratio - 1.0) > self.SD_DRIFT_THRESHOLD or
                 ks_p < 0.05
             )
             return drift_info

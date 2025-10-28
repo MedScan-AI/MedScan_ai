@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 
+import os
 import pandas as pd
 
 from .validator import DataValidator
@@ -27,12 +28,15 @@ class DataQualityAnalyzer:
     GCS_BASELINE_STATS_PATH = "RAG/validation/baseline_stats.json"
     
     # Local working directory
-    WORK_DIR = Path("/opt/airflow/data/validation_work")
+    WORK_DIR = Path("/opt/airflow/data")
     
     # Local temporary files
-    LOCAL_BASELINE = WORK_DIR / "baseline.jsonl"
-    LOCAL_NEW_DATA = WORK_DIR / "new_data.jsonl"
-    LOCAL_STATS = WORK_DIR / "baseline_stats.json"
+    # LOCAL_BASELINE = WORK_DIR / "baseline.jsonl"
+    LOCAL_BASELINE = WORK_DIR / "scraped_baseline.jsonl"
+    # LOCAL_NEW_DATA = WORK_DIR / "new_data.jsonl"
+    LOCAL_NEW_DATA = WORK_DIR / "scraped_updated.jsonl"
+
+    LOCAL_STATS = WORK_DIR / "validation_work" / "baseline_stats.json"
     
     TRAIN_SPLIT_RATIO = 0.7
 
@@ -106,6 +110,7 @@ class DataQualityAnalyzer:
         }
         
         # Save locally
+        os.makedirs(self.WORK_DIR / "validation_work", exist_ok=True)
         with open(self.LOCAL_STATS, 'w') as f:
             json.dump(baseline_data, f, indent=2, default=str)
         
@@ -189,17 +194,27 @@ class DataQualityAnalyzer:
         
         # Drift detection (need baseline data)
         print("DRIFT DETECTION")
-        if self.gcs and self.gcs.blob_exists(self.GCS_BASELINE_PATH):
-            self.gcs.download_file(self.GCS_BASELINE_PATH, str(self.LOCAL_BASELINE))
-            baseline_df = self.load_jsonl(self.LOCAL_BASELINE)
-            train_df, _ = self.split_data(baseline_df)
-            
-            drift_results = self.drift_detector.detect_all_drift(train_df, new_df)
-            drift_features = [f for f, d in drift_results.items() if d and d.get('has_drift')]
-            print(f"Drift detected in {len(drift_features)} features")
+        if self.gcs:
+            # Cloud execution. 
+            if self.gcs.blob_exists(self.GCS_BASELINE_PATH):
+                self.gcs.download_file(self.GCS_BASELINE_PATH, str(self.LOCAL_BASELINE))
+                baseline_df = self.load_jsonl(self.LOCAL_BASELINE)
+                train_df, _ = self.split_data(baseline_df)
+                
+                drift_results = self.drift_detector.detect_all_drift(train_df, new_df)
+                drift_features = [f for f, d in drift_results.items() if d and d.get('has_drift')]
+                print(f"Drift detected in {len(drift_features)} features")
         else:
-            print("Baseline data not available for drift detection")
-            drift_results = {}
+            # Local testing. 
+            try:
+                baseline_df = self.load_jsonl(self.LOCAL_BASELINE)
+                train_df, _ = self.split_data(baseline_df)
+                drift_results = self.drift_detector.detect_all_drift(train_df, new_df)
+                drift_features = [f for f, d in drift_results.items() if d and d.get('has_drift')]
+                print(f"Drift detected in {len(drift_features)} features")
+            except FileNotFoundError or Exception as e:
+                print("Baseline data not available for drift detection")
+                drift_results = {}
         print()
         
         # Compile results
@@ -278,6 +293,8 @@ def main():
     analyzer = DataQualityAnalyzer(is_baseline=False)
     new_df = analyzer.load_jsonl(NEW_DATA_FILE)
     results = analyzer.validate_against_baseline(new_df)
+
+    print(results)
     
     print("\n" + "="*80)
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

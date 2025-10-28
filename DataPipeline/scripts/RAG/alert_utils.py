@@ -28,7 +28,7 @@ def send_failure_alert(
     dag_id = context.get('dag', {}).dag_id if 'dag' in context else 'Unknown'
     run_id = context.get('run_id', 'Unknown')
     
-    subject = f"❌ RAG Pipeline Task Failed: {task_name}"
+    subject = f"RAG Pipeline Task Failed: {task_name}"
     
     html_content = f"""
     <html>
