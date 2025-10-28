@@ -50,18 +50,86 @@ TBD - Environment variables will be documented upon implementation
 
 ```
 medscan-ai/
-├── src/
-│   ├── models/          # TBD
-│   ├── services/        # TBD
-│   ├── api/            # TBD
-│   └── utils/          # TBD
-├── data/               # TBD
-├── tests/              # TBD
-├── configs/            # TBD
-├── docker/             # TBD
-├── requirements.txt
-├── .env.example
-└── README.md
+├── DataPipeline
+│   ├── README.md
+│   ├── config
+│   │   ├── gcp_config.py
+│   │   ├── metadata.yml
+│   │   ├── rag_pipeline.yml
+│   │   ├── synthetic_data.yml
+│   │   └── vision_pipeline.yml
+│   ├── data.dvc
+│   ├── docs
+│   │   └── schema_statistics.md
+│   ├── experiment
+│   │   └── md_modification.ipynb
+│   ├── htmlcov
+│   ├── logs
+│   ├── requirements.txt
+│   ├── scripts
+│   │   ├── RAG
+│   │   │   ├── __init__.py
+│   │   │   ├── alert_utils.py
+│   │   │   ├── analysis
+│   │   │   │   ├── anomalies_and_bias_detection.py
+│   │   │   │   ├── baseline_stats.json
+│   │   │   │   ├── drift.py
+│   │   │   │   ├── main.py
+│   │   │   │   └── validator.py
+│   │   │   ├── chunking.py
+│   │   │   ├── common_utils.py
+│   │   │   ├── create_urls_file.py
+│   │   │   ├── data
+│   │   │   │   ├── scraped_baseline.jsonl
+│   │   │   │   └── scraped_updated.jsonl
+│   │   │   ├── embedding.py
+│   │   │   ├── indexing.py
+│   │   │   ├── main.py
+│   │   │   ├── requirements.txt
+│   │   │   ├── scraper.py
+│   │   │   ├── url_manager.py
+│   │   │   ├── urls_baseline.json
+│   │   │   └── urls_new.json
+│   │   ├── data_acquisition
+│   │   │   └── fetch_data.py
+│   │   └── data_preprocessing
+│   │       ├── baseline_synthetic_data_generator.py
+│   │       ├── process_lungcancer.py
+│   │       ├── process_tb.py
+│   │       └── schema_statistics.py
+│   ├── setup_gcs_bucket.sh
+│   └── tests
+│       ├── baseline_stats.json
+│       ├── data_acquisition
+│       │   └── fetch_data_test.py
+│       ├── data_preprocessing
+│       │   ├── baseline_synthetic_data_generator_test.py
+│       │   ├── preprocess_lung_cancer_test.py
+│       │   ├── preprocess_tb_test.py
+│       │   └── schema_statistics_test.py
+│       ├── test_chunking.py
+│       ├── test_embedding.py
+│       ├── test_indexer.py
+│       ├── test_rag_analysis_integration.py
+│       ├── test_rag_anomalies_and_bias_detection.py
+│       ├── test_rag_drift.py
+│       ├── test_rag_validator.py
+│       └── test_scraper.py
+├── README.md
+├── VISION_README.md
+├── airflow
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── dags
+│   │   ├── medscan_vision_pipeline.py
+│   │   └── rag_data_pipeline.py
+│   └── docker-compose.yml
+├── assets
+│   └── high_level_architecture.png
+├── docs
+│   ├── DVC.md
+│   └── Scoping.pdf
+├── requirements-pipel
 ```
 
 ### High Level Architecture
@@ -72,7 +140,6 @@ medscan-ai/
 
 ### Running the Application
 
-TBD - Application startup commands pending implementation
 
 ### API Endpoints
 
