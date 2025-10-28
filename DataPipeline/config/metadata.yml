@@ -273,7 +273,7 @@ mlmd:
   # Metadata store configuration
   store:
     type: "sqlite"  # sqlite or mysql
-    database_path: "/tmp/mlflow/metadata.db"
+    database_path: "/opt/airflow/mlflow/metadata.db"  # UPDATED to use /opt/airflow/mlflow
     
   # Artifact types
   artifact_types:
@@ -422,8 +422,8 @@ execution:
 
 # MLflow Tracking Configuration
 mlflow:
-  # MLflow tracking URI (MUST be writable path)
-  tracking_uri: "file:///tmp/mlflow/metadata/mlruns"
+  # MLflow tracking URI 
+  tracking_uri: "file:///opt/airflow/mlflow/mlruns"
   
   # Experiment name
   experiment_name: "MedScan_Data_Validation"
@@ -435,12 +435,11 @@ mlflow:
   log_artifacts: true
   
   # Artifact location
-  artifact_location: "/tmp/mlflow/metadata/artifacts"
+  artifact_location: "/opt/airflow/mlflow/artifacts"
   
   # What to log
   log_params: true
   log_metrics: true
-  log_artifacts: true
   
   # Auto-log configuration
   autolog:

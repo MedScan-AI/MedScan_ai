@@ -1,6 +1,5 @@
 """
-MedScan AI Vision Pipeline DAG with GCS Storage
-Complete version with:
+MedScan AI Vision Pipeline DAG
 """
 from datetime import timedelta
 from pathlib import Path
@@ -17,24 +16,21 @@ from airflow.operators.email import EmailOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.utils.dates import days_ago
 
-# Add paths
+# Paths
 PROJECT_ROOT = Path("/opt/airflow")
+sys.path.insert(0, str(PROJECT_ROOT / "DataPipeline"))
 sys.path.insert(0, str(PROJECT_ROOT / "DataPipeline" / "scripts"))
 sys.path.insert(0, str(PROJECT_ROOT / "DataPipeline" / "config"))
 
-try:
-    import vision_gcp_config
-    from data_preprocessing.vision_gcs_utils import VisionGCSManager
-    from data_preprocessing import alert_utils
-except ImportError as e:
-    print(f"Import error: {e}")
-    raise
+# Import config and GCS manager
+from DataPipeline.config import gcp_config
+from DataPipeline.scripts.common.gcs_manager import GCSManager
+from DataPipeline.scripts.data_preprocessing import alert_utils
 
 logger = logging.getLogger(__name__)
 
-# Get alert emails from environment
-ALERT_EMAILS = os.environ.get('ALERT_EMAIL_RECIPIENTS', 
-                               ','.join(vision_gcp_config.ALERT_CONFIG['email_recipients'])).split(',')
+# Get alert emails from config
+ALERT_EMAILS = gcp_config.ALERT_CONFIG['email_recipients']
 
 default_args = {
     'owner': 'vision-team',
@@ -49,8 +45,8 @@ default_args = {
 # UTILITY FUNCTIONS
 
 def setup_task_logging(task_name: str, partition: str) -> logging.Logger:
-    """Setup file-based logging for task."""
-    log_dir = Path('/opt/airflow/DataPipeline/data/logs')
+    """Setup logging for task."""
+    log_dir = gcp_config.LOCAL_PATHS['logs']
     log_dir.mkdir(parents=True, exist_ok=True)
     
     log_file = log_dir / f"{task_name}_{partition.replace('/', '_')}.log"
@@ -58,7 +54,6 @@ def setup_task_logging(task_name: str, partition: str) -> logging.Logger:
     task_logger = logging.getLogger(f"medscan.{task_name}")
     task_logger.setLevel(logging.INFO)
     
-    # File handler
     fh = logging.FileHandler(log_file)
     fh.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -72,7 +67,7 @@ def get_partition(context, task_ids=None):
     """Get partition with fallback logic."""
     ti = context['ti']
     
-    # Try to get from previous task
+    # Trying to get from previous task
     if task_ids:
         if isinstance(task_ids, list):
             for task_id in task_ids:
@@ -91,7 +86,6 @@ def get_partition(context, task_ids=None):
     return partition
 
 # MAIN PIPELINE TASKS
-
 def download_kaggle_to_gcs(**context):
     """Download from Kaggle and upload to GCS."""
     execution_date = context['execution_date']
@@ -99,20 +93,18 @@ def download_kaggle_to_gcs(**context):
     
     task_logger = setup_task_logging('download_kaggle', partition)
     
-    logger.info("="*80)
     logger.info("TASK: Download Kaggle Data to GCS - Started")
-    logger.info("="*80)
-    task_logger.info(f"Starting download task for partition: {partition}")
+    task_logger.info(f"Starting download for partition: {partition}")
     
     try:
-        gcs = VisionGCSManager()
+        gcs = GCSManager.from_config()
         
         # Check if already exists
-        tb_marker = f"vision/raw/tb/{partition}/.complete"
-        lc_marker = f"vision/raw/lung_cancer/{partition}/.complete"
+        tb_marker = gcp_config.get_gcs_path('vision', 'raw/tb', partition=partition) + ".complete"
+        lc_marker = gcp_config.get_gcs_path('vision', 'raw/lung_cancer', partition=partition) + ".complete"
         
         if gcs.blob_exists(tb_marker) and gcs.blob_exists(lc_marker):
-            logger.info(f"✓ Data already exists for {partition} - SKIPPING")
+            logger.info(f"Data exists for {partition} - SKIPPING")
             task_logger.info(f"Skipped - markers exist")
             context['ti'].xcom_push(key='partition', value=partition)
             context['ti'].xcom_push(key='skipped', value=True)
@@ -136,7 +128,7 @@ def download_kaggle_to_gcs(**context):
             task_logger.error(error_msg)
             raise Exception(error_msg)
         
-        logger.info("✓ Download complete")
+        logger.info("Download complete")
         logger.info(result.stdout)
         task_logger.info("Kaggle download complete")
         
@@ -149,7 +141,7 @@ def download_kaggle_to_gcs(**context):
             # Upload TB
             for tb_dir in local_raw.glob('tb/*'):
                 if tb_dir.is_dir():
-                    tb_gcs_path = f"vision/raw/tb/{partition}"
+                    tb_gcs_path = gcp_config.get_gcs_path('vision', 'raw', 'tb', partition).rstrip('/')
                     logger.info(f"Uploading TB to {tb_gcs_path}")
                     task_logger.info(f"Uploading TB: {tb_dir} -> {tb_gcs_path}")
                     tb_count += gcs.upload_directory(str(tb_dir), tb_gcs_path, max_workers=15)
@@ -161,7 +153,7 @@ def download_kaggle_to_gcs(**context):
             # Upload Lung Cancer
             for lc_dir in local_raw.glob('lung_cancer*/*'):
                 if lc_dir.is_dir():
-                    lc_gcs_path = f"vision/raw/lung_cancer/{partition}"
+                    lc_gcs_path = gcp_config.get_gcs_path('vision', 'raw', 'lung_cancer', partition).rstrip('/')
                     logger.info(f"Uploading Lung Cancer to {lc_gcs_path}")
                     task_logger.info(f"Uploading LC: {lc_dir} -> {lc_gcs_path}")
                     lc_count += gcs.upload_directory(str(lc_dir), lc_gcs_path, max_workers=15)
@@ -175,9 +167,7 @@ def download_kaggle_to_gcs(**context):
         context['ti'].xcom_push(key='tb_files', value=tb_count)
         context['ti'].xcom_push(key='lc_files', value=lc_count)
         
-        logger.info("="*80)
-        logger.info(f"✓ Download complete (TB: {tb_count}, LC: {lc_count})")
-        logger.info("="*80)
+        logger.info(f" Download complete (TB: {tb_count}, LC: {lc_count})")
         task_logger.info(f"Task complete: TB={tb_count}, LC={lc_count}")
         return "Success"
         
@@ -192,22 +182,18 @@ def preprocess_images_gcs(**context):
     partition = get_partition(context, task_ids='download_kaggle_to_gcs')
     task_logger = setup_task_logging('preprocess_images', partition)
     
-    logger.info("="*80)
     logger.info("TASK: Preprocess Images - Started")
-    logger.info("="*80)
     task_logger.info(f"Starting preprocessing for partition: {partition}")
     
     try:
-        gcs = VisionGCSManager()
+        gcs = GCSManager.from_config()
         
         # Check if already preprocessed
-        tb_marker = f"vision/preprocessed/tb/{partition}/.complete"
-        lc_marker = f"vision/preprocessed/lung_cancer/{partition}/.complete"
+        tb_marker = gcp_config.get_gcs_path('vision', 'preprocessed', 'tb', partition) + ".complete"
+        lc_marker = gcp_config.get_gcs_path('vision', 'preprocessed', 'lung_cancer', partition) + ".complete"
         
         if gcs.blob_exists(tb_marker) and gcs.blob_exists(lc_marker):
-            logger.info("="*80)
-            logger.info(f"✓ Preprocessed data already exists for {partition} - SKIPPING")
-            logger.info("="*80)
+            logger.info(f"Preprocessed data exists for {partition} - SKIPPING")
             task_logger.info("Skipped - markers exist")
             context['ti'].xcom_push(key='preprocessing_complete', value=True)
             context['ti'].xcom_push(key='skipped', value=True)
@@ -226,7 +212,7 @@ def preprocess_images_gcs(**context):
         result = subprocess.run(tb_cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
         if result.returncode != 0:
             raise Exception(f"TB preprocessing failed: {result.stderr}")
-        logger.info("✓ TB complete")
+        logger.info("TB complete")
         logger.info(result.stdout)
         task_logger.info("TB preprocessing complete")
         
@@ -242,7 +228,7 @@ def preprocess_images_gcs(**context):
         result = subprocess.run(lc_cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
         if result.returncode != 0:
             raise Exception(f"Lung cancer preprocessing failed: {result.stderr}")
-        logger.info("✓ Lung Cancer complete")
+        logger.info("Lung Cancer complete")
         logger.info(result.stdout)
         task_logger.info("Lung Cancer preprocessing complete")
         
@@ -257,7 +243,7 @@ def preprocess_images_gcs(**context):
             
             for tb_dir in local_preprocessed.glob('tb/*'):
                 if tb_dir.is_dir():
-                    tb_gcs = f"vision/preprocessed/tb/{partition}"
+                    tb_gcs = gcp_config.get_gcs_path('vision', 'preprocessed', 'tb', partition).rstrip('/')
                     tb_count += gcs.upload_directory(str(tb_dir), tb_gcs, max_workers=15)
             
             if tb_count > 0:
@@ -266,7 +252,7 @@ def preprocess_images_gcs(**context):
             
             for lc_dir in local_preprocessed.glob('lung_cancer*/*'):
                 if lc_dir.is_dir():
-                    lc_gcs = f"vision/preprocessed/lung_cancer/{partition}"
+                    lc_gcs = gcp_config.get_gcs_path('vision', 'preprocessed', 'lung_cancer', partition).rstrip('/')
                     lc_count += gcs.upload_directory(str(lc_dir), lc_gcs, max_workers=15)
             
             if lc_count > 0:
@@ -278,9 +264,9 @@ def preprocess_images_gcs(**context):
         context['ti'].xcom_push(key='lc_processed', value=lc_count)
         context['ti'].xcom_push(key='partition', value=partition)
         
-        logger.info("="*80)
-        logger.info(f"✓ Preprocessing complete (TB: {tb_count}, LC: {lc_count})")
-        logger.info("="*80)
+        
+        logger.info(f"Preprocessing complete (TB: {tb_count}, LC: {lc_count})")
+        
         task_logger.info(f"Task complete: TB={tb_count}, LC={lc_count}")
         return "Success"
         
@@ -295,20 +281,20 @@ def generate_metadata_gcs(**context):
     partition = get_partition(context, task_ids=['preprocess_images_gcs', 'download_kaggle_to_gcs'])
     task_logger = setup_task_logging('generate_metadata', partition)
     
-    logger.info("="*80)
+    
     logger.info("TASK: Generate Metadata - Started")
-    logger.info("="*80)
+    
     task_logger.info(f"Starting metadata generation for partition: {partition}")
     
     try:
-        gcs = VisionGCSManager()
+        gcs = GCSManager.from_config()
         
         # Check if already generated
-        tb_marker = f"vision/metadata/tb/{partition}/.complete"
-        lc_marker = f"vision/metadata/lung_cancer/{partition}/.complete"
+        tb_marker = gcp_config.get_gcs_path('vision', 'metadata', 'tb', partition) + ".complete"
+        lc_marker = gcp_config.get_gcs_path('vision', 'metadata', 'lung_cancer', partition) + ".complete"
         
         if gcs.blob_exists(tb_marker) and gcs.blob_exists(lc_marker):
-            logger.info(f"✓ Metadata already exists for {partition} - SKIPPING")
+            logger.info(f"Metadata exists for {partition} - SKIPPING")
             task_logger.info("Skipped - markers exist")
             context['ti'].xcom_push(key='partition', value=partition)
             return "Success - Skipped"
@@ -325,7 +311,7 @@ def generate_metadata_gcs(**context):
         result = subprocess.run(cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
         if result.returncode != 0:
             raise Exception(f"Metadata generation failed: {result.stderr}")
-        logger.info("✓ Generation complete")
+        logger.info("Generation complete")
         logger.info(result.stdout)
         task_logger.info("Metadata generation complete")
         
@@ -338,26 +324,26 @@ def generate_metadata_gcs(**context):
             
             tb_csv = local_metadata / f'tb/{partition}/tb_patients.csv'
             if tb_csv.exists():
-                tb_gcs = f"vision/metadata/tb/{partition}/tb_patients.csv"
+                tb_gcs = gcp_config.get_gcs_path('vision', 'metadata', 'tb', partition) + "tb_patients.csv"
                 gcs.upload_file(str(tb_csv), tb_gcs)
                 gcs.create_marker(tb_marker, f"TB metadata uploaded")
-                logger.info(f"✓ TB metadata uploaded")
+                logger.info(f"TB metadata uploaded")
                 task_logger.info(f"TB metadata: {tb_csv.stat().st_size} bytes")
             
             lc_csv = local_metadata / f'lung_cancer/{partition}/lung_cancer_ct_scan_patients.csv'
             if lc_csv.exists():
-                lc_gcs = f"vision/metadata/lung_cancer/{partition}/lung_cancer_ct_scan_patients.csv"
+                lc_gcs = gcp_config.get_gcs_path('vision', 'metadata', 'lung_cancer', partition) + "lung_cancer_ct_scan_patients.csv"
                 gcs.upload_file(str(lc_csv), lc_gcs)
                 gcs.create_marker(lc_marker, f"Lung Cancer metadata uploaded")
-                logger.info(f"✓ Lung Cancer metadata uploaded")
+                logger.info(f"Lung Cancer metadata uploaded")
                 task_logger.info(f"LC metadata: {lc_csv.stat().st_size} bytes")
         
         context['ti'].xcom_push(key='metadata_uploaded', value=True)
         context['ti'].xcom_push(key='partition', value=partition)
         
-        logger.info("="*80)
-        logger.info("✓ Metadata generation complete")
-        logger.info("="*80)
+        
+        logger.info("Metadata generation complete")
+        
         task_logger.info("Task complete")
         return "Success"
         
@@ -373,19 +359,19 @@ def validate_and_upload_gcs(**context):
                                                   'download_kaggle_to_gcs'])
     task_logger = setup_task_logging('validate_and_upload', partition)
     
-    logger.info("="*80)
+    
     logger.info("TASK: Validate Data - Started")
-    logger.info("="*80)
+    
     logger.info(f"Using partition: {partition}")
     task_logger.info(f"Starting validation for partition: {partition}")
     
     try:
-        gcs = VisionGCSManager()
+        gcs = GCSManager.from_config()
         
         # Check if already validated
-        marker = f"vision/ge_outputs/validations/{partition}/.complete"
+        marker = gcp_config.get_gcs_path('vision', 'ge_outputs/validations', partition=partition) + ".complete"
         if gcs.blob_exists(marker):
-            logger.info(f"✓ Validation already complete for {partition} - SKIPPING")
+            logger.info(f"Validation complete for {partition} - SKIPPING")
             task_logger.info("Skipped - marker exists")
             context['ti'].xcom_push(key='partition', value=partition)
             return "Success - Skipped"
@@ -402,7 +388,7 @@ def validate_and_upload_gcs(**context):
         result = subprocess.run(cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
         if result.returncode != 0:
             raise Exception(f"Validation failed: {result.stderr}")
-        logger.info("✓ Validation complete")
+        logger.info("Validation complete")
         logger.info(result.stdout)
         task_logger.info("Validation complete")
         
@@ -418,10 +404,10 @@ def validate_and_upload_gcs(**context):
                           'drift', 'bias_analysis', 'eda', 'reports']:
                 local_subdir = local_ge / subdir
                 if local_subdir.exists():
-                    gcs_path = f"vision/ge_outputs/{subdir}/{partition}"
+                    gcs_path = gcp_config.get_gcs_path('vision', f'ge_outputs/{subdir}', partition=partition).rstrip('/')
                     count = gcs.upload_directory(str(local_subdir), gcs_path, max_workers=10)
                     uploaded_count += count
-                    logger.info(f"  ✓ {subdir}: {count} files")
+                    logger.info(f"  {subdir}: {count} files")
                     task_logger.info(f"{subdir}: {count} files uploaded")
         
         # Upload mitigated metadata
@@ -429,10 +415,10 @@ def validate_and_upload_gcs(**context):
         if local_mitigated.exists():
             logger.info("Uploading bias-mitigated metadata...")
             task_logger.info("Uploading mitigated metadata")
-            mitigated_gcs = f"vision/metadata_mitigated/{partition}"
+            mitigated_gcs = gcp_config.get_gcs_path('vision', 'metadata_mitigated', partition=partition).rstrip('/')
             count = gcs.upload_directory(str(local_mitigated), mitigated_gcs, max_workers=10)
             uploaded_count += count
-            logger.info(f"  ✓ Uploaded {count} mitigated files")
+            logger.info(f"  Uploaded {count} mitigated files")
             task_logger.info(f"Mitigated metadata: {count} files")
         
         # Upload MLflow
@@ -440,10 +426,10 @@ def validate_and_upload_gcs(**context):
         if local_mlflow.exists():
             logger.info("Uploading MLflow artifacts...")
             task_logger.info("Uploading MLflow artifacts")
-            mlflow_gcs = f"vision/mlflow/{partition}"
+            mlflow_gcs = gcp_config.get_gcs_path('vision', 'mlflow', partition=partition).rstrip('/')
             count = gcs.upload_directory(str(local_mlflow), mlflow_gcs, max_workers=10)
             uploaded_count += count
-            logger.info(f"  ✓ Uploaded {count} MLflow files")
+            logger.info(f"  Uploaded {count} MLflow files")
             task_logger.info(f"MLflow: {count} files")
         
         # Create completion marker
@@ -454,9 +440,9 @@ def validate_and_upload_gcs(**context):
         context['ti'].xcom_push(key='uploaded_files', value=uploaded_count)
         context['ti'].xcom_push(key='partition', value=partition)
         
-        logger.info("="*80)
-        logger.info(f"✓ Validation complete ({uploaded_count} files uploaded to {partition})")
-        logger.info("="*80)
+        
+        logger.info(f"Validation complete ({uploaded_count} files uploaded)")
+        
         task_logger.info(f"Task complete: {uploaded_count} files")
         return "Success"
         
@@ -467,7 +453,6 @@ def validate_and_upload_gcs(**context):
 
 
 # ALERT CHECKING TASKS
-
 def check_validation_results(**context):
     """Check validation JSON files for anomalies."""
     partition = get_partition(context, task_ids='validate_and_upload_gcs')
@@ -478,7 +463,6 @@ def check_validation_results(**context):
     
     result = alert_utils.check_validation_results()
     
-    # Push to XCom
     context['ti'].xcom_push(key='anomalies', value=result.get('anomalies', []))
     context['ti'].xcom_push(key='total_anomalies', value=result.get('total_anomalies', 0))
     context['ti'].xcom_push(key='alert_needed', value=result.get('alert_needed', False))
@@ -497,7 +481,6 @@ def check_drift_results(**context):
     
     result = alert_utils.check_drift_results()
     
-    # Push to XCom
     context['ti'].xcom_push(key='drift_details', value=result.get('drift_details', []))
     context['ti'].xcom_push(key='total_drifted_features', value=result.get('total_drifted_features', 0))
     context['ti'].xcom_push(key='drift_detected', value=result.get('drift_detected', False))
@@ -511,9 +494,9 @@ def check_bias_results(**context):
     partition = get_partition(context, task_ids='validate_and_upload_gcs')
     task_logger = setup_task_logging('check_bias', partition)
     
-    logger.info("="*80)
+    
     logger.info("Checking bias analysis results...")
-    logger.info("="*80)
+    
     task_logger.info(f"Checking bias for partition: {partition}")
     
     bias_base = '/opt/airflow/DataPipeline/data/ge_outputs/bias_analysis'
@@ -553,7 +536,7 @@ def check_bias_results(**context):
                 bias_found.append({
                     'dataset': dataset_name,
                     'num_biases': num_biases,
-                    'details': significant_biases[:5]  # First 5
+                    'details': significant_biases[:5]
                 })
                 total_biases += num_biases
         
@@ -562,9 +545,8 @@ def check_bias_results(**context):
             task_logger.error(f"Error reading {bias_file}: {e}")
     
     if bias_found:
-        logger.warning("="*80)
-        logger.warning(f"⚠️  BIAS ALERT: {total_biases} biases detected!")
-        logger.warning("="*80)
+        logger.warning(f" BIAS ALERT: {total_biases} biases detected!")
+        
         task_logger.warning(f"BIAS DETECTED: {total_biases} total biases")
         
         context['ti'].xcom_push(key='bias_details', value=bias_found)
@@ -572,9 +554,9 @@ def check_bias_results(**context):
         
         return {'bias_detected': True, 'total_biases': total_biases, 'bias_details': bias_found}
     else:
-        logger.info("="*80)
-        logger.info("✓ No significant bias detected")
-        logger.info("="*80)
+        
+        logger.info(" No significant bias detected")
+        
         task_logger.info("No significant bias detected")
         return {'bias_detected': False, 'total_biases': 0, 'bias_details': []}
 
@@ -592,20 +574,20 @@ def should_send_alert(**context):
     has_bias = bias_details and len(bias_details) > 0
     
     if has_anomalies or has_drift or has_bias:
-        logger.warning("="*80)
-        logger.warning("🚨 ALERT NEEDED - Issues detected")
+        
+        logger.warning(" ALERT NEEDED - Issues detected")
         if has_anomalies:
             logger.warning(f"  - Anomalies: {len(anomalies)} datasets")
         if has_drift:
             logger.warning(f"  - Drift: {len(drift_details)} datasets")
         if has_bias:
             logger.warning(f"  - Bias: {len(bias_details)} datasets")
-        logger.warning("="*80)
+        
         return True
     else:
-        logger.info("="*80)
-        logger.info("✓ No alerts needed - All checks passed")
-        logger.info("="*80)
+        
+        logger.info(" No alerts needed - All checks passed")
+        
         return False
 
 
@@ -636,13 +618,11 @@ def generate_alert_email(**context):
         partition=partition
     )
     
-    # Push to XCom for EmailOperator
     ti.xcom_push(key='email_body_plain', value=plain_text)
     ti.xcom_push(key='email_body_html', value=html_body)
     
-    logger.info("\n" + "="*80)
     logger.info("EMAIL CONTENT GENERATED")
-    logger.info("="*80)
+    
     logger.info(plain_text)
     
     return plain_text
@@ -653,9 +633,9 @@ def cleanup_temp_data(**context):
     partition = get_partition(context, task_ids='validate_and_upload_gcs')
     task_logger = setup_task_logging('cleanup', partition)
     
-    logger.info("="*80)
+    
     logger.info("TASK: Cleanup - Started")
-    logger.info("="*80)
+    
     task_logger.info("Starting cleanup")
     
     try:
@@ -667,15 +647,15 @@ def cleanup_temp_data(**context):
         for path in temp_paths:
             if path.exists():
                 shutil.rmtree(path, ignore_errors=True)
-                logger.info(f"✓ Cleaned: {path}")
+                logger.info(f" Cleaned: {path}")
                 task_logger.info(f"Cleaned: {path}")
         
         Path('/opt/airflow/DataPipeline/data').mkdir(exist_ok=True)
         Path('/opt/airflow/DataPipeline/temp').mkdir(exist_ok=True)
         
-        logger.info("="*80)
-        logger.info("✓ Cleanup complete")
-        logger.info("="*80)
+        
+        logger.info(" Cleanup complete")
+        
         task_logger.info("Cleanup complete")
         return "Success"
         
@@ -685,15 +665,14 @@ def cleanup_temp_data(**context):
         return "Partial"
 
 # DAG DEFINITION
-
 with DAG(
     dag_id='medscan_vision_pipeline_gcs',
     default_args=default_args,
-    description='MedScan AI Vision Pipeline with GCS Storage and Comprehensive Alerts',
+    description='MedScan AI Vision Pipeline with GCS integration',
     schedule_interval=None,
     start_date=days_ago(1),
     catchup=False,
-    tags=['vision', 'medical-imaging', 'gcs', 'bias-detection', 'alerts'],
+    tags=['vision', 'medical-imaging', 'gcs'],
     max_active_runs=1,
 ) as dag:
     
@@ -743,7 +722,6 @@ with DAG(
         provide_context=True,
     )
     
-    # Gate for conditional email
     check_if_alert_needed = ShortCircuitOperator(
         task_id='check_if_alert_needed',
         python_callable=should_send_alert,
@@ -756,11 +734,10 @@ with DAG(
         provide_context=True,
     )
     
-    # Email operator (only runs if alerts needed)
     send_alert_email = EmailOperator(
         task_id='send_alert_email',
         to=ALERT_EMAILS,
-        subject='🚨 MedScan AI Pipeline Alert - {{ execution_date.strftime("%Y-%m-%d %H:%M") }}',
+        subject=' MedScan AI Pipeline Alert - {{ execution_date.strftime("%Y-%m-%d %H:%M") }}',
         html_content="{{ task_instance.xcom_pull(task_ids='generate_alert_email', key='email_body_html') }}",
     )
     
@@ -772,7 +749,7 @@ with DAG(
     
     complete = EmptyOperator(task_id='complete')
     
-    # Pipeline flow with bias check added
+    # Pipeline flow
     start >> download >> preprocess >> metadata >> validate
     validate >> check_validation >> check_drift >> check_bias >> check_if_alert_needed
     check_if_alert_needed >> generate_email >> send_alert_email >> cleanup >> complete

@@ -1,7 +1,12 @@
-"""Simple alert utilities for RAG pipeline using Airflow's email."""
+"""
+Alert utilities for RAG Pipeline]
+"""
 import logging
 from typing import Dict, Any, Optional
 from airflow.utils.email import send_email
+
+# Import unified config
+from DataPipeline.config import gcp_config
 
 logger = logging.getLogger(__name__)
 
@@ -12,23 +17,16 @@ def send_failure_alert(
     context: Dict[str, Any],
     recipients: list
 ):
-    """Send email alert when task fails.
-    
-    Args:
-        task_name: Name of the failed task
-        error_message: Error message
-        context: Airflow context dictionary
-        recipients: List of email addresses
-    """
+    """Send email alert when task fails."""
     if not recipients:
-        logger.warning("No email recipients configured for alerts")
+        logger.warning("No email recipients configured")
         return
     
     execution_date = context.get('execution_date', 'Unknown')
     dag_id = context.get('dag', {}).dag_id if 'dag' in context else 'Unknown'
     run_id = context.get('run_id', 'Unknown')
     
-    subject = f"❌ RAG Pipeline Task Failed: {task_name}"
+    subject = f" RAG Pipeline Task Failed: {task_name}"
     
     html_content = f"""
     <html>
@@ -52,6 +50,7 @@ def send_failure_alert(
                 <p><strong>DAG:</strong> {dag_id}</p>
                 <p><strong>Run ID:</strong> {run_id}</p>
                 <p><strong>Execution Date:</strong> {execution_date}</p>
+                <p><strong>Bucket:</strong> gs://{gcp_config.BUCKET_NAME}</p>
             </div>
             
             <div class="error">
@@ -59,8 +58,7 @@ def send_failure_alert(
                 <pre>{error_message}</pre>
             </div>
             
-            <p>Please check the Airflow logs for more details.</p>
-            <p><em>This is an automated alert from the MedScan RAG Pipeline.</em></p>
+            <p>Check Airflow logs: <a href="{gcp_config.AIRFLOW_URL}">{gcp_config.AIRFLOW_URL}</a></p>
         </div>
     </body>
     </html>
@@ -74,7 +72,7 @@ def send_failure_alert(
         )
         logger.info(f"Failure alert sent to {len(recipients)} recipients")
     except Exception as e:
-        logger.error(f"Failed to send email alert: {e}")
+        logger.error(f"Failed to send email: {e}")
 
 
 def send_threshold_alert(
@@ -86,28 +84,18 @@ def send_threshold_alert(
     recipients: list,
     additional_info: Optional[Dict] = None
 ):
-    """Send email alert when threshold is exceeded.
-    
-    Args:
-        task_name: Name of the task
-        threshold_name: Name of the threshold metric
-        actual_value: Actual measured value
-        threshold_value: Threshold value that was exceeded
-        context: Airflow context dictionary
-        recipients: List of email addresses
-        additional_info: Optional additional context
-    """
+    """Send email alert when threshold is exceeded."""
     if not recipients:
-        logger.warning("No email recipients configured for alerts")
+        logger.warning("No email recipients configured")
         return
     
     execution_date = context.get('execution_date', 'Unknown')
     dag_id = context.get('dag', {}).dag_id if 'dag' in context else 'Unknown'
     run_id = context.get('run_id', 'Unknown')
     
-    subject = f"⚠️ RAG Pipeline Threshold Exceeded: {threshold_name}"
+    subject = f"RAG Pipeline Threshold Exceeded: {threshold_name}"
     
-    # Build additional info section
+    # Build additional info
     additional_info_html = ""
     if additional_info:
         additional_info_html = "<h4>Additional Information:</h4><ul>"
@@ -137,6 +125,7 @@ def send_threshold_alert(
                 <p><strong>DAG:</strong> {dag_id}</p>
                 <p><strong>Run ID:</strong> {run_id}</p>
                 <p><strong>Execution Date:</strong> {execution_date}</p>
+                <p><strong>Bucket:</strong> gs://{gcp_config.BUCKET_NAME}</p>
             </div>
             
             <div class="warning">
@@ -147,8 +136,8 @@ def send_threshold_alert(
                 {additional_info_html}
             </div>
             
-            <p>The pipeline continued running, but this metric exceeded the configured threshold.</p>
-            <p><em>This is an automated alert from the MedScan RAG Pipeline.</em></p>
+            <p>Pipeline continued running, but review recommended.</p>
+            <p><a href="{gcp_config.AIRFLOW_URL}">View Airflow →</a></p>
         </div>
     </body>
     </html>
@@ -162,4 +151,4 @@ def send_threshold_alert(
         )
         logger.info(f"Threshold alert sent to {len(recipients)} recipients")
     except Exception as e:
-        logger.error(f"Failed to send email alert: {e}")
+        logger.error(f"Failed to send email: {e}")

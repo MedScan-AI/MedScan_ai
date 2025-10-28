@@ -15,24 +15,24 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
 
     # Python path
-    PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
+    PYTHONPATH: /opt/airflow:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
 
     # MLflow
-    MLFLOW_TRACKING_URI: "file:///tmp/mlflow"
+    MLFLOW_TRACKING_URI: "file:///opt/airflow/mlflow"
 
     # Email configuration
-    AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+    AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST}
     AIRFLOW__SMTP__SMTP_STARTTLS: "True"
     AIRFLOW__SMTP__SMTP_SSL: "False"
-    AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER:-noreply@medscan.ai}
-    AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD:-dummy}
-    AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT:-587}
-    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM:-noreply@medscan.ai}
+    AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD}
+    AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM}
 
-    # GCP/GCS for RAG
+    # GCP/GCS
     GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-service-account.json
-    GCP_PROJECT_ID: ${GCP_PROJECT_ID:-medscanai-476203}
-    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-medscan-rag-data}
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
 
   volumes:
     # Airflow directories
@@ -43,12 +43,12 @@ x-airflow-common: &airflow-common
     # Project directories
     - ../DataPipeline:/opt/airflow/DataPipeline
     - ../requirements.txt:/opt/airflow/requirements.txt
-    - ../scripts:/opt/airflow/scripts
-    - ../config:/opt/airflow/config
-    - ../data:/opt/airflow/data
 
     # GCP credentials
     - ~/gcp-service-account.json:/opt/airflow/gcp-service-account.json:ro
+
+    # MLflow tracking directory
+    - ./mlflow:/opt/airflow/mlflow
 
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
   depends_on:
@@ -87,10 +87,15 @@ services:
         echo "✓ Postgres ready"
         echo ""
 
+        mkdir -p /opt/airflow/mlflow/mlruns
+        mkdir -p /opt/airflow/mlflow/artifacts
+        chmod -R 777 /opt/airflow/mlflow
+        echo "✓ MLflow directory created with permissions"
+
         # Initialize database
         airflow db migrate 2>/dev/null || airflow db init
 
-        # Create user (ignore if exists)
+        # Create user
         airflow users create \
           --username ${AIRFLOW_USERNAME:-airflow} \
           --password ${AIRFLOW_PASSWORD:-airflow123} \
@@ -108,7 +113,7 @@ services:
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
-      PYTHONPATH: /opt/airflow:/opt/airflow/scripts:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
+      PYTHONPATH: /opt/airflow:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
     depends_on:
       postgres:
         condition: service_healthy

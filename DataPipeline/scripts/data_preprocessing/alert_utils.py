@@ -1,96 +1,21 @@
 """
 Alert utilities for Vision Pipeline
-Enhanced with bias detection support and improved email formatting
 """
 import logging
-import smtplib
-import traceback
 import json
 import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "config"))
-import vision_gcp_config
+# Import unified config
+from DataPipeline.config import gcp_config
 
 logger = logging.getLogger(__name__)
 
 
-def send_email_alert(subject: str, body: str, html_body: str = None, recipients: list = None):
-    """
-    Send email alert using SMTP configuration.
-    
-    Args:
-        subject: Email subject
-        body: Plain text body
-        html_body: HTML formatted body (optional, preferred)
-        recipients: List of email addresses (uses config default if None)
-    """
-    alert_config = vision_gcp_config.get_alert_config()
-    
-    if not alert_config.get('enabled', True):
-        logger.info("Email alerts disabled, skipping")
-        return
-    
-    recipients = recipients or alert_config.get('email_recipients', [])
-    smtp_settings = alert_config.get('smtp_settings', {})
-    
-    if not recipients:
-        logger.warning("No email recipients configured")
-        return
-    
-    try:
-        # Create message
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"[MedScan Vision] {subject}"
-        msg['From'] = smtp_settings.get('username', 'noreply@medscan.ai')
-        msg['To'] = ', '.join(recipients)
-        msg['Date'] = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')
-        
-        # Attach plain text version
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Attach HTML version if provided
-        if html_body:
-            msg.attach(MIMEText(html_body, 'html'))
-        
-        # Send email
-        with smtplib.SMTP(smtp_settings.get('host', 'smtp.gmail.com'), 
-                         smtp_settings.get('port', 587)) as server:
-            if smtp_settings.get('use_tls', True):
-                server.starttls()
-            
-            username = smtp_settings.get('username')
-            password = smtp_settings.get('password')
-            
-            if username and password:
-                server.login(username, password)
-            
-            server.send_message(msg)
-        
-        logger.info(f"✓ Email alert sent: {subject} → {recipients}")
-        
-    except Exception as e:
-        logger.error(f"Failed to send email alert: {e}", exc_info=True)
-
-
 def check_validation_results(validation_dir: str = '/opt/airflow/DataPipeline/data/ge_outputs/validations') -> dict:
-    """
-    Check validation results and return anomaly details.
-    
-    Returns:
-        {
-            'alert_needed': bool,
-            'total_anomalies': int,
-            'anomalies': [{'dataset': str, 'num_anomalies': int, 'details': []}]
-        }
-    """
-    logger.info("="*80)
+    """Check validation results and return anomaly details."""
     logger.info("Checking validation results for anomalies...")
-    logger.info("="*80)
     
     validation_files = []
     if os.path.exists(validation_dir):
@@ -100,7 +25,7 @@ def check_validation_results(validation_dir: str = '/opt/airflow/DataPipeline/da
                     validation_files.append(os.path.join(root, file))
     
     if not validation_files:
-        logger.info("No validation files found. Skipping anomaly check.")
+        logger.info("No validation files found.")
         return {'alert_needed': False, 'total_anomalies': 0, 'anomalies': []}
     
     anomalies_found = []
@@ -132,35 +57,24 @@ def check_validation_results(validation_dir: str = '/opt/airflow/DataPipeline/da
             logger.error(f"Error reading validation file {val_file}: {e}")
     
     if anomalies_found:
-        logger.warning("="*80)
-        logger.warning(f"⚠️  ALERT: {total_anomalies} total anomalies found!")
-        logger.warning("="*80)
+        logger.warning(f" ALERT: {total_anomalies} total anomalies found!")
+        
         return {
             'alert_needed': True,
             'total_anomalies': total_anomalies,
             'anomalies': anomalies_found
         }
     else:
-        logger.info("="*80)
-        logger.info("✓ No anomalies detected")
-        logger.info("="*80)
+        
+        logger.info(" No anomalies detected")
+        
         return {'alert_needed': False, 'total_anomalies': 0, 'anomalies': []}
 
 
 def check_drift_results(drift_dir: str = '/opt/airflow/DataPipeline/data/ge_outputs/drift') -> dict:
-    """
-    Check drift detection results.
+    """Check drift detection results."""
     
-    Returns:
-        {
-            'drift_detected': bool,
-            'total_drifted_features': int,
-            'drift_details': [{'dataset': str, 'num_drifted': int, 'features': []}]
-        }
-    """
-    logger.info("="*80)
     logger.info("Checking drift detection results...")
-    logger.info("="*80)
     
     drift_files = []
     if os.path.exists(drift_dir):
@@ -170,7 +84,7 @@ def check_drift_results(drift_dir: str = '/opt/airflow/DataPipeline/data/ge_outp
                     drift_files.append(os.path.join(root, file))
     
     if not drift_files:
-        logger.info("No drift files found. Skipping drift check.")
+        logger.info("No drift files found.")
         return {'drift_detected': False, 'total_drifted_features': 0, 'drift_details': []}
     
     drift_found = []
@@ -202,18 +116,18 @@ def check_drift_results(drift_dir: str = '/opt/airflow/DataPipeline/data/ge_outp
             logger.error(f"Error reading drift file {drift_file}: {e}")
     
     if drift_found:
-        logger.warning("="*80)
-        logger.warning(f"⚠️  DRIFT ALERT: {total_drifted_features} features drifted!")
-        logger.warning("="*80)
+        
+        logger.warning(f" DRIFT ALERT: {total_drifted_features} features drifted!")
+        
         return {
             'drift_detected': True,
             'total_drifted_features': total_drifted_features,
             'drift_details': drift_found
         }
     else:
-        logger.info("="*80)
-        logger.info("✓ No drift detected")
-        logger.info("="*80)
+        
+        logger.info(" No drift detected")
+        
         return {'drift_detected': False, 'total_drifted_features': 0, 'drift_details': []}
 
 
@@ -222,13 +136,8 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
                                  bias_details: list, total_biases: int,
                                  dag_run_id: str, execution_date: str,
                                  partition: str) -> tuple:
-    """
-    Generate both plain text and HTML email content.
-    NOW INCLUDES BIAS DETECTION!
+    """Generate both plain text and HTML email content."""
     
-    Returns:
-        (plain_text_body, html_body)
-    """
     # Plain text version
     email_lines = [
         "MedScan AI Data Pipeline Alert",
@@ -241,7 +150,7 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
     
     if anomalies:
         email_lines.extend([
-            "🚨 DATA VALIDATION ALERTS",
+            "DATA VALIDATION ALERTS",
             "=" * 60,
             f"Total Anomalies Detected: {total_anomalies}",
             ""
@@ -263,7 +172,7 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
     
     if drift_details:
         email_lines.extend([
-            "⚠️  DATA DRIFT ALERTS",
+            " DATA DRIFT ALERTS",
             "=" * 60,
             f"Total Drifted Features: {total_drifted}",
             ""
@@ -275,10 +184,9 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
             email_lines.append(f"  Features: {', '.join(drift['features'])}")
             email_lines.append("")
     
-    # ADD BIAS SECTION
     if bias_details:
         email_lines.extend([
-            "⚠️  BIAS DETECTION ALERTS",
+            " BIAS DETECTION ALERTS",
             "=" * 60,
             f"Total Biases Detected: {total_biases}",
             ""
@@ -301,14 +209,14 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
     email_lines.extend([
         "RECOMMENDED ACTIONS",
         "=" * 60,
-        "1. Review validation reports in GCS: gs://your-bucket/vision/ge_outputs/",
-        "2. Check bias analysis HTML reports for detailed slicing analysis",
-        "3. Review drift analysis for feature-level details",
-        "4. Consider model retraining if significant drift detected",
-        "5. Apply bias mitigation strategies before training models",
+        f"1. Review reports in GCS: gs://{gcp_config.BUCKET_NAME}/vision/ge_outputs/{partition}/",
+        "2. Check bias analysis HTML reports",
+        "3. Review drift analysis for details",
+        "4. Apply bias mitigation if needed",
+        "5. Consider model retraining if drift significant",
         "",
-        f"View full logs in Airflow UI: {vision_gcp_config.AIRFLOW_URL}",
-        f"GCS Console: {vision_gcp_config.get_gcs_console_url(f'vision/ge_outputs/{partition}')}",
+        f"Airflow UI: {gcp_config.AIRFLOW_URL}",
+        f"GCS Console: {gcp_config.get_gcs_console_url(f'vision/ge_outputs/{partition}')}",
     ])
     
     plain_text = "\n".join(email_lines)
@@ -328,12 +236,11 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
             .details {{ margin-left: 20px; font-size: 14px; color: #666; }}
             .actions {{ background: #e8f5e9; padding: 15px; border-left: 4px solid #4caf50; }}
             .footer {{ padding: 10px; text-align: center; font-size: 12px; color: #666; background: #333; color: white; }}
-            ul {{ margin: 10px 0; }}
         </style>
     </head>
     <body>
         <div class="header">
-            <h1>🚨 MedScan AI Pipeline Alert</h1>
+            <h1> MedScan AI Pipeline Alert</h1>
             <p>Issues Detected in Data Pipeline</p>
         </div>
         <div class="content">
@@ -348,8 +255,8 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
     if anomalies:
         html_body += f"""
             <div class="section">
-                <h3>🚨 DATA VALIDATION ALERTS</h3>
-                <p><strong>Total Anomalies Detected:</strong> {total_anomalies}</p>
+                <h3> DATA VALIDATION ALERTS</h3>
+                <p><strong>Total Anomalies:</strong> {total_anomalies}</p>
         """
         for anom in anomalies:
             html_body += f"""
@@ -358,7 +265,7 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
                     <strong>Anomalies:</strong> {anom['num_anomalies']}<br>
             """
             if anom.get('details'):
-                html_body += "<div class='details'><strong>Details:</strong><ul>"
+                html_body += "<div class='details'><ul>"
                 for detail in anom['details']:
                     if isinstance(detail, dict):
                         col = detail.get('column', 'Unknown')
@@ -373,7 +280,7 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
     if drift_details:
         html_body += f"""
             <div class="section">
-                <h3>⚠️ DATA DRIFT ALERTS</h3>
+                <h3> DATA DRIFT ALERTS</h3>
                 <p><strong>Total Drifted Features:</strong> {total_drifted}</p>
         """
         for drift in drift_details:
@@ -386,13 +293,11 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
             """
         html_body += "</div>"
     
-    # ADD BIAS SECTION TO HTML
     if bias_details:
         html_body += f"""
             <div class="section">
-                <h3>⚠️ BIAS DETECTION ALERTS</h3>
-                <p><strong>Total Biases Detected:</strong> {total_biases}</p>
-                <p style="color: #d32f2f;">Bias detected in data slicing analysis. Review bias reports before model training.</p>
+                <h3> BIAS DETECTION ALERTS</h3>
+                <p><strong>Total Biases:</strong> {total_biases}</p>
         """
         for bias in bias_details:
             html_body += f"""
@@ -401,7 +306,7 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
                     <strong>Significant Biases:</strong> {bias['num_biases']}<br>
             """
             if bias.get('details'):
-                html_body += "<div class='details'><strong>Problematic Slices:</strong><ul>"
+                html_body += "<div class='details'><ul>"
                 for detail in bias['details'][:5]:
                     if isinstance(detail, dict):
                         slice_name = detail.get('slice', 'Unknown')
@@ -417,22 +322,21 @@ def generate_alert_email_content(anomalies: list, total_anomalies: int,
             <div class="actions">
                 <h3>📋 RECOMMENDED ACTIONS</h3>
                 <ol>
-                    <li>Review validation reports in GCS: <code>gs://{vision_gcp_config.GCS_BUCKET_NAME}/vision/ge_outputs/{partition}/</code></li>
-                    <li><strong>Review bias analysis HTML reports</strong> for detailed slicing insights</li>
-                    <li>Check drift analysis for feature-level details</li>
-                    <li>Consider data augmentation or resampling to address bias</li>
-                    <li>Apply bias mitigation strategies before model training</li>
-                    <li>Consider retraining if significant drift detected</li>
+                    <li>Review reports: <code>gs://{gcp_config.BUCKET_NAME}/vision/ge_outputs/{partition}/</code></li>
+                    <li>Check bias analysis HTML reports</li>
+                    <li>Review drift analysis</li>
+                    <li>Apply bias mitigation strategies</li>
+                    <li>Consider model retraining if needed</li>
                 </ol>
                 <p>
-                    <a href="{vision_gcp_config.AIRFLOW_URL}" style="color: #4caf50; font-weight: bold;">View Airflow Logs →</a> | 
-                    <a href="{vision_gcp_config.get_gcs_console_url(f'vision/ge_outputs/{partition}')}" style="color: #2196F3; font-weight: bold;">View GCS Reports →</a>
+                    <a href="{gcp_config.AIRFLOW_URL}">View Airflow →</a> | 
+                    <a href="{gcp_config.get_gcs_console_url(f'vision/ge_outputs/{partition}')}">View GCS →</a>
                 </p>
             </div>
         </div>
         <div class="footer">
-            <p>MedScan AI Automated Data Pipeline - Vision Module</p>
-            <p>GCS Bucket: {vision_gcp_config.GCS_BUCKET_NAME} | Partition: {partition}</p>
+            <p>MedScan AI Automated Data Pipeline</p>
+            <p>Bucket: {gcp_config.BUCKET_NAME} | Partition: {partition}</p>
         </div>
     </body>
     </html>

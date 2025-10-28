@@ -1,28 +1,45 @@
 #!/bin/bash
 set -e
 
-echo "=========================================="
-echo "GCS Setup for Vision Pipeline"
-echo "=========================================="
+echo "MedScan AI - Unified GCS Bucket Setup"
+echo ""
 
 export GOOGLE_APPLICATION_CREDENTIALS=~/gcp-service-account.json
 
-python << 'EOF'
+python3 << 'EOF'
 from google.cloud import storage
 
-# YOUR project and existing bucket
-client = storage.Client(project="medscanai-476500")
-bucket_name = "medscan-pipeline-medscanai-476500"  # Use existing bucket
+# Single unified bucket
+project_id = "medscanai-476203"
+bucket_name = "medscan-data"
 
-# Get existing bucket
-bucket = client.get_bucket(bucket_name)
-print(f"✓ Using existing bucket: {bucket_name}")
+client = storage.Client(project=project_id)
+
+# Create or get bucket
+try:
+    bucket = client.get_bucket(bucket_name)
+    print(f"✓ Using existing bucket: {bucket_name}")
+except:
+    bucket = client.create_bucket(bucket_name, location="us-central1")
+    print(f"✓ Created bucket: {bucket_name}")
+
+print("")
+print("Creating unified folder structure:")
 print("")
 
-print("Creating vision pipeline folders:")
-
-# Vision folder structure
+# Unified folder structure for both pipelines
 folders = [
+    # RAG Pipeline
+    "RAG/config/",
+    "RAG/raw_data/baseline/",
+    "RAG/raw_data/incremental/",
+    "RAG/validation/",
+    "RAG/validation/reports/",
+    "RAG/chunks/",
+    "RAG/embeddings/",
+    "RAG/index/",
+    
+    # Vision Pipeline
     "vision/raw/tb/",
     "vision/raw/lung_cancer/",
     "vision/preprocessed/tb/",
@@ -44,14 +61,25 @@ folders = [
 
 for folder in folders:
     blob = bucket.blob(folder + ".gitkeep")
-    blob.upload_from_string("")
-    print(f"  ✓ {folder}")
+    if not blob.exists():
+        blob.upload_from_string("")
+        print(f"  ✓ {folder}")
+    else:
+        print(f"  - {folder} (exists)")
 
 print("")
-print("="*50)
-print("✓ Setup complete!")
-print(f"  Project: medscanai-476500")
-print(f"  Bucket: gs://{bucket_name}")
-print(f"  Vision: gs://{bucket_name}/vision/")
-print("="*50)
+print("✓ GCS Setup Complete!")
+print(f"Project: {project_id}")
+print(f"Bucket: gs://{bucket_name}")
+print(f"  - RAG: gs://{bucket_name}/RAG/")
+print(f"  - Vision: gs://{bucket_name}/vision/")
+print(f"Total Folders: {len(folders)}")
+print("")
+print("Next Steps:")
+print("  1. Run: python DataPipeline/scripts/RAG/create_urls_file.py")
+print("  2. Start Airflow and run DAGs")
+
 EOF
+
+echo ""
+echo "Setup complete!"

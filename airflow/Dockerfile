@@ -42,13 +42,9 @@ USER airflow
 # Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip
 
-# Vision pipeline dependencies
-COPY requirements-pipeline.txt /opt/airflow/requirements-pipeline.txt
-RUN pip install --no-cache-dir -r /opt/airflow/requirements-pipeline.txt
-
-# RAG pipeline dependencies
-COPY DataPipeline/scripts/RAG/requirements.txt /opt/airflow/requirements-rag.txt
-RUN pip install --no-cache-dir -r /opt/airflow/requirements-rag.txt
+# Pipeline dependencies
+COPY requirements.txt /opt/airflow/requirements.txt
+RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
 
 RUN pip install --no-cache-dir \
     sentence-transformers \

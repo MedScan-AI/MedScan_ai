@@ -1,16 +1,20 @@
-"""Data quality analysis - TFDV style."""
-
+"""
+Data quality analysis - TFDV style
+"""
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
 from .validator import DataValidator
 from .anomalies_and_bias_detection import AnomalyDetector
 from .drift import DriftDetector
+
+# Import unified config
+from DataPipeline.config import gcp_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -20,14 +24,14 @@ logging.basicConfig(
 
 
 class DataQualityAnalyzer:
-    """Simple data quality analysis pipeline."""
+    """Data quality analysis pipeline using unified GCS paths."""
 
-    # GCS paths (source of truth)
-    GCS_BASELINE_PATH = "RAG/raw_data/baseline/baseline.jsonl"
-    GCS_BASELINE_STATS_PATH = "RAG/validation/baseline_stats.json"
+    # GCS paths using unified config
+    GCS_BASELINE_PATH = gcp_config.get_gcs_path('rag', 'raw_data/baseline') + "baseline.jsonl"
+    GCS_BASELINE_STATS_PATH = gcp_config.get_gcs_path('rag', 'validation') + "baseline_stats.json"
     
     # Local working directory
-    WORK_DIR = Path("/opt/airflow/data/validation_work")
+    WORK_DIR = gcp_config.LOCAL_PATHS['temp'] / "validation_work"
     
     # Local temporary files
     LOCAL_BASELINE = WORK_DIR / "baseline.jsonl"
@@ -49,7 +53,6 @@ class DataQualityAnalyzer:
 
     def load_jsonl(self, filepath) -> pd.DataFrame:
         """Load JSONL file."""
-        # Convert to Path if string
         filepath = Path(filepath) if isinstance(filepath, str) else filepath
         
         records = []
@@ -86,11 +89,11 @@ class DataQualityAnalyzer:
         train_df, val_df = self.split_data(baseline_df)
         print(f"Training: {len(train_df)} | Validation: {len(val_df)}")
         
-        # Compute stats from training data
+        # Compute stats
         baseline_stats = self.anomaly_detector.compute_baseline_stats(train_df)
         schema = self._infer_schema(train_df)
         
-        # Run validation checks on validation split
+        # Run validation
         print("\nVALIDATION CHECKS (on validation split)")
         ge_results = self.validator.validate_with_ge(train_df, val_df, store_baseline=True)
         print(f"Success Rate: {ge_results.get('success_rate', 0):.1f}%")
@@ -145,7 +148,7 @@ class DataQualityAnalyzer:
         # Schema validation
         schema_val = self.validator.validate_schema_completeness(new_df, schema)
         if not schema_val.get('has_issues'):
-            print("Schema matches baseline")
+            print("✓ Schema matches baseline")
         else:
             print("Schema issues detected:")
             if schema_val.get('missing_columns'):
@@ -158,11 +161,11 @@ class DataQualityAnalyzer:
         print("DATA TYPE VALIDATION")
         type_issues = self.validator.validate_data_types(new_df, "New Data", schema)
         if type_issues:
-            print("Type issues found:")
+            print("Type issues:")
             for col, issue in type_issues.items():
                 print(f"  {col}: {issue}")
         else:
-            print("No type issues")
+            print("✓ No type issues")
         print()
         
         # Anomaly detection
@@ -187,7 +190,7 @@ class DataQualityAnalyzer:
         bias = self.anomaly_detector.detect_bias(new_df)
         self._print_bias(bias)
         
-        # Drift detection (need baseline data)
+        # Drift detection
         print("DRIFT DETECTION")
         if self.gcs and self.gcs.blob_exists(self.GCS_BASELINE_PATH):
             self.gcs.download_file(self.GCS_BASELINE_PATH, str(self.LOCAL_BASELINE))
@@ -198,7 +201,7 @@ class DataQualityAnalyzer:
             drift_features = [f for f, d in drift_results.items() if d and d.get('has_drift')]
             print(f"Drift detected in {len(drift_features)} features")
         else:
-            print("Baseline data not available for drift detection")
+            print("Baseline data not available")
             drift_results = {}
         print()
         
@@ -256,33 +259,3 @@ class DataQualityAnalyzer:
             for topic, count in list(bias['top_topics'].items())[:3]:
                 print(f"  {topic}: {count}")
         print()
-
-
-def main():
-    """Run analysis pipeline - for standalone testing only."""
-    print("\n" + "="*80)
-    print("DATA QUALITY ANALYSIS PIPELINE")
-    print("="*80)
-    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # This is only for local testing
-    BASELINE_FILE = Path("/opt/airflow/data/scraped_baseline.jsonl")
-    NEW_DATA_FILE = Path("/opt/airflow/data/scraped_updated.jsonl")
-    
-    # Phase 1: Baseline
-    analyzer = DataQualityAnalyzer(is_baseline=True)
-    baseline_df = analyzer.load_jsonl(BASELINE_FILE)
-    analyzer.generate_baseline_stats(baseline_df)
-    
-    # Phase 2: New Data
-    analyzer = DataQualityAnalyzer(is_baseline=False)
-    new_df = analyzer.load_jsonl(NEW_DATA_FILE)
-    results = analyzer.validate_against_baseline(new_df)
-    
-    print("\n" + "="*80)
-    print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*80)
-
-
-if __name__ == "__main__":
-    main()

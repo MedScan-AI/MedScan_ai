@@ -1,16 +1,22 @@
-"""Manage URLs from GCS configuration file."""
+"""
+URL Manager for RAG Pipeline
+"""
 import logging
 from pathlib import Path
+
+# Import unified config
+from DataPipeline.config import gcp_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def read_urls_from_gcs(gcs_manager, gcs_path: str) -> list:
+    """Read URLs from GCS configuration file."""
     logger.info(f"Reading URLs from GCS: {gcs_path}")
     
     # Download to temp location
-    local_temp = Path("/opt/airflow/data/RAG/temp/urls.txt")
+    local_temp = gcp_config.LOCAL_PATHS['temp'] / "urls.txt"
     local_temp.parent.mkdir(parents=True, exist_ok=True)
     
     success = gcs_manager.download_file(gcs_path, str(local_temp))
@@ -43,7 +49,8 @@ def get_default_urls() -> list:
 
 
 def upload_urls_to_gcs(gcs_manager, urls: list, gcs_path: str):
-    local_temp = Path("/opt/airflow/data/RAG/temp/urls_upload.txt")
+    """Upload URLs to GCS."""
+    local_temp = gcp_config.LOCAL_PATHS['temp'] / "urls_upload.txt"
     local_temp.parent.mkdir(parents=True, exist_ok=True)
     
     # Write URLs
