@@ -42,10 +42,6 @@ gcloud config set project YOUR_PROJECT_ID
 gcloud auth application-default login
 ```
 
-### Environment Variables
-
-TBD - Environment variables will be documented upon implementation
-
 ## Project Structure
 
 ```
