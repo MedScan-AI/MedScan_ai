@@ -1,6 +1,0 @@
-[core]
-    remote = local
-['remote "local"']
-    url = /Users/harshitha/dvc-storage/medscan-ai
-['remote "rag"']
-    url = gs://medscan-rag-data

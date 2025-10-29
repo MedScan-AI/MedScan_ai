@@ -79,23 +79,22 @@ services:
     command:
       - -c
       - |
-        # Wait for postgres
+        set -e
+
+        echo "Waiting for PostgreSQL..."
         while ! pg_isready -h postgres -U airflow 2>/dev/null; do
           sleep 1
         done
-
-        echo "✓ Postgres ready"
+        echo "PostgreSQL ready"
         echo ""
 
-        mkdir -p /opt/airflow/mlflow/mlruns
-        mkdir -p /opt/airflow/mlflow/artifacts
-        chmod -R 777 /opt/airflow/mlflow
-        echo "✓ MLflow directory created with permissions"
-
-        # Initialize database
+        # Initialize Airflow database
+        echo "Initializing Airflow database..."
         airflow db migrate 2>/dev/null || airflow db init
+        echo ""
 
-        # Create user
+        # Create Airflow user
+        echo "Creating Airflow user..."
         airflow users create \
           --username ${AIRFLOW_USERNAME:-airflow} \
           --password ${AIRFLOW_PASSWORD:-airflow123} \
@@ -103,10 +102,41 @@ services:
           --lastname ${AIRFLOW_LASTNAME:-User} \
           --role Admin \
           --email ${AIRFLOW_EMAIL:-admin@medscan.ai} 2>/dev/null || echo "User already exists"
-
-        echo "Access Airflow at: http://localhost:8080"
-        echo "Login: ${AIRFLOW_USERNAME:-airflow} / ${AIRFLOW_PASSWORD:-airflow123}"
         echo ""
+
+        # Setup MLflow directories
+        echo "Setting up MLflow..."
+        mkdir -p /opt/airflow/mlflow/mlruns
+        mkdir -p /opt/airflow/mlflow/artifacts
+        chmod -R 777 /opt/airflow/mlflow
+        echo "MLflow directories ready"
+        echo ""
+
+        # Run complete initialization (GCS + DVC)
+        if [ -f /opt/airflow/gcp-service-account.json ]; then
+          echo "Running complete initialization..."
+          cd /opt/airflow/DataPipeline
+          bash scripts/common/complete_init.sh
+        else
+          echo "WARNING: GCP credentials not found"
+          echo "Skipping GCS and DVC initialization"
+          echo "Place credentials at ~/gcp-service-account.json and restart"
+        fi
+        echo ""
+
+        echo "================================================"
+        echo "Initialization Complete"
+        echo "================================================"
+        echo ""
+        echo "Airflow UI: http://localhost:8080"
+        echo "Username: ${AIRFLOW_USERNAME:-airflow}"
+        echo "Password: ${AIRFLOW_PASSWORD:-airflow123}"
+        echo ""
+        echo "Available DAGs:"
+        echo "  - medscan_vision_pipeline_dvc"
+        echo "  - rag_data_pipeline_dvc"
+        echo "================================================"
+
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -114,6 +144,9 @@ services:
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
       PYTHONPATH: /opt/airflow:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-service-account.json
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-medscanai-476203}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-medscan-data}
     depends_on:
       postgres:
         condition: service_healthy
