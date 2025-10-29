@@ -1,73 +1,16 @@
-## Dataset Information
+# MedScan AI
 
-### **Medical Image Datasets**
+AI-powered radiological assistant for CT scan analysis with explainable AI and patient engagement RAG to answer questions about their report's content.
 
-**Time Period**: Public datasets updated through 2024
+Note: This project is in the initial development phase. Repository structure, naming conventions, technology choices, and implementation details are subject to change based on ongoing technical discussions and requirements refinement.
 
-**Size**:
+## About MedScan AI
 
-- Tuberculosis X-rays: ~700 images
-- Lung Cancer CT scans: ~1,000 images
+Scope - Click [here](docs/Scoping.pdf) 
 
-#### **Data Types**
+### High Level Architecture
 
-**Vision Pipeline (Medical Images)**:
-
-- **Images**: Chest X-rays (TB), CT scans (Lung Cancer)
-- **Metadata**: Patient demographics, symptoms, medical history
-- **Numerical**: Age, weight, height
-- **Categorical**: Gender, diagnosis class, urgency level
-- **Text**: Presenting symptoms, medications, surgical history
-
-**RAG Pipeline (Medical Knowledge)**:
-
-- **Text**: Medical articles, research papers, treatment guidelines
-- **Metadata**: Authors, publication dates, source types
-- **Topics**: Treatment methods, disease information, clinical guidelines
-
-### **Data Sources**
-
-1. **Medical Images**: Kaggle public datasets
-
-   - [Tuberculosis Chest X-ray Dataset](https://www.kaggle.com/datasets/tawsifurrahman/tuberculosis-tb-chest-xray-dataset)
-   - [Lung Cancer CT Scan Dataset](https://www.kaggle.com/datasets/dishantrathi20/ct-scan-images-for-lung-cancer)
-
-2. **Medical Knowledge**: Trusted medical sources
-   - CDC, WHO, Mayo Clinic
-   - NIH/PubMed research papers
-   - Cancer.org, NCI treatment guidelines
-   - Clinical journals and research databases
-
-## Key Features
-
-### Data Pipeline Capabilities
-
-- ✅ **Automated Data Acquisition**: Fetches datasets from Kaggle with partitioning
-- ✅ **Image Preprocessing**: Standardizes images to 224x224 JPEG format
-- ✅ **Synthetic Metadata Generation**: Creates realistic patient demographics using Faker
-- ✅ **Comprehensive Validation**: Schema validation, drift detection, anomaly detection
-- ✅ **Bias Detection & Mitigation**: Advanced fairness analysis using Fairlearn, SliceFinder, TFMA
-- ✅ **Data Versioning**: DVC integration with GCS for reproducibility
-- ✅ **RAG Knowledge Base**: Medical article scraping, chunking, embedding, and FAISS indexing
-- ✅ **Email Alerts**: Automated notifications for anomalies, drift, and bias
-- ✅ **MLflow Tracking**: Experiment tracking and artifact logging
-
-### Advanced Quality Checks
-
-**Validation Framework**:
-
-- Schema consistency validation
-- Statistical drift detection (Kolmogorov-Smirnov, Chi-square tests)
-- Bias detection across demographic slices
-- Exploratory Data Analysis (EDA) with outlier detection
-- Fairness metrics (demographic parity, equalized odds)
-
-**Bias Mitigation Strategies**:
-
-- Resampling underrepresented groups
-- Class weight computation
-- Stratified split recommendations
-- Fairlearn post-processing techniques
+![Architecture](assets/high_level_architecture.png)
 
 ## Getting Started
 
@@ -84,7 +27,7 @@
 #### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/MedScan_ai.git
+git clone https://github.com/rjaditya-2702/MedScan_ai.git
 cd MedScan_ai
 ```
 
@@ -143,15 +86,22 @@ AIRFLOW__WEBSERVER__SECRET_KEY=<random-secret-key>
 AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
 
 # Airflow User
+AIRFLOW__CORE__FERNET_KEY=your-existing-fernet-key
+AIRFLOW__WEBSERVER__SECRET_KEY=your-existing-secret-key
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+
+AIRFLOW_UID=50000
+AIRFLOW_GID=0
 AIRFLOW_USERNAME=airflow
 AIRFLOW_PASSWORD=airflow123
 AIRFLOW_FIRSTNAME=Admin
 AIRFLOW_LASTNAME=User
-AIRFLOW_EMAIL=admin@medscan.ai
+AIRFLOW_EMAIL=admin@example.com
 
 # GCP Configuration
 GCP_PROJECT_ID=medscanai-476203
 GCS_BUCKET_NAME=medscan-data
+GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp-service-account.json
 
 # Email Alerts (optional)
 SMTP_HOST=smtp.gmail.com
@@ -161,6 +111,29 @@ SMTP_PASSWORD=your-app-password
 SMTP_MAIL_FROM=your-email@gmail.com
 ALERTS_ENABLED=true
 ALERT_EMAIL_RECIPIENTS=harshitha8.shekar@gmail.com,kothari.sau@northeastern.edu
+
+VISION_MAX_ANOMALY_PCT=25.0
+VISION_MAX_ANOMALIES=10
+VISION_MAX_DRIFT_FEATURES=3
+VISION_MIN_COMPLETENESS=0.95
+VISION_EXPECTED_TB_IMAGES=700
+VISION_EXPECTED_LC_IMAGES=1000
+VISION_VARIANCE_TOLERANCE=0.1
+VISION_MIN_IMAGE_COUNT=500
+VISION_PREPROCESS_MIN_SUCCESS=0.95
+VISION_BIAS_MAX_VARIANCE=0.3
+VISION_BIAS_MIN_REPRESENTATION=0.05
+
+RAG_SCRAPING_MIN_SUCCESS=0.7
+RAG_MAX_ANOMALY_PCT=25.0
+RAG_MAX_DRIFT_FEATURES=3
+RAG_EMBEDDING_MIN_SUCCESS=0.95
+RAG_MIN_VECTORS=100
+
+AIRFLOW_URL=http://localhost:8080
+MLFLOW_URL=http://localhost:5000
+SKIP_CONFIG_VALIDATION=false
+DEBUG=false
 EOF
 ```
 
@@ -227,7 +200,6 @@ exit
 open http://localhost:8080
 # Login: airflow / airflow123
 ```
-
 ## Usage
 
 ### Running Pipelines
@@ -298,50 +270,81 @@ docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc
 scrape_data → check_baseline → [create_baseline OR validate_data] →
 chunk_data → generate_embeddings → create_index → track_all_with_dvc
 ```
-
-### Managing Medical URLs
-
-The RAG pipeline uses a versioned URLs list stored in GCS.
-
-#### View Current URLs
+### Running Tests
 
 ```bash
-docker-compose exec webserver bash
-cd /opt/airflow/DataPipeline
-python scripts/common/manage_urls.py list
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=src tests/
 ```
 
-#### Add New Medical Resources
+## Dataset Information
 
-```bash
-# Add URLs
-python scripts/common/manage_urls.py add \
-  "https://www.nejm.org/doi/full/10.1056/NEJMoa1234567" \
-  "https://pubmed.ncbi.nlm.nih.gov/12345678/"
-```
+### **Medical Image Datasets**
 
-#### Download and Edit
+**Time Period**: Public datasets updated through 2024
 
-```bash
-# Download current list
-python scripts/common/manage_urls.py download -o urls.txt
+**Size**:
 
-# Edit
-nano urls.txt
+- Tuberculosis X-rays: ~700 images
+- Lung Cancer CT scans: ~1,000 images
 
-# Upload updated list (creates automatic backup)
-python scripts/common/manage_urls.py upload urls.txt
-```
+#### **Data Types**
 
-#### View Version History
+**Vision Pipeline (Medical Images)**:
 
-```bash
-# List all versions
-python scripts/common/manage_urls.py list
+- **Images**: Chest X-rays (TB), CT scans (Lung Cancer)
+- **Metadata**: Patient demographics, symptoms, medical history
+- **Numerical**: Age, weight, height
+- **Categorical**: Gender, diagnosis class, urgency level
+- **Text**: Presenting symptoms, medications, surgical history
 
-# Restore previous version
-python scripts/common/manage_urls.py restore RAG/config/versions/urls_20250129_120000.txt
-```
+**RAG Pipeline (Medical Knowledge)**:
+
+- **Text**: Medical articles, research papers, treatment guidelines
+- **Metadata**: Authors, publication dates, source types
+- **Topics**: Treatment methods, disease information, clinical guidelines
+
+### **Data Sources**
+
+1. **Medical Images**: Kaggle public datasets
+
+   - [Tuberculosis Chest X-ray Dataset](https://www.kaggle.com/datasets/tawsifurrahman/tuberculosis-tb-chest-xray-dataset)
+   - [Lung Cancer CT Scan Dataset](https://www.kaggle.com/datasets/dishantrathi20/ct-scan-images-for-lung-cancer)
+
+2. **Medical Knowledge**: Trusted medical sources
+
+## Key Features
+
+### Data Pipeline Capabilities
+
+-  **Automated Data Acquisition**: Fetches datasets from Kaggle with partitioning
+-  **Image Preprocessing**: Standardizes images to 224x224 JPEG format
+-  **Synthetic Metadata Generation**: Creates realistic patient demographics using Faker
+-  **Comprehensive Validation**: Schema validation, drift detection, anomaly detection
+-  **Bias Detection & Mitigation**: Advanced fairness analysis using Fairlearn, SliceFinder, TFMA
+-  **Data Versioning**: DVC integration with GCS for reproducibility
+-  **RAG Knowledge Base**: Medical article scraping, chunking, embedding, and FAISS indexing
+-  **Email Alerts**: Automated notifications for anomalies, drift, and bias
+
+### Advanced Quality Checks
+
+**Validation Framework**:
+
+- Schema consistency validation
+- Statistical drift detection (Kolmogorov-Smirnov, Chi-square tests)
+- Bias detection across demographic slices
+- Exploratory Data Analysis (EDA) with outlier detection
+- Fairness metrics (demographic parity, equalized odds)
+
+**Bias Mitigation Strategies**:
+
+- Resampling underrepresented groups
+- Class weight computation
+- Stratified split recommendations
+- Fairlearn post-processing techniques
 
 ### Data Versioning with DVC
 
@@ -358,67 +361,6 @@ dvc status
 dvc status -r vision
 dvc status -r rag
 ```
-
-#### Pull Data from DVC
-
-```bash
-# Pull all data
-dvc pull
-
-# Pull specific pipeline
-dvc pull -r vision
-dvc pull -r rag
-
-# Pull specific dataset
-dvc pull data/raw.dvc
-```
-
-#### View Tracked Files
-
-```bash
-# List DVC tracked files
-ls -la *.dvc
-ls -la data/*.dvc
-
-# View DVC file content
-cat data/raw.dvc
-```
-
-## Data Quality & Validation
-
-### Validation Pipeline
-
-The pipeline performs comprehensive data quality checks:
-
-**Schema Validation**:
-
-- Validates against predefined schemas
-- Detects missing/extra columns
-- Checks data type consistency
-- Tracks schema changes over time
-
-**Drift Detection**:
-
-- Kolmogorov-Smirnov test for numerical features
-- Chi-square test for categorical features
-- Temporal distribution monitoring
-- Alert if drift exceeds thresholds
-
-**Bias Detection**:
-
-- **SliceFinder**: Automatic discovery of problematic data slices
-- **Fairlearn**: Industry-standard fairness metrics
-- **TFMA**: Model performance across demographic groups
-- Detects disparate impact, unequal representation
-- Age, gender, diagnosis class analysis
-
-**Bias Mitigation**:
-
-- Resampling underrepresented groups
-- Class weight computation
-- Stratified sampling recommendations
-- Fairlearn post-processing techniques
-
 ### Alerts
 
 Email alerts are configured for:
@@ -429,67 +371,3 @@ Email alerts are configured for:
 - **Drift Detection**: More than 3 features show drift
 - **Bias Detection**: Fairness violations detected
 - **DVC Operations**: Push/pull failures
-
-Alert thresholds (configurable in `.env`):
-
-```bash
-VISION_MAX_ANOMALY_PCT=25.0
-VISION_MAX_DRIFT_FEATURES=3
-RAG_SCRAPING_MIN_SUCCESS=0.7
-RAG_EMBEDDING_MIN_SUCCESS=0.95
-```
-
-## Monitoring
-
-### Airflow UI
-
-Monitor pipeline execution:
-
-```
-http://localhost:8080
-Username: airflow
-Password: airflow123
-```
-
-Features:
-
-- DAG run history
-- Task logs
-- Task duration metrics
-- Retry tracking
-- Email alert history
-
-### MLflow Tracking
-
-View experiment metrics:
-
-```bash
-docker-compose exec webserver bash
-cd /opt/airflow/DataPipeline
-mlflow ui --backend-store-uri file:///opt/airflow/mlflow/mlruns
-
-# Access at: http://localhost:5000
-```
-
-Tracked metrics:
-
-- Dataset statistics
-- Validation results
-- Drift metrics
-- Bias detection results
-- Schema changes
-
-### GCS Console
-
-View stored data and reports:
-
-```
-https://console.cloud.google.com/storage/browser/medscan-data
-```
-
-Structure:
-
-- `vision/ge_outputs/` - Validation reports and HTML visualizations
-- `vision/mlflow/` - MLflow artifacts
-- `RAG/validation/` - RAG validation reports
-- `dvc-storage/` - Versioned data storage
