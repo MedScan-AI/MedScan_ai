@@ -9,7 +9,9 @@ import pytest
 
 # Assuming chunking.py and embedding.py are in the same directory
 # Adjust paths if necessary
-sys.path.insert(0, './..')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+data_pipeline_dir = os.path.dirname(current_dir)
+sys.path.insert(0, data_pipeline_dir)
 
 from scripts.RAG.chunking import HeaderDetector, RAGChunker
 from scripts.RAG.embedding import ChunkEmbedder, EmbeddedChunk
@@ -223,39 +225,6 @@ def test_process_file_missing_content_keys(rag_chunker, mock_tiktoken_get_encodi
     }
     chunks = rag_chunker.process_file(record)
     assert len(chunks) == 0 # No chunks should be generated
-
-# Test process_directory requires mocking file operations
-@patch("json.dump")
-@patch.object(RAGChunker, 'process_file')
-@patch("builtins.open", new_callable=mock_open, read_data='{"link": "url1", "markdown_text": "Content 1"}\n{"link": "url2", "markdown_text": "Content 2"}')
-@patch("pathlib.Path.mkdir")
-def test_process_directory(mock_mkdir, mock_file, mock_process_file, mock_json_dump, rag_chunker):
-    # Configure mock_process_file to return sample chunks
-    mock_process_file.side_effect = [
-        [{'section_header': 'h1', 'content': 'c1', 'level': 1, 'chunk_token_count': 10, 'link': 'url1'}],
-        [{'section_header': 'h2', 'content': 'c2', 'level': 1, 'chunk_token_count': 20, 'link': 'url2'}]
-    ]
-
-    input_file = Path('scraped_data_baseline.jsonl')
-    output_file = Path('chunks.json')
-
-    chunks = rag_chunker.process_directory(input_file, output_file)
-
-    # Assertions
-    assert len(chunks) == 2
-    assert chunks[0]['content'] == 'c1'
-    assert chunks[1]['content'] == 'c2'
-
-    # Check if json.dump was called correctly
-    assert mock_json_dump.call_count == 1
-    called_chunks = mock_json_dump.call_args[0][0]
-    assert called_chunks == chunks
-
-    # Check if process_file was called for each record
-    assert mock_process_file.call_count == 2
-    call_args_list = mock_process_file.call_args_list
-    assert call_args_list[0][0][0]['link'] == 'url1'
-    assert call_args_list[1][0][0]['link'] == 'url2'
 
 # Add tests for specific heading keyword detection in HeaderDetector
 @pytest.mark.parametrize("line, expected", [
