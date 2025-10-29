@@ -1,15 +1,20 @@
 import asyncio
 import json
 import sys
+import pytest
+import os
+
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import pytest
+current_dir = os.path.dirname(os.path.abspath(__file__))
+data_pipeline_dir = os.path.dirname(current_dir)
+project_dir = os.path.dirname(data_pipeline_dir)
+sys.path.insert(0, project_dir)
 
-# Adjust path if necessary
-sys.path.insert(0, './..')
+os.environ["ALERTS_ENABLED"] = "false"
 
-from scripts.RAG.scraper import (
+from DataPipeline.scripts.RAG.scraper import (
     GLOBAL_METRICS,
     clean_text,
     compute_token_stats,
