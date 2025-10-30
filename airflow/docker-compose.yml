@@ -17,9 +17,6 @@ x-airflow-common: &airflow-common
     # Python path
     PYTHONPATH: /opt/airflow:/opt/airflow/DataPipeline:/opt/airflow/DataPipeline/scripts:/opt/airflow/DataPipeline/config
 
-    # MLflow
-    MLFLOW_TRACKING_URI: "file:///opt/airflow/mlflow"
-
     # Email configuration
     AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST}
     AIRFLOW__SMTP__SMTP_STARTTLS: "True"
@@ -36,19 +33,16 @@ x-airflow-common: &airflow-common
 
   volumes:
     # Airflow directories
-    - ./dags:/opt/airflow/dags
-    - ./logs:/opt/airflow/logs
+    - ./dags:/opt/airflow/dags:delegated  
+    - ./logs:/opt/airflow/logs:delegated 
     - ./plugins:/opt/airflow/plugins
 
     # Project directories
-    - ../DataPipeline:/opt/airflow/DataPipeline
+    - ../DataPipeline:/opt/airflow/DataPipeline:delegated
     - ../requirements.txt:/opt/airflow/requirements.txt
 
     # GCP credentials
     - ~/gcp-service-account.json:/opt/airflow/gcp-service-account.json:ro
-
-    # MLflow tracking directory
-    - ./mlflow:/opt/airflow/mlflow
 
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
   depends_on:
@@ -102,14 +96,6 @@ services:
           --lastname ${AIRFLOW_LASTNAME:-User} \
           --role Admin \
           --email ${AIRFLOW_EMAIL:-admin@medscan.ai} 2>/dev/null || echo "User already exists"
-        echo ""
-
-        # Setup MLflow directories
-        echo "Setting up MLflow..."
-        mkdir -p /opt/airflow/mlflow/mlruns
-        mkdir -p /opt/airflow/mlflow/artifacts
-        chmod -R 777 /opt/airflow/mlflow
-        echo "MLflow directories ready"
         echo ""
 
         # Run complete initialization (GCS + DVC)

@@ -4,9 +4,9 @@
     autostage = true
 ['remote "vision"']
     url = gs://medscan-data/dvc-storage/vision
-    projectname = medscanai-476203
+    projectname = medscanai-476500
     credentialpath = /opt/airflow/gcp-service-account.json
 ['remote "rag"']
     url = gs://medscan-data/dvc-storage/rag
-    projectname = medscanai-476203
+    projectname = medscanai-476500
     credentialpath = /opt/airflow/gcp-service-account.json

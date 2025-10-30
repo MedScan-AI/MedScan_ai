@@ -12,8 +12,8 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-PROJECT_ID = "medscanai-476203"
-BUCKET_NAME = "medscan-data"
+PROJECT_ID = "medscanai-476500"
+BUCKET_NAME = "medscan-pipeline-medscanai-476500"
 
 # Medical URLs for RAG pipeline
 MEDICAL_URLS = [
