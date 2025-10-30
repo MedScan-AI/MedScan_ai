@@ -10,8 +10,8 @@ python3 << 'EOF'
 from google.cloud import storage
 
 # Single unified bucket
-project_id = "medscanai-476203"
-bucket_name = "medscan-data"
+project_id = "medscanai-476500"
+bucket_name = "medscan-pipeline-medscanai-476500"
 
 client = storage.Client(project=project_id)
 

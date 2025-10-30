@@ -98,3 +98,6 @@ docs/_build/
 *.json
 *.jsonl
 *.bin
+DataPipeline/data/
+DataPipeline/logs/
+airflow/logs/
