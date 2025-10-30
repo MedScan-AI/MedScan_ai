@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import aiohttp
 import nltk
 import tiktoken
 import trafilatura
@@ -21,6 +20,7 @@ from newspaper import Article
 from nltk import ne_chunk, pos_tag, word_tokenize
 from nltk.tree import Tree
 from playwright.async_api import async_playwright
+from DataPipeline.config import gcp_config
 
 nltk.set_proxy('')
 
@@ -28,8 +28,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='nltk')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 OUT_FILE = INPUT_DIR = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "raw_data" / "raw_data.jsonl"
+    gcp_config.LOCAL_PATHS['data'] / "RAG" / "raw_data" / "raw_data.jsonl"
 )
 
 # Setup logging

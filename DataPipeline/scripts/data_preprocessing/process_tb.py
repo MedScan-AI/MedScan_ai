@@ -748,16 +748,16 @@ def main():
     )
     
     if structure_valid:
-        print("\n✓ Directory structure validation passed")
+        print("\n Directory structure validation passed")
     else:
-        print("\n✗ Directory structure validation failed")
+        print("\n Directory structure validation failed")
     
     images_valid = validator.validate_images(target_size=target_size)
     
     if images_valid:
-        print("✓ Image format validation passed")
+        print(" Image format validation passed")
     else:
-        print("✗ Image format validation failed")
+        print(" Image format validation failed")
 
 
 if __name__ == "__main__":

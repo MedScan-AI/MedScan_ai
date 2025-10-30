@@ -18,6 +18,10 @@ from datetime import datetime
 from glob import glob
 from faker import Faker
 
+import sys
+sys.path.insert(0, '/opt/airflow/DataPipeline')
+from DataPipeline.config import gcp_config
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

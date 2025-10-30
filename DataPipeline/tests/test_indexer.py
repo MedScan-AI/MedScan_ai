@@ -8,7 +8,9 @@ import numpy as np
 import pytest
 
 # Adjust path if necessary
-sys.path.insert(0, './..')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+data_pipeline_dir = os.path.dirname(current_dir)
+sys.path.insert(0, data_pipeline_dir)
 
 from scripts.RAG.embedding import EmbeddedChunk
 from scripts.RAG.indexing import FAISSIndex

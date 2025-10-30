@@ -1,1 +1,53 @@
-/data
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+temp/
+tmp/
+
+# DVC - CRITICAL: Only ignore data, NOT .dvc files
+data/raw/
+data/preprocessed/
+data/synthetic_metadata/
+data/synthetic_metadata_mitigated/
+data/RAG/raw_data/
+data/RAG/chunks/
+data/RAG/embeddings/
+data/RAG/index/
+
+# DVC cache (internal - don't commit)
+.dvc/tmp/
+.dvc/cache/
+.dvc/plots/
+
+# MLflow
+data/mlflow_store/
+
+# Great Expectations
+data/ge_outputs/
+
+# Other
+data/partition_metadata.json
+data/test_preprocessed/
+.cache/

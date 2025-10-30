@@ -1,16 +1,15 @@
 """
-This file is for LOCAL TESTING ONLY.
+Creates urls.txt in GCS (Standalone Script)
 """
+import os
+from google.cloud import storage
+from pathlib import Path
 
-import asyncio
-import sys
+# Set credentials (local Mac path)
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(Path.home() / "gcp-service-account.json")
 
-from .chunking import main as chunker
-from .embedding import main as embedder
-from .indexing import main as indexer
-from .scraper import main as scraper
-
-urls = [
+# All URLs
+urls = urls = [
     "https://www.cdc.gov/tb/treatment/index.html",
     "https://www.mayoclinic.org/diseases-conditions/lung-cancer/diagnosis-treatment/drc-20374627",
     "https://www.cancer.org/cancer/understanding-cancer/what-is-cancer.html",
@@ -73,29 +72,52 @@ urls = [
     "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
     "https://www.sciencedirect.com/topics/pharmacology-toxicology-and-pharmaceutical-science/tuberculosis",
     "https://www.cdc.gov/infection-control/hcp/core-practices/index.html",
-    "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/"
+    "https://pmc.ncbi.nlm.nih.gov/articles/PMC6234945/",
+    # new urls
+    "https://www.cdc.gov/tb/about/index.html",
+    "https://www.cdc.gov/tb/signs-symptoms/index.html",
+    "https://www.cdc.gov/tb/treatment/active-tuberculosis-disease.html",
+    "https://www.cdc.gov/tb/hcp/clinical-overview/index.html",
+    "https://www.cdc.gov/tb/hcp/treatment/tuberculosis-disease.html",
+    "https://www.cdc.gov/mmwr/volumes/69/rr/rr6901a1.htm", 
+
+    "https://www.mayoclinic.org/diseases-conditions/tuberculosis/symptoms-causes/syc-20351250",
+    "https://www.mayoclinic.org/diseases-conditions/tuberculosis/diagnosis-treatment/drc-20351256",
+    "https://communityhealth.mayoclinic.org/featured-stories/tuberculosis"
+
+    "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
+    "https://www.who.int/health-topics/tuberculosis",
+    "https://www.who.int/publications/i/item/9789240096196",
+    "https://www.who.int/publications/i/item/9789240048126",
+    "https://www.who.int/publications/i/item/9789240063129",
+    "https://www.who.int/publications/i/item/9789240107243",
+    "https://www.who.int/publications-detail-redirect/9789240007048",
+
+    "https://jamanetwork.com/journals/jama/fullarticle/2804324",
+    "https://jamanetwork.com/journals/jama/fullarticle/2800774",
+    "https://jamanetwork.com/journals/jama/fullarticle/2804320",
+
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6857485/",
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8176349/",
+    "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8886963/",
+
+    "https://www.maxhealthcare.in/blogs/understanding-tuberculosis"
 ]
 
-try:
-    asyncio.run(scraper(urls))
-except Exception as e:
-    print(e)
-    sys.exit(1)
+# Create local file
+local_file = Path("urls.txt")
+with open(local_file, 'w') as f:
+    for url in urls:
+        f.write(url + '\n')
 
-try:
-    chunker()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+# Upload to GCS using UNIFIED bucket
+client = storage.Client(project="medscanai-476203")
+bucket = client.bucket("medscan-data") 
+blob = bucket.blob("RAG/config/urls.txt")
+blob.upload_from_filename(str(local_file))
 
-try:
-    embedder()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+print(f"Uploaded {len(urls)} URLs to GCS")
+print(f"   gs://medscan-data/RAG/config/urls.txt")  
 
-try:
-    indexer()
-except Exception as e:
-    print(e)
-    sys.exit(1)
+# Cleanup
+local_file.unlink()

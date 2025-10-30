@@ -1,0 +1,13 @@
+# Temporary files
+temp/
+logs/
+*.log
+
+# MLflow
+data/mlflow_store/
+
+# Great Expectations outputs
+data/ge_outputs/
+
+# Partition metadata
+data/partition_metadata.json

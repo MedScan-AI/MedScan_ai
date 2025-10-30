@@ -12,7 +12,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # Setup logging
-LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR = Path("/opt/airflow/logs")
 LOG_DIR.mkdir(exist_ok=True)
 log_file = LOG_DIR / f"embedding_{datetime.now().strftime('%Y-%m-%d')}.log"
 
@@ -25,15 +25,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-INPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "chunked_data" / "chunks.json"
-)
-OUTPUT_FILE = (
-    Path(__file__).parent.parent.parent / "data" / "RAG" /
-    "index" / "embeddings.json"
-)
 
 
 @dataclass
@@ -86,17 +77,24 @@ class ChunkEmbedder:
             raise
     
     def create_combined_text(self, chunk: Dict[str, Any]) -> str:
-        """
-        Combine title and content for embedding
+        """Combine title and content for embedding."""
+        # Try different field names for title
+        title = (
+            chunk.get('title') or 
+            chunk.get('section_header') or 
+            chunk.get('markdown_title') or 
+            ''
+        ).strip()
         
-        Args:
-            chunk: Dictionary containing chunk data
-            
-        Returns:
-            Combined text string
-        """
-        title = chunk.get('title', '').strip()
         content = chunk.get('content', '').strip()
+        
+        # If no content, log warning
+        if not content:
+            return title if title else ''
+        
+        # If no title, just use content
+        if not title:
+            return content
         
         # Weight title more heavily by including it twice
         combined = f"{title}. {title}. {content}"
@@ -240,7 +238,12 @@ class ChunkEmbedder:
             logger.error(f"Failed to load embeddings: {str(e)}")
             raise
 
+
 def main():
+    """Main execution function - for standalone testing only."""
+    INPUT_FILE = Path("/opt/airflow/data/RAG/chunked_data/chunks.json")
+    OUTPUT_FILE = Path("/opt/airflow/data/RAG/index/embeddings.json")
+    
     with open(INPUT_FILE, 'r', encoding='utf-8') as f:
         chunk_file = json.load(f)
 
