@@ -229,26 +229,26 @@ Data-Pipeline/
 **Step 1: Download Data**
 ```bash
 cd Data-Pipeline
-python scripts/data_acquisition/fetch_data.py --config config/vision_pipeline.yml
+python scripts/data_acquisition/fetch_data.py --config config/prod/vision_pipeline.yml
 ```
 Output: `data/raw/{dataset}/YYYY/MM/DD/`
 
 **Step 2: Preprocess Images**
 ```bash
-python scripts/data_preprocessing/process_tb.py --config config/vision_pipeline.yml
-python scripts/data_preprocessing/process_lungcancer.py --config config/vision_pipeline.yml
+python scripts/data_preprocessing/process_tb.py --config config/prod/vision_pipeline.yml
+python scripts/data_preprocessing/process_lungcancer.py --config config/prod/vision_pipeline.yml
 ```
 Output: `data/preprocessed/{dataset}/YYYY/MM/DD/`
 
 **Step 3: Generate Synthetic Metadata**
 ```bash
-python scripts/data_preprocessing/baseline_synthetic_data_generator.py --config config/synthetic_data.yml
+python scripts/data_preprocessing/baseline_synthetic_data_generator.py --config config/prod/synthetic_data.yml
 ```
 Output: `data/synthetic_metadata/YYYY/MM/DD/*.csv`
 
 **Step 4: Validate & Analyze Data**
 ```bash
-python scripts/data_preprocessing/schema_statistics.py --config config/metadata.yml
+python scripts/data_preprocessing/schema_statistics.py --config config/prod/metadata.yml
 ```
 Output: `data/ge_outputs/**/YYYY/MM/DD/`
 

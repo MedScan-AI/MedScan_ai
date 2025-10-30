@@ -1,0 +1,202 @@
+# Synthetic Patient Data Generation Configuration using Faker
+# 
+# Note: Patient IDs are extracted from preprocessed image filenames.
+# The preprocessing scripts (process_tb.py, process_lungcancer.py) 
+# automatically generate unique UUID-based Patient IDs (32-character hex strings)
+# and use them as image filenames. This generator reads those filenames to
+# ensure Patient IDs match between images and metadata.
+
+# Output configuration
+output:
+  format: "csv"  # csv or json
+  tb_output_path: "data/synthetic_metadata/tb/tb_patients.csv"
+  lung_cancer_output_path: "data/synthetic_metadata/lung_cancer/lung_cancer_ct_scan_patients.csv"
+  include_image_path: true
+  random_seed: 42  # For reproducibility, set to null for random
+  
+  # Partitioning configuration
+  use_partitioning: true  # Write to year/month/day partitions
+  use_latest_partition: true  # Only generate data for latest preprocessed partition
+
+# Faker Configuration
+faker:
+  locale: "en_US"  # Locale for Faker (en_US, en_GB, etc.)
+  
+# Patient Demographics Configuration
+demographics:
+  age_range:
+    min: 22
+    max: 85
+  
+  weight_range:  # kg
+    min: 45
+    max: 120
+  
+  height_range:  # cm
+    min: 150
+    max: 195
+  
+  gender_distribution:  # Probability weights
+    Male: 0.48
+    Female: 0.48
+    Other: 0.04
+
+# Tuberculosis Chest X-ray Specific Configuration
+tb:
+  examination_type: "X-ray"
+  body_region: "Chest"
+  
+  # Class-specific presenting symptoms
+  presenting_symptoms:
+    Tuberculosis:
+      - "Persistent cough lasting more than 3 weeks"
+      - "Coughing up blood or sputum"
+      - "Chest pain"
+      - "Night sweats"
+      - "Fever"
+      - "Unexplained weight loss"
+      - "Fatigue"
+      - "Loss of appetite"
+      - "Shortness of breath"
+    
+    Normal:
+      - "Routine screening"
+      - "Follow-up examination"
+      - "Pre-employment screening"
+      - "Contact screening"
+      - "None reported"
+  
+  # Medical treatments and medications
+  current_medications:
+    - "Isoniazid (TB treatment)"
+    - "Rifampicin (TB treatment)"
+    - "Pyrazinamide (TB treatment)"
+    - "Ethambutol (TB treatment)"
+    - "Streptomycin (TB treatment)"
+    - "Albuterol (bronchodilator)"
+    - "Prednisone (steroid)"
+    - "Vitamin B6 (pyridoxine)"
+    - "Antihistamines"
+    - "None"
+  
+  # Surgical history
+  previous_surgeries:
+    - "None"
+    - "Thoracotomy"
+    - "Lung resection"
+    - "Pleural biopsy"
+    - "Bronchoscopy"
+    - "Appendectomy"
+    - "Cholecystectomy"
+    - "Hernia repair"
+  
+  # Urgency levels and weights
+  urgency_levels:
+    Routine: 0.7
+    Urgent: 0.2
+    Emergent: 0.1
+
+# Lung Cancer CT Scan Specific Configuration
+lung_cancer:
+  examination_type: "CT"
+  body_region: "Chest"
+  
+  # Class-specific presenting symptoms
+  presenting_symptoms:
+    adenocarcinoma:
+      - "Persistent cough"
+      - "Shortness of breath"
+      - "Chest pain"
+      - "Coughing up blood"
+      - "Weight loss"
+      - "Fatigue"
+      - "Hoarseness"
+      - "Recurrent respiratory infections"
+    
+    large_cell_carcinoma:
+      - "Chronic cough"
+      - "Chest pain"
+      - "Shortness of breath"
+      - "Weight loss"
+      - "Fatigue"
+      - "Hemoptysis"
+      - "Wheezing"
+    
+    squamous_cell_carcinoma:
+      - "Persistent cough"
+      - "Hemoptysis"
+      - "Dyspnea"
+      - "Chest pain"
+      - "Weight loss"
+      - "Recurrent pneumonia"
+      - "Hoarseness"
+    
+    malignant:
+      - "Persistent cough"
+      - "Shortness of breath"
+      - "Chest pain"
+      - "Weight loss"
+      - "Fatigue"
+      - "Coughing up blood"
+    
+    benign:
+      - "Routine screening"
+      - "Follow-up examination"
+      - "Mild cough"
+      - "Chest discomfort"
+      - "None reported"
+    
+    normal:
+      - "Routine screening"
+      - "Pre-operative evaluation"
+      - "Follow-up examination"
+      - "Annual health check"
+      - "None reported"
+    
+    unlabeled:  # For test_cases
+      - "Routine screening"
+      - "Follow-up examination"
+      - "Chest discomfort"
+      - "None reported"
+  
+  # Medical treatments and medications
+  current_medications:
+    - "Albuterol (bronchodilator)"
+    - "Carboplatin (chemotherapy)"
+    - "Cisplatin (chemotherapy)"
+    - "Pembrolizumab (immunotherapy)"
+    - "Osimertinib (targeted therapy)"
+    - "Prednisone (steroid)"
+    - "Metoprolol (beta-blocker)"
+    - "Warfarin (anticoagulant)"
+    - "Omeprazole (proton pump inhibitor)"
+    - "None"
+  
+  # Surgical history
+  previous_surgeries:
+    - "None"
+    - "Lobectomy"
+    - "Wedge resection"
+    - "Pneumonectomy"
+    - "Mediastinoscopy"
+    - "Thoracotomy"
+    - "Coronary artery bypass"
+    - "Appendectomy"
+    - "Cholecystectomy"
+  
+  # Urgency levels and weights
+  urgency_levels:
+    Routine: 0.5
+    Urgent: 0.3
+    Emergent: 0.15
+    STAT: 0.05
+
+# General Configuration
+general:
+  max_symptoms_per_patient: 3  # Maximum number of symptoms to combine
+  max_medications_per_patient: 3  # Maximum number of current medications
+  max_surgeries_per_patient: 2  # Maximum number of previous surgeries
+  
+  # Probability of having no medications/surgeries
+  prob_no_medication: 0.2
+  prob_no_surgery: 0.5
