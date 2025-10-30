@@ -209,7 +209,16 @@ class SchemaStatisticsManager:
                 dt = datetime.now()
         else:
             dt = datetime.now()
-        
+        # Normalize base_output_dir to avoid double-appending an existing YYYY/MM/DD suffix
+        # If base_output_dir already ends with a date partition, strip it off
+        try:
+            parts = os.path.normpath(base_output_dir).split(os.sep)
+            if len(parts) >= 3 and parts[-3].isdigit() and len(parts[-3]) == 4 and parts[-2].isdigit() and len(parts[-2]) == 2 and parts[-1].isdigit() and len(parts[-1]) == 2:
+                base_output_dir = os.sep.join(parts[:-3])
+        except Exception:
+            # Best-effort normalization; continue if any issue
+            pass
+
         # Create disease-specific path structure
         partition_path = os.path.join(
             base_output_dir,
@@ -3445,12 +3454,10 @@ class SchemaStatisticsManager:
         viz_config = self.config['great_expectations']['visualization']
         base_output_dir = viz_config['output_dir']
         
-        # Use disease-specific partitioned output path
-        if dataset_key:
-            output_dir = self._get_ge_outputs_partition_path(base_output_dir, dataset_key, partition_timestamp)
-        else:
-            # Fallback to old method if dataset_key not provided
-            output_dir = self._get_output_partition_path(base_output_dir, partition_timestamp)
+        # Require dataset_key to avoid double partitioning and ensure disease-specific layout
+        if not dataset_key:
+            raise ValueError("dataset_key is required for report generation to avoid double partitioning")
+        output_dir = self._get_ge_outputs_partition_path(base_output_dir, dataset_key, partition_timestamp)
         
         # Generate statistics comparison HTML
         stats_html = self._generate_statistics_html(baseline_stats, new_stats)
