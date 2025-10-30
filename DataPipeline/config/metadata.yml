@@ -179,9 +179,6 @@ bias_detection:
   slicing_features:
     - "Age_Years"
     - "Age_Group"
-    - "Diagnosis_Class"
-    - "Urgency_Level"
-    - "Body_Region"
   
   # Age grouping for age-based slicing
   age_bins:

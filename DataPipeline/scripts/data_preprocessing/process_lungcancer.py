@@ -15,6 +15,7 @@ from glob import glob
 import logging
 from PIL import Image
 import numpy as np
+import pandas as pd
 
 
 class ImageProcessor:
@@ -99,6 +100,62 @@ class ImageProcessor:
         """
         img_array = np.clip(img_array * 255.0, 0, 255).astype(np.uint8)
         return Image.fromarray(img_array)
+    
+    def extract_image_metadata(self, image_path: str) -> Optional[Dict]:
+        """
+        Extract comprehensive metadata from an image file.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Dictionary containing image metadata or None if extraction fails
+        """
+        try:
+            img = Image.open(image_path)
+            
+            # Basic image properties
+            metadata = {
+                'original_size': img.size,  # (width, height)
+                'original_format': img.format,
+                'original_mode': img.mode,  # Color mode (RGB, RGBA, L, etc.)
+                'has_transparency': img.mode in ['RGBA', 'LA'],
+                'file_size_bytes': os.path.getsize(image_path),
+                'filename': os.path.basename(image_path),
+                'file_extension': os.path.splitext(image_path)[1].lower()
+            }
+            
+            # Technical metadata from PIL info (flattened for CSV)
+            if img.info:
+                for key, value in img.info.items():
+                    # Convert non-serializable values to strings
+                    metadata[f'info_{key}'] = str(value)
+            
+            # EXIF data if available (flattened for CSV)
+            if hasattr(img, '_getexif') and img._getexif() is not None:
+                exif_dict = dict(img._getexif())
+                for key, value in exif_dict.items():
+                    metadata[f'exif_{key}'] = str(value)
+            
+            # Image quality metrics (flattened for CSV)
+            img_array = np.array(img)
+            metadata['mean_brightness'] = float(np.mean(img_array))
+            metadata['std_brightness'] = float(np.std(img_array))
+            metadata['min_pixel_value'] = int(np.min(img_array))
+            metadata['max_pixel_value'] = int(np.max(img_array))
+            metadata['unique_colors'] = len(np.unique(img_array.reshape(-1, img_array.shape[-1]), axis=0)) if len(img_array.shape) > 2 else len(np.unique(img_array))
+            
+            # DPI information if available
+            if 'dpi' in img.info:
+                metadata['dpi'] = img.info['dpi']
+            elif 'jfif_density' in img.info:
+                metadata['dpi'] = img.info['jfif_density']
+            
+            return metadata
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting metadata from {image_path}: {str(e)}")
+            return None
     
     def process_single_image(self, image_path: str) -> Optional[np.ndarray]:
         """
@@ -190,6 +247,7 @@ class LungCancerPreprocessor(ImageProcessor):
             'total_failed': 0,
             'by_split_class': {}
         }
+        self.image_metadata: List[Dict] = []  # Store extracted image metadata
     
     def generate_patient_id(self) -> str:
         """
@@ -288,22 +346,26 @@ class LungCancerPreprocessor(ImageProcessor):
         self,
         image_path: Path,
         output_path: Path
-    ) -> bool:
+    ) -> Tuple[bool, Optional[Dict]]:
         """
         Preprocess a single image and save to output path.
+        Also extracts and returns image metadata.
         
         Args:
             image_path: Path to input image
             output_path: Path to save preprocessed image
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success_flag, metadata_dict)
         """
         try:
+            # Extract metadata from original image
+            metadata = self.extract_image_metadata(str(image_path))
+            
             # Load and process image
             image = self.load_image(str(image_path))
             if image is None:
-                return False
+                return False, metadata
             
             # Resize image
             resized = self.resize_image(image)
@@ -313,11 +375,20 @@ class LungCancerPreprocessor(ImageProcessor):
             output_path = output_path.with_suffix('.jpg')
             resized.save(output_path, 'JPEG', quality=self.quality, optimize=True)
             
-            return True
+            # Add preprocessing metadata
+            if metadata:
+                metadata['preprocessed_size'] = self.target_size
+                metadata['preprocessed_format'] = 'JPEG'
+                metadata['preprocessed_mode'] = 'RGB'
+                metadata['preprocessed_quality'] = self.quality
+                metadata['preprocessed_path'] = str(output_path)
+                metadata['preprocessing_timestamp'] = datetime.now().isoformat()
+            
+            return True, metadata
             
         except Exception as e:
             self.logger.error(f"Error preprocessing {image_path}: {str(e)}")
-            return False
+            return False, None
     
     def process_class_directory(
         self,
@@ -354,8 +425,16 @@ class LungCancerPreprocessor(ImageProcessor):
                 self.preprocessed_data_path / split / output_class_name / f"{patient_id}.jpg"
             )
             
-            if self.preprocess_image(image_path, output_path):
+            success, metadata = self.preprocess_image(image_path, output_path)
+            if success:
                 successful += 1
+                # Store metadata with additional context
+                if metadata:
+                    metadata['patient_id'] = patient_id
+                    metadata['split'] = split
+                    metadata['class'] = output_class_name
+                    metadata['original_path'] = str(image_path)
+                    self.image_metadata.append(metadata)
             else:
                 failed += 1
         
@@ -424,6 +503,68 @@ class LungCancerPreprocessor(ImageProcessor):
             Dictionary with statistics
         """
         return self.stats
+    
+    def save_image_metadata(self, output_path: Optional[str] = None) -> str:
+        """
+        Save collected image metadata to CSV file.
+        
+        Args:
+            output_path: Optional custom output path for metadata file
+            
+        Returns:
+            Path to saved metadata file
+        """
+        if not self.image_metadata:
+            self.logger.warning("No image metadata collected to save")
+            return ""
+        
+        if output_path is None:
+            # Save in the same directory as preprocessed data
+            metadata_path = self.preprocessed_data_path / "image_metadata.csv"
+        else:
+            metadata_path = Path(output_path)
+        
+        # Ensure directory exists
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Convert to DataFrame and save as CSV
+        df = pd.DataFrame(self.image_metadata)
+        df.to_csv(metadata_path, index=False)
+        
+        self.logger.info(f"Saved image metadata for {len(self.image_metadata)} images to {metadata_path}")
+        return str(metadata_path)
+    
+    def get_image_metadata_summary(self) -> Dict:
+        """
+        Get summary statistics of collected image metadata.
+        
+        Returns:
+            Dictionary with metadata summary statistics
+        """
+        if not self.image_metadata:
+            return {}
+        
+        # Calculate summary statistics
+        sizes = [meta['original_size'] for meta in self.image_metadata if 'original_size' in meta]
+        formats = [meta['original_format'] for meta in self.image_metadata if 'original_format' in meta]
+        modes = [meta['original_mode'] for meta in self.image_metadata if 'original_mode' in meta]
+        file_sizes = [meta['file_size_bytes'] for meta in self.image_metadata if 'file_size_bytes' in meta]
+        
+        summary = {
+            'total_images': len(self.image_metadata),
+            'unique_sizes': len(set(sizes)),
+            'size_distribution': dict(zip(*np.unique(sizes, return_counts=True))),
+            'format_distribution': dict(zip(*np.unique(formats, return_counts=True))),
+            'mode_distribution': dict(zip(*np.unique(modes, return_counts=True))),
+            'file_size_stats': {
+                'min_bytes': min(file_sizes) if file_sizes else 0,
+                'max_bytes': max(file_sizes) if file_sizes else 0,
+                'mean_bytes': np.mean(file_sizes) if file_sizes else 0,
+                'std_bytes': np.std(file_sizes) if file_sizes else 0
+            }
+        }
+        
+        return summary
 
 
 class DatasetValidator:
@@ -672,6 +813,9 @@ def main():
     # Process all images
     stats = preprocessor.process_all()
     
+    # Save image metadata
+    metadata_path = preprocessor.save_image_metadata()
+    
     # Print statistics
     print("\n" + "="*50)
     print("PREPROCESSING STATISTICS")
@@ -681,6 +825,21 @@ def main():
     for key, count in sorted(stats['by_split_class'].items()):
         print(f"  {key}: {count}")
     print("="*50)
+    
+    # Print image metadata summary
+    metadata_summary = preprocessor.get_image_metadata_summary()
+    if metadata_summary:
+        print("\n" + "="*50)
+        print("IMAGE METADATA SUMMARY")
+        print("="*50)
+        print(f"Total images with metadata: {metadata_summary['total_images']}")
+        print(f"Unique image sizes: {metadata_summary['unique_sizes']}")
+        print(f"Format distribution: {metadata_summary['format_distribution']}")
+        print(f"Color mode distribution: {metadata_summary['mode_distribution']}")
+        print(f"File size stats: {metadata_summary['file_size_stats']}")
+        if metadata_path:
+            print(f"Metadata saved to: {metadata_path}")
+        print("="*50)
     
     # Validate preprocessed data
     validator = DatasetValidator(str(preprocessed_data_path))

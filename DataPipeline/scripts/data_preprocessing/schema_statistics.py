@@ -374,6 +374,111 @@ class SchemaStatisticsManager:
         
         return partitions
     
+    def _load_image_metadata(self, dataset_key: str, partition_timestamp: str = None) -> Optional[pd.DataFrame]:
+        """
+        Load image metadata CSV files for a dataset.
+        
+        Args:
+            dataset_key: Key of the dataset in configuration
+            partition_timestamp: Optional timestamp for partition
+            
+        Returns:
+            DataFrame containing image metadata or None if not found
+        """
+        try:
+            dataset_config = self.config['datasets'][dataset_key]
+            dataset_name = dataset_config['name']
+            
+            # Determine image metadata path based on dataset
+            if dataset_key == 'tb':
+                image_metadata_path = 'data/preprocessed/tb'
+            elif dataset_key == 'lung_cancer':
+                image_metadata_path = 'data/preprocessed/lung_cancer_ct_scan'
+            else:
+                self.logger.warning(f"No image metadata path configured for dataset: {dataset_key}")
+                return None
+            
+            # Handle partitioned vs non-partitioned data
+            if partition_timestamp:
+                # Parse timestamp for partitioned path
+                try:
+                    dt = datetime.fromisoformat(partition_timestamp.replace('Z', '+00:00'))
+                    partition_path = os.path.join(
+                        image_metadata_path,
+                        f"{dt.year:04d}",
+                        f"{dt.month:02d}",
+                        f"{dt.day:02d}"
+                    )
+                    metadata_file = os.path.join(partition_path, "image_metadata.csv")
+                except:
+                    metadata_file = os.path.join(image_metadata_path, "image_metadata.csv")
+            else:
+                metadata_file = os.path.join(image_metadata_path, "image_metadata.csv")
+            
+            # Check if metadata file exists
+            if not os.path.exists(metadata_file):
+                self.logger.warning(f"Image metadata file not found: {metadata_file}")
+                return None
+            
+            # Load image metadata
+            df = pd.read_csv(metadata_file)
+            self.logger.info(f"Loaded image metadata: {len(df)} images from {metadata_file}")
+            
+            # Add dataset context
+            df['dataset_key'] = dataset_key
+            df['dataset_name'] = dataset_name
+            
+            return df
+            
+        except Exception as e:
+            self.logger.warning(f"Error loading image metadata for {dataset_key}: {e}")
+            return None
+    
+    def _merge_patient_and_image_metadata(self, patient_df: pd.DataFrame, image_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Merge patient metadata with image metadata using patient_id.
+        
+        Args:
+            patient_df: DataFrame containing patient metadata
+            image_df: DataFrame containing image metadata
+            
+        Returns:
+            Merged DataFrame or original patient_df if merge fails
+        """
+        try:
+            if image_df is None or len(image_df) == 0:
+                self.logger.warning("No image metadata to merge")
+                return patient_df
+            
+            # Check if both DataFrames have patient_id column
+            if 'Patient_ID' not in patient_df.columns:
+                self.logger.warning("Patient_ID column not found in patient metadata")
+                return patient_df
+            
+            if 'patient_id' not in image_df.columns:
+                self.logger.warning("patient_id column not found in image metadata")
+                return patient_df
+            
+            # Merge on patient_id
+            merged_df = patient_df.merge(
+                image_df, 
+                left_on='Patient_ID', 
+                right_on='patient_id', 
+                how='left'
+            )
+            
+            # Log merge statistics
+            merged_count = merged_df['patient_id'].notna().sum()
+            total_patients = len(patient_df)
+            
+            self.logger.info(f"Merged image metadata: {merged_count}/{total_patients} patients have image metadata")
+            
+            return merged_df
+            
+        except Exception as e:
+            self.logger.warning(f"Error merging patient and image metadata: {e}")
+            return patient_df
+    
     def _load_partition_data(self, partitions: List[Dict[str, Any]]) -> Optional[pd.DataFrame]:
         """
         Load data from partition(s).
@@ -748,6 +853,45 @@ class SchemaStatisticsManager:
         else:
             corr_rows = "<tr><td colspan='3' style='text-align:center;'>No high correlations found (threshold: 0.5)</td></tr>"
         
+        # Build image metadata analysis section
+        image_metadata_rows = ""
+        image_metadata_cols = ['original_mode', 'original_format', 'mean_brightness', 'file_size_bytes', 'std_brightness', 'unique_colors']
+        image_metadata_found = False
+        
+        for col in image_metadata_cols:
+            if col in numerical:
+                image_metadata_found = True
+                stats = numerical[col]
+                image_metadata_rows += f"""
+                <tr>
+                    <td><strong>{col}</strong></td>
+                    <td>{stats['mean']:.2f}</td>
+                    <td>{stats['median']:.2f}</td>
+                    <td>{stats['std']:.2f}</td>
+                    <td>{stats['min']:.2f}</td>
+                    <td>{stats['max']:.2f}</td>
+                    <td>{stats['skewness']:.2f}</td>
+                </tr>
+                """
+            elif col in categorical:
+                image_metadata_found = True
+                stats = categorical[col]
+                most_common_str = ", ".join([f"{k} ({v})" for k, v in list(stats['most_common'].items())[:3]])
+                image_metadata_rows += f"""
+                <tr>
+                    <td><strong>{col}</strong></td>
+                    <td>{stats['unique_count']}</td>
+                    <td>{stats['mode']}</td>
+                    <td>{most_common_str}</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                </tr>
+                """
+        
+        if not image_metadata_found:
+            image_metadata_rows = "<tr><td colspan='7' style='text-align:center; color:orange;'>⚠️ No image metadata found in dataset</td></tr>"
+        
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -826,6 +970,15 @@ class SchemaStatisticsManager:
                 <table>
                     <tr><th>Feature 1</th><th>Feature 2</th><th>Correlation</th></tr>
                     {corr_rows}
+                </table>
+                
+                <h2>Image Metadata Analysis</h2>
+                <table>
+                    <tr>
+                        <th>Feature</th><th>Mean</th><th>Median</th><th>Std Dev</th>
+                        <th>Min</th><th>Max</th><th>Skewness</th>
+                    </tr>
+                    {image_metadata_rows}
                 </table>
             </div>
         </body>
@@ -1147,6 +1300,71 @@ class SchemaStatisticsManager:
                         'column': col
                     })
         
+        # Image metadata constraints (automatically added if columns exist)
+        image_metadata_constraints = {
+            'original_mode': {
+                'expectation_type': 'expect_column_values_to_be_in_set',
+                'value_set': ['RGB', 'RGBA', 'L', 'LA', 'P', 'PA'],
+                'required': True
+            },
+            'original_format': {
+                'expectation_type': 'expect_column_values_to_be_in_set',
+                'value_set': ['JPEG', 'PNG', 'TIFF', 'BMP', 'WEBP'],
+                'required': True
+            },
+            'mean_brightness': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 0,
+                'max_value': 255,
+                'required': True
+            },
+            'file_size_bytes': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 1000,  # At least 1KB
+                'max_value': 50000000,  # Max 50MB
+                'required': True
+            },
+            'std_brightness': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 0,
+                'max_value': 100,
+                'required': True
+            },
+            'min_pixel_value': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 0,
+                'max_value': 255,
+                'required': True
+            },
+            'max_pixel_value': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 0,
+                'max_value': 255,
+                'required': True
+            },
+            'unique_colors': {
+                'expectation_type': 'expect_column_values_to_be_between',
+                'min_value': 1,
+                'max_value': 16777216,  # 256^3 for RGB
+                'required': True
+            }
+        }
+        
+        # Add image metadata constraints if columns exist
+        for col, config in image_metadata_constraints.items():
+            if col in df.columns:
+                expectations['expectations'].append({
+                    'expectation_type': config['expectation_type'],
+                    'column': col,
+                    **{k: v for k, v in config.items() if k != 'expectation_type'}
+                })
+                
+                if config.get('required', False):
+                    expectations['expectations'].append({
+                        'expectation_type': 'expect_column_values_to_not_be_null',
+                        'column': col
+                    })
+        
         # Save schema (partition directory already provides temporal context)
         with open(output_path, 'w') as f:
             json.dump(expectations, f, indent=2)
@@ -1189,6 +1407,10 @@ class SchemaStatisticsManager:
         self.logger.info(f"Validating data for {dataset_name}")
         
         anomalies = []
+        
+        # Validate image metadata if present
+        image_metadata_anomalies = self._validate_image_metadata(df)
+        anomalies.extend(image_metadata_anomalies)
         
         # Validate each expectation
         for expectation in expectations['expectations']:
@@ -1491,6 +1713,219 @@ class SchemaStatisticsManager:
         
         return disparate_impact
     
+    def _analyze_image_metadata_bias(self, df: pd.DataFrame, image_features: List[str]) -> Dict:
+        """
+        Analyze bias in image metadata across different patient groups.
+        
+        Args:
+            df: DataFrame containing both patient and image metadata
+            image_features: List of image metadata features to analyze
+            
+        Returns:
+            Dictionary containing image metadata bias analysis results
+        """
+        analysis = {
+            'timestamp': datetime.now().isoformat(),
+            'features_analyzed': image_features,
+            'bias_detected': False,
+            'significant_biases': [],
+            'quality_distributions': {},
+            'group_comparisons': {},
+            'recommendations': []
+        }
+        
+        try:
+            # Analyze each image feature across patient groups
+            for feature in image_features:
+                if feature not in df.columns:
+                    continue
+                
+                # Get feature statistics by patient groups (Diagnosis_Class analysis removed)
+                # Note: Diagnosis_Class, Urgency_Level, and Body_Region removed from bias analysis
+                
+                # Analyze by gender if available
+                if 'Gender' in df.columns:
+                    gender_stats = df.groupby('Gender')[feature].agg(['mean', 'std', 'min', 'max', 'count'])
+                    analysis['quality_distributions'][f'{feature}_by_gender'] = gender_stats.to_dict()
+                
+                # Analyze by age groups if available
+                if 'Age_Group' in df.columns:
+                    age_stats = df.groupby('Age_Group')[feature].agg(['mean', 'std', 'min', 'max', 'count'])
+                    analysis['quality_distributions'][f'{feature}_by_age'] = age_stats.to_dict()
+            
+            # Overall image quality assessment
+            if 'mean_brightness' in df.columns:
+                brightness_mean = df['mean_brightness'].mean()
+                brightness_std = df['mean_brightness'].std()
+                
+                # Check for extreme brightness values
+                low_brightness = df[df['mean_brightness'] < brightness_mean - 2 * brightness_std]
+                high_brightness = df[df['mean_brightness'] > brightness_mean + 2 * brightness_std]
+                
+                if len(low_brightness) > len(df) * 0.1:  # More than 10% are very dark
+                    analysis['recommendations'].append(
+                        f"Warning: {len(low_brightness)} images ({len(low_brightness)/len(df)*100:.1f}%) have very low brightness"
+                    )
+                
+                if len(high_brightness) > len(df) * 0.1:  # More than 10% are very bright
+                    analysis['recommendations'].append(
+                        f"Warning: {len(high_brightness)} images ({len(high_brightness)/len(df)*100:.1f}%) have very high brightness"
+                    )
+            
+            # File size analysis
+            if 'file_size_bytes' in df.columns:
+                size_mean = df['file_size_bytes'].mean()
+                size_std = df['file_size_bytes'].std()
+                
+                # Check for unusually large or small files
+                small_files = df[df['file_size_bytes'] < size_mean - 2 * size_std]
+                large_files = df[df['file_size_bytes'] > size_mean + 2 * size_std]
+                
+                if len(small_files) > len(df) * 0.05:  # More than 5% are very small
+                    analysis['recommendations'].append(
+                        f"Warning: {len(small_files)} images ({len(small_files)/len(df)*100:.1f}%) have unusually small file sizes - possible quality issues"
+                    )
+                
+                if len(large_files) > len(df) * 0.05:  # More than 5% are very large
+                    analysis['recommendations'].append(
+                        f"Warning: {len(large_files)} images ({len(large_files)/len(df)*100:.1f}%) have unusually large file sizes - consider compression"
+                    )
+            
+        except Exception as e:
+            self.logger.error(f"Error in image metadata bias analysis: {e}")
+            analysis['error'] = str(e)
+        
+        return analysis
+    
+    def _validate_image_metadata(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Validate image metadata for quality and consistency issues.
+        
+        Args:
+            df: DataFrame containing image metadata
+            
+        Returns:
+            List of validation anomalies
+        """
+        anomalies = []
+        
+        try:
+            # Check for image metadata columns
+            image_columns = ['original_size', 'original_format', 'original_mode', 'mean_brightness', 'file_size_bytes']
+            available_image_columns = [col for col in image_columns if col in df.columns]
+            
+            if not available_image_columns:
+                return anomalies  # No image metadata to validate
+            
+            self.logger.info(f"Validating image metadata columns: {available_image_columns}")
+            
+            # Validate image format consistency
+            if 'original_format' in df.columns:
+                format_counts = df['original_format'].value_counts()
+                if len(format_counts) > 1:
+                    anomalies.append({
+                        'column': 'original_format',
+                        'expectation': 'expect_column_values_to_be_in_set',
+                        'description': f"Multiple image formats detected: {format_counts.to_dict()}. Consider standardizing format."
+                    })
+            
+            # Validate color mode consistency
+            if 'original_mode' in df.columns:
+                mode_counts = df['original_mode'].value_counts()
+                if len(mode_counts) > 1:
+                    anomalies.append({
+                        'column': 'original_mode',
+                        'expectation': 'expect_column_values_to_be_in_set',
+                        'description': f"Multiple color modes detected: {mode_counts.to_dict()}. Consider standardizing color mode."
+                    })
+            
+            # Validate brightness range
+            if 'mean_brightness' in df.columns:
+                brightness_stats = df['mean_brightness'].describe()
+                min_brightness = brightness_stats['min']
+                max_brightness = brightness_stats['max']
+                
+                # Check for extreme brightness values
+                if min_brightness < 10:  # Very dark images
+                    dark_count = len(df[df['mean_brightness'] < 10])
+                    anomalies.append({
+                        'column': 'mean_brightness',
+                        'expectation': 'expect_column_values_to_be_between',
+                        'description': f"{dark_count} images have very low brightness (<10). Check for underexposed images."
+                    })
+                
+                if max_brightness > 245:  # Very bright images
+                    bright_count = len(df[df['mean_brightness'] > 245])
+                    anomalies.append({
+                        'column': 'mean_brightness',
+                        'expectation': 'expect_column_values_to_be_between',
+                        'description': f"{bright_count} images have very high brightness (>245). Check for overexposed images."
+                    })
+            
+            # Validate file size consistency
+            if 'file_size_bytes' in df.columns:
+                size_stats = df['file_size_bytes'].describe()
+                size_std = size_stats['std']
+                size_mean = size_stats['mean']
+                
+                # Check for unusually large file size variation
+                if size_std > size_mean * 0.5:  # High coefficient of variation
+                    anomalies.append({
+                        'column': 'file_size_bytes',
+                        'expectation': 'expect_column_values_to_be_between',
+                        'description': f"High file size variation detected (CV={size_std/size_mean:.2f}). Consider compression standardization."
+                    })
+                
+                # Check for extremely small files (possible corruption)
+                small_files = df[df['file_size_bytes'] < 1000]  # Less than 1KB
+                if len(small_files) > 0:
+                    anomalies.append({
+                        'column': 'file_size_bytes',
+                        'expectation': 'expect_column_values_to_be_between',
+                        'description': f"{len(small_files)} images have very small file sizes (<1KB). Check for corrupted files."
+                    })
+            
+            # Validate image dimensions consistency
+            if 'original_size' in df.columns:
+                # Extract dimensions from size tuples
+                try:
+                    sizes = df['original_size'].apply(lambda x: eval(x) if isinstance(x, str) else x)
+                    widths = sizes.apply(lambda x: x[0] if isinstance(x, tuple) and len(x) >= 2 else None)
+                    heights = sizes.apply(lambda x: x[1] if isinstance(x, tuple) and len(x) >= 2 else None)
+                    
+                    if widths.notna().any() and heights.notna().any():
+                        width_counts = widths.value_counts()
+                        height_counts = heights.value_counts()
+                        
+                        if len(width_counts) > 1 or len(height_counts) > 1:
+                            anomalies.append({
+                                'column': 'original_size',
+                                'expectation': 'expect_column_values_to_be_in_set',
+                                'description': f"Multiple image dimensions detected. Consider standardizing image sizes."
+                            })
+                except Exception as e:
+                    self.logger.warning(f"Error parsing image dimensions: {e}")
+            
+            # Check for missing image metadata
+            missing_metadata = df[available_image_columns].isna().any(axis=1)
+            if missing_metadata.any():
+                missing_count = missing_metadata.sum()
+                anomalies.append({
+                    'column': 'image_metadata',
+                    'expectation': 'expect_column_values_to_not_be_null',
+                    'description': f"{missing_count} records have missing image metadata. Check data completeness."
+                })
+            
+        except Exception as e:
+            self.logger.error(f"Error validating image metadata: {e}")
+            anomalies.append({
+                'column': 'image_metadata',
+                'expectation': 'validation_error',
+                'description': f"Error during image metadata validation: {str(e)}"
+            })
+        
+        return anomalies
+    
     def detect_bias_via_slicing(self, dataset_name: str, df: pd.DataFrame, 
                                 output_path: str) -> Dict:
         """
@@ -1539,15 +1974,33 @@ class SchemaStatisticsManager:
             # Replace Age_Years with Age_Group for slicing
             slicing_features = [f if f != 'Age_Years' else 'Age_Group' for f in slicing_features]
         
+        # Add image metadata slicing features if available
+        image_slicing_features = []
+        if 'original_mode' in df.columns:
+            image_slicing_features.append('original_mode')
+        if 'original_format' in df.columns:
+            image_slicing_features.append('original_format')
+        if 'mean_brightness' in df.columns:
+            image_slicing_features.append('mean_brightness')
+        if 'file_size_bytes' in df.columns:
+            image_slicing_features.append('file_size_bytes')
+        
+        # Combine patient and image slicing features
+        all_slicing_features = slicing_features + image_slicing_features
+        self.logger.info(f"Using slicing features: {all_slicing_features}")
+        
         bias_analysis = {
             'dataset_name': dataset_name,
             'timestamp': datetime.now().isoformat(),
             'total_samples': len(df),
-            'slicing_features': slicing_features,
+            'slicing_features': all_slicing_features,
+            'patient_slicing_features': slicing_features,
+            'image_slicing_features': image_slicing_features,
             'libraries_used': [],
             'slicefinder_analysis': {},
             'tfma_analysis': {},
             'fairlearn_analysis': {},
+            'image_metadata_analysis': {},
             'bias_detected': False,
             'significant_biases': [],
             'problematic_slices': [],
@@ -1555,12 +2008,25 @@ class SchemaStatisticsManager:
             'recommendations': []
         }
         
+        # 0. Image Metadata Analysis - Analyze image quality bias
+        if image_slicing_features:
+            self.logger.info("Running image metadata bias analysis...")
+            try:
+                image_analysis = self._analyze_image_metadata_bias(df, image_slicing_features)
+                bias_analysis['image_metadata_analysis'] = image_analysis
+                if image_analysis.get('bias_detected', False):
+                    bias_analysis['bias_detected'] = True
+                    bias_analysis['significant_biases'].extend(image_analysis.get('significant_biases', []))
+            except Exception as e:
+                self.logger.warning(f"Image metadata analysis failed: {e}")
+                bias_analysis['image_metadata_analysis'] = {'error': str(e)}
+        
         # 1. SliceFinder Analysis - Automatic problematic slice discovery
         if SLICEFINDER_AVAILABLE:
             self.logger.info("Running SliceFinder analysis...")
             bias_analysis['libraries_used'].append('SliceFinder')
             try:
-                slicefinder_results = self._run_slicefinder_analysis(df, slicing_features, min_slice_size)
+                slicefinder_results = self._run_slicefinder_analysis(df, all_slicing_features, min_slice_size)
                 bias_analysis['slicefinder_analysis'] = slicefinder_results
                 bias_analysis['problematic_slices'].extend(slicefinder_results.get('problematic_slices', []))
                 if slicefinder_results.get('bias_detected', False):
@@ -2562,24 +3028,9 @@ class SchemaStatisticsManager:
                         mitigation_report['strategies_applied'].append('resample_underrepresented')
                         self.logger.info(f"Balanced {len([k for k in mitigation_report['modifications'].keys() if k.startswith(feature)])} groups in {feature}")
         
-        # Strategy 2: Compute class weights for model training
-        if 'class_weights' in strategies and 'Diagnosis_Class' in df_mitigated.columns:
-            self.logger.info("Computing class weights for balanced training")
-            
-            class_counts = df_mitigated['Diagnosis_Class'].value_counts()
-            total_samples = len(df_mitigated)
-            n_classes = len(class_counts)
-            
-            # Compute balanced class weights
-            class_weights = {}
-            for cls, count in class_counts.items():
-                weight = total_samples / (n_classes * count)
-                class_weights[cls] = float(weight)
-            
-            mitigation_report['class_weights'] = class_weights
-            mitigation_report['strategies_applied'].append('class_weights')
-            
-            self.logger.info(f"Computed class weights: {class_weights}")
+        # Strategy 2: Compute class weights for model training (removed Diagnosis_Class specific logic)
+        if 'class_weights' in strategies:
+            self.logger.info("Class weights computation disabled - Diagnosis_Class removed from bias analysis")
         
         # Strategy 3: Generate stratified split recommendations
         if 'stratified_split' in strategies:
@@ -3234,6 +3685,16 @@ class SchemaStatisticsManager:
                     baseline_timestamp = baseline_partition[0]['timestamp']
                     new_timestamp = new_partition[0]['timestamp']
                     
+                    # Load and merge image metadata
+                    baseline_image_metadata = self._load_image_metadata(dataset_key, baseline_timestamp)
+                    new_image_metadata = self._load_image_metadata(dataset_key, new_timestamp)
+                    
+                    if baseline_image_metadata is not None:
+                        baseline_df = self._merge_patient_and_image_metadata(baseline_df, baseline_image_metadata)
+                    
+                    if new_image_metadata is not None:
+                        new_df = self._merge_patient_and_image_metadata(new_df, new_image_metadata)
+                    
                     self.logger.info(f"Using partition-based drift detection (2 most recent):")
                     self.logger.info(f"  Baseline: {baseline_timestamp} ({len(baseline_df)} rows)")
                     self.logger.info(f"  New: {new_timestamp} ({len(new_df)} rows)")
@@ -3256,6 +3717,12 @@ class SchemaStatisticsManager:
                         new_df = None
                         baseline_timestamp = data_partitions[0]['timestamp']
                         new_timestamp = None
+                        
+                        # Load and merge image metadata
+                        baseline_image_metadata = self._load_image_metadata(dataset_key, baseline_timestamp)
+                        if baseline_image_metadata is not None:
+                            baseline_df = self._merge_patient_and_image_metadata(baseline_df, baseline_image_metadata)
+                        
                         self.logger.info(f"Only 1 partition found. Drift detection will be skipped.")
                         self.logger.info(f"  Baseline: {baseline_timestamp} ({len(baseline_df)} rows)")
                     else:
@@ -3269,23 +3736,13 @@ class SchemaStatisticsManager:
                         
                         # Create dataset-specific drift patterns
                         if dataset_name == 'tb_patients':
-                            # TB-specific drift: Sort by diagnosis class (Normal vs Tuberculosis)
-                            if 'Diagnosis_Class' in full_df.columns:
-                                full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
-                                                                  ascending=[True, True]).reset_index(drop=True)
-                                self.logger.info(f"Creating TB-specific drift by sorting on Diagnosis_Class and Age_Years")
-                            else:
-                                full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
-                                self.logger.info(f"Creating TB-specific drift by sorting on Age_Years")
+                            # TB-specific drift: Sort by age only (Diagnosis_Class removed)
+                            full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
+                            self.logger.info(f"Creating TB-specific drift by sorting on Age_Years")
                                 
                         elif dataset_name == 'lung_cancer_ct_scan_patients':
-                            # Lung cancer-specific drift: Sort by age and urgency level
-                            if 'Age_Years' in full_df.columns and 'Urgency_Level' in full_df.columns:
-                                # Create different drift pattern for lung cancer
-                                full_df_sorted = full_df.sort_values(['Urgency_Level', 'Age_Years'], 
-                                                                  ascending=[False, True]).reset_index(drop=True)
-                                self.logger.info(f"Creating Lung Cancer-specific drift by sorting on Urgency_Level and Age_Years")
-                            elif 'Age_Years' in full_df.columns:
+                            # Lung cancer-specific drift: Sort by age only (Urgency_Level removed)
+                            if 'Age_Years' in full_df.columns:
                                 # Reverse age sorting for different pattern
                                 full_df_sorted = full_df.sort_values('Age_Years', ascending=False).reset_index(drop=True)
                                 self.logger.info(f"Creating Lung Cancer-specific drift by reverse sorting on Age_Years")
@@ -3293,12 +3750,8 @@ class SchemaStatisticsManager:
                                 full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
                                 self.logger.info(f"Creating Lung Cancer-specific drift by sorting on Age_Years")
                         else:
-                            # Generic drift for other datasets
-                            if 'Diagnosis_Class' in full_df.columns:
-                                full_df_sorted = full_df.sort_values(['Diagnosis_Class', 'Age_Years'], 
-                                                                  ascending=[True, True]).reset_index(drop=True)
-                                self.logger.info(f"Creating generic drift by sorting on Diagnosis_Class and Age_Years")
-                            elif 'Age_Years' in full_df.columns:
+                            # Generic drift for other datasets (Diagnosis_Class removed)
+                            if 'Age_Years' in full_df.columns:
                                 full_df_sorted = full_df.sort_values('Age_Years').reset_index(drop=True)
                                 self.logger.info(f"Creating generic drift by sorting on Age_Years")
                             else:
@@ -3319,18 +3772,24 @@ class SchemaStatisticsManager:
                         baseline_timestamp = data_partitions[0]['timestamp']
                         new_timestamp = data_partitions[0]['timestamp']  # Same timestamp
                         
+                        # Load and merge image metadata for both splits
+                        baseline_image_metadata = self._load_image_metadata(dataset_key, baseline_timestamp)
+                        new_image_metadata = self._load_image_metadata(dataset_key, new_timestamp)
+                        
+                        if baseline_image_metadata is not None:
+                            baseline_df = self._merge_patient_and_image_metadata(baseline_df, baseline_image_metadata)
+                        
+                        if new_image_metadata is not None:
+                            new_df = self._merge_patient_and_image_metadata(new_df, new_image_metadata)
+                        
                         self.logger.info(f"Only 1 partition found with no previous baselines.")
                         self.logger.info(f"Splitting data 70:30 for drift detection with intentional distribution shift:")
                         self.logger.info(f"  Baseline (70%): {len(baseline_df)} rows")
                         self.logger.info(f"  New (30%): {len(new_df)} rows")
                         self.logger.info(f"  Total rows: {total_rows}")
                         
-                        # Log distribution differences if Diagnosis_Class exists
-                        if 'Diagnosis_Class' in full_df.columns:
-                            baseline_dist = baseline_df['Diagnosis_Class'].value_counts(normalize=True)
-                            new_dist = new_df['Diagnosis_Class'].value_counts(normalize=True)
-                            self.logger.info(f"  Baseline distribution: {baseline_dist.to_dict()}")
-                            self.logger.info(f"  New distribution: {new_dist.to_dict()}")
+                        # Log distribution differences (Diagnosis_Class analysis removed)
+                        # Note: Diagnosis_Class, Urgency_Level, and Body_Region removed from bias analysis
             else:
                 # Non-partitioned mode: load from single CSV
                 if metadata_base_path and metadata_filename:
