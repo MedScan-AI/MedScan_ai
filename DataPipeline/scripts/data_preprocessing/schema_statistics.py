@@ -223,19 +223,47 @@ class SchemaStatisticsManager:
     
     def _setup_mlflow(self):
         """Setup MLflow tracking."""
-        # Set MLflow tracking URI (UPDATED to use /opt/airflow/mlflow)
-        mlflow_tracking_dir = "/opt/airflow/mlflow/mlruns"
-        os.makedirs(mlflow_tracking_dir, exist_ok=True)
+        # Get MLflow config
+        mlflow_config = self.config.get('mlflow', {})
         
-        mlflow.set_tracking_uri(f"file:///{mlflow_tracking_dir}")
+        # Set MLflow tracking URI
+        if mlflow_config and 'tracking_uri' in mlflow_config:
+            # Use explicit mlflow config if available
+            tracking_uri = mlflow_config['tracking_uri']
+            self.logger.info(f"Using MLflow config from metadata.yml")
+        else:
+            # Fall back to deriving from mlmd config 
+            mlflow_uri = self.config['mlmd']['store']['database_path'].replace('.db', '')
+            mlflow_tracking_dir = os.path.join(mlflow_uri, 'mlruns')
+            os.makedirs(mlflow_tracking_dir, exist_ok=True)
+            tracking_uri = f"file:///{os.path.abspath(mlflow_tracking_dir)}"
+            self.logger.info(f"Derived MLflow path from mlmd config")
+        
+        # Extract directory and ensure it exists
+        if tracking_uri.startswith('file:///'):
+            tracking_dir = tracking_uri.replace('file:///', '/')
+            os.makedirs(tracking_dir, exist_ok=True)
+        
+        mlflow.set_tracking_uri(tracking_uri)
+        
+        # Set artifact location explicitly if configured
+        if mlflow_config and 'artifact_location' in mlflow_config:
+            artifact_location = mlflow_config['artifact_location']
+            os.makedirs(artifact_location, exist_ok=True)
+            os.environ['MLFLOW_ARTIFACT_ROOT'] = artifact_location
+            self.logger.info(f"MLflow artifact location: {artifact_location}")
+        
         self.mlflow_client = MlflowClient()
         
         # Set experiment name
-        experiment_name = "MedScan_Data_Validation"
+        experiment_name = mlflow_config.get('experiment_name', "MedScan_Data_Validation")
         try:
             experiment = self.mlflow_client.get_experiment_by_name(experiment_name)
             if experiment is None:
-                experiment_id = self.mlflow_client.create_experiment(experiment_name)
+                experiment_id = self.mlflow_client.create_experiment(
+                    experiment_name,
+                    artifact_location=mlflow_config.get('artifact_location') if mlflow_config else None
+                )
             else:
                 experiment_id = experiment.experiment_id
         except:
@@ -243,8 +271,8 @@ class SchemaStatisticsManager:
         
         mlflow.set_experiment(experiment_name)
         self.experiment_id = experiment_id
-        self.logger.info(f"MLflow tracking initialized at: {mlflow_tracking_dir}")
-        self.logger.info(f"MLflow experiment: {experiment_name} (ID: {experiment_id})")
+        self.logger.info(f"MLflow tracking initialized at: {tracking_uri}")
+        self.logger.info(f"MLflow experiment: {experiment_name} (ID: {experiment_id})")   
     
     def _setup_great_expectations(self):
         """Setup Great Expectations context."""

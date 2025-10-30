@@ -39,6 +39,7 @@ LOCAL_PATHS = {
     'data': PROJECT_ROOT / "data",
     'logs': PROJECT_ROOT / "logs",
     'ge_outputs': PROJECT_ROOT / "data" / "ge_outputs",
+    'mlflow_store': PROJECT_ROOT / "data" / "mlflow_store", 
     'validation': PROJECT_ROOT / "data" / "RAG" / "validation",
     'index': PROJECT_ROOT / "data" / "RAG" / "index",
 }
