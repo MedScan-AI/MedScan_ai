@@ -225,7 +225,15 @@ def preprocess_images(**context):
             '--config', '/opt/airflow/DataPipeline/config/vision_pipeline.yml'
         ]
         result = subprocess.run(tb_cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
+        
+        # Log subprocess output for debugging
+        if result.stdout:
+            task_logger.info(f"TB preprocessing stdout: {result.stdout[-1000:]}")  # Last 1000 chars
+        if result.stderr:
+            task_logger.warning(f"TB preprocessing stderr: {result.stderr[-1000:]}")
+        
         if result.returncode != 0:
+            task_logger.error(f"TB preprocessing failed with return code {result.returncode}")
             raise Exception(f"TB preprocessing failed: {result.stderr}")
         task_logger.info("TB preprocessing complete")
         
@@ -237,7 +245,15 @@ def preprocess_images(**context):
             '--config', '/opt/airflow/DataPipeline/config/vision_pipeline.yml'
         ]
         result = subprocess.run(lc_cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
+        
+        # Log subprocess output for debugging
+        if result.stdout:
+            task_logger.info(f"Lung Cancer preprocessing stdout: {result.stdout[-1000:]}")
+        if result.stderr:
+            task_logger.warning(f"Lung Cancer preprocessing stderr: {result.stderr[-1000:]}")
+        
         if result.returncode != 0:
+            task_logger.error(f"Lung Cancer preprocessing failed with return code {result.returncode}")
             raise Exception(f"Lung cancer preprocessing failed: {result.stderr}")
         task_logger.info("Lung Cancer preprocessing complete")
         
@@ -313,26 +329,29 @@ def validate_and_upload_reports(**context):
         gcs = GCSManager.from_config()
         
         # Check if already validated
-        marker = gcp_config.get_gcs_path('vision', 'ge_outputs/validations', partition=partition) + ".complete"
-        if gcs.blob_exists(marker):
-            logger.info(f"Validation complete for {partition} - skipping")
+        # Marker includes partition in filename to avoid creating unnecessary directory structure
+        # Use filename format: .complete_{YYYY}_{MM}_{DD} instead of creating {YYYY}/{MM}/{DD}/.complete
+        partition_flat = partition.replace('/', '_')  # Convert 2025/11/05 to 2025_11_05
+        marker = gcp_config.get_gcs_path('vision', 'ge_outputs/validations', partition=None).rstrip('/') + f"/.complete_{partition_flat}"
+        validation_skipped = gcs.blob_exists(marker)
+        
+        if validation_skipped:
+            logger.info(f"Validation complete for {partition} - skipping validation step")
             task_logger.info("Skipped - marker exists")
-            context['ti'].xcom_push(key='partition', value=partition)
-            return "Success - Skipped"
+        else:
+            # Run validation
+            task_logger.info("Starting validation")
+            cmd = [
+                'python',
+                '/opt/airflow/DataPipeline/scripts/data_preprocessing/schema_statistics.py',
+                '--config', '/opt/airflow/DataPipeline/config/metadata.yml'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
+            if result.returncode != 0:
+                raise Exception(f"Validation failed: {result.stderr}")
+            task_logger.info("Validation complete")
         
-        # Run validation
-        task_logger.info("Starting validation")
-        cmd = [
-            'python',
-            '/opt/airflow/DataPipeline/scripts/data_preprocessing/schema_statistics.py',
-            '--config', '/opt/airflow/DataPipeline/config/metadata.yml'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd='/opt/airflow/DataPipeline')
-        if result.returncode != 0:
-            raise Exception(f"Validation failed: {result.stderr}")
-        task_logger.info("Validation complete")
-        
-        # Upload ONLY ge_outputs (reports/logs) to GCS
+        # Upload ONLY ge_outputs (reports/logs) to GCS (even if validation was skipped)
         local_ge = Path('/opt/airflow/DataPipeline/data/ge_outputs')
         uploaded_count = 0
         
@@ -343,16 +362,35 @@ def validate_and_upload_reports(**context):
                           'drift', 'bias_analysis', 'eda', 'reports']:
                 local_subdir = local_ge / subdir
                 if local_subdir.exists():
-                    gcs_path = gcp_config.get_gcs_path('vision', f'ge_outputs/{subdir}', partition=partition).rstrip('/')
+                    # Don't add partition here - partition is already in local directory structure
+                    # (e.g., baseline/lung_cancer/2025/11/04/ already contains partition)
+                    gcs_path = gcp_config.get_gcs_path('vision', f'ge_outputs/{subdir}', partition=None).rstrip('/')
                     count = gcs.upload_directory(str(local_subdir), gcs_path, max_workers=10)
                     uploaded_count += count
         
-        # Upload MLflow artifacts
-        local_mlflow = Path('/tmp/mlflow')
-        if local_mlflow.exists():
-            mlflow_gcs = gcp_config.get_gcs_path('vision', 'mlflow', partition=partition).rstrip('/')
-            count = gcs.upload_directory(str(local_mlflow), mlflow_gcs, max_workers=10)
-            uploaded_count += count
+        # Upload MLflow artifacts (even if validation was skipped - artifacts may exist from previous run)
+        # MLflow stores artifacts in structure: artifacts/{run_id}/artifacts/{category}/files
+        local_mlflow_base = Path('/opt/airflow/DataPipeline/data/mlflow_store/metadata/artifacts')
+        if local_mlflow_base.exists():
+            mlflow_gcs_base = gcp_config.get_gcs_path('vision', 'mlflow', partition=partition).rstrip('/')
+            
+            # Find all run directories
+            run_dirs = [d for d in local_mlflow_base.iterdir() if d.is_dir()]
+            
+            if run_dirs:
+                task_logger.info(f"Found {len(run_dirs)} MLflow runs to upload")
+                for run_dir in run_dirs:
+                    # Upload from artifacts/{run_id}/artifacts/
+                    artifacts_dir = run_dir / 'artifacts'
+                    if artifacts_dir.exists() and any(artifacts_dir.iterdir()):
+                        run_gcs_path = f"{mlflow_gcs_base}/{run_dir.name}/artifacts"
+                        count = gcs.upload_directory(str(artifacts_dir), run_gcs_path, max_workers=10)
+                        uploaded_count += count
+                        task_logger.info(f"Uploaded {count} artifacts from run {run_dir.name}")
+            else:
+                task_logger.info("No MLflow run directories found")
+        else:
+            task_logger.info("MLflow artifacts directory does not exist")
         
         # Create completion marker
         gcs.create_marker(marker, f"Validation completed: {uploaded_count} files uploaded")
