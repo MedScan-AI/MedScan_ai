@@ -89,15 +89,37 @@ wheels/
 # Documentation builds
 docs/_build/
 
-# Data Files
-*.csv
-*.jpg
-*.jpeg
-*.png
-*.md
-*.json
-*.jsonl
-*.bin
-DataPipeline/data/
+# DataPipeline - ignore actual data but keep .dvc files
+# First un-ignore directories, then ignore contents, then un-ignore .dvc files
+!DataPipeline/
+!DataPipeline/data/
+DataPipeline/data/*
+!DataPipeline/data/*.dvc
+!DataPipeline/data/.gitkeep
+!DataPipeline/data/RAG/
+DataPipeline/data/RAG/*
+!DataPipeline/data/RAG/*.dvc
+!DataPipeline/data/RAG/.gitkeep
+!DataPipeline/data/RAG/raw_data/
+DataPipeline/data/RAG/raw_data/*
+!DataPipeline/data/RAG/raw_data/*.dvc
+!DataPipeline/data/RAG/raw_data/.gitkeep
+!DataPipeline/data/RAG/chunks/
+DataPipeline/data/RAG/chunks/*
+!DataPipeline/data/RAG/chunks.dvc
+!DataPipeline/data/RAG/chunks/.gitkeep
+!DataPipeline/data/RAG/embeddings/
+DataPipeline/data/RAG/embeddings/*
+!DataPipeline/data/RAG/embeddings.dvc
+!DataPipeline/data/RAG/embeddings/.gitkeep
+!DataPipeline/data/RAG/index/
+DataPipeline/data/RAG/index/*
+!DataPipeline/data/RAG/index.dvc
+!DataPipeline/data/RAG/index/.gitkeep
+
+# Logs
 DataPipeline/logs/
 airflow/logs/
+
+# Keep .dvc tracking files
+!**/*.dvc

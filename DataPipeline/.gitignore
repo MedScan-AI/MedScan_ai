@@ -26,15 +26,41 @@ logs/
 temp/
 tmp/
 
-# DVC - CRITICAL: Only ignore data, NOT .dvc files
-data/raw/
-data/preprocessed/
-data/synthetic_metadata/
-data/synthetic_metadata_mitigated/
-data/RAG/raw_data/
-data/RAG/chunks/
-data/RAG/embeddings/
-data/RAG/index/
+# DVC - CRITICAL: Ignore data contents but NOT .dvc files
+# Pattern: ignore directory contents with /*, then un-ignore .dvc files
+data/raw/*
+!data/raw/*.dvc
+!data/raw/.gitkeep
+
+data/preprocessed/*
+!data/preprocessed/*.dvc
+!data/preprocessed/.gitkeep
+
+data/synthetic_metadata/*
+!data/synthetic_metadata/*.dvc
+!data/synthetic_metadata/.gitkeep
+
+data/synthetic_metadata_mitigated/*
+!data/synthetic_metadata_mitigated/*.dvc
+!data/synthetic_metadata_mitigated/.gitkeep
+
+# RAG - Keep folder structure, ignore contents, keep .dvc
+data/RAG/raw_data/incremental/*
+data/RAG/raw_data/baseline/*
+!data/RAG/raw_data/*.dvc
+!data/RAG/raw_data/.gitkeep
+
+data/RAG/chunks/*
+!data/RAG/chunks/*.dvc
+!data/RAG/chunks/.gitkeep
+
+data/RAG/embeddings/*
+!data/RAG/embeddings/*.dvc
+!data/RAG/embeddings/.gitkeep
+
+data/RAG/index/*
+!data/RAG/index/*.dvc
+!data/RAG/index/.gitkeep
 
 # DVC cache (internal - don't commit)
 .dvc/tmp/
@@ -51,3 +77,6 @@ data/ge_outputs/
 data/partition_metadata.json
 data/test_preprocessed/
 .cache/
+
+# Safety net: never ignore .dvc files anywhere
+!**/*.dvc

@@ -1,0 +1,6 @@
+outs:
+- md5: 00003bee91ce5ffc6eac03ea0df8d2b7.dir
+  size: 1823849
+  nfiles: 2
+  hash: md5
+  path: synthetic_metadata
