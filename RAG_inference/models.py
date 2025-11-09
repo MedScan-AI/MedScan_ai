@@ -19,123 +19,6 @@ from prompts import get_prompt_template
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class Bloom:
-    """Fixed BLOOM model with repetition prevention"""
-    
-    def __init__(
-        self, 
-        model_name: str = "bigscience/bloom-560m",
-        max_tokens: int = 500,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        repetition_penalty: float = 1.2,  # ADD THIS
-        **kwargs
-    ):
-        self.model_name = model_name
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self.top_p = top_p
-        self.repetition_penalty = repetition_penalty  # ADD THIS
-        
-        logger.info(f"Loading BLOOM model: {model_name}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        # Set pad token
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        
-        if torch.cuda.is_available():
-            self.model = self.model.to("cuda")
-            logger.info(f"✓ {model_name} loaded on GPU")
-        else:
-            logger.info(f"✓ {model_name} loaded on CPU")
-    
-    def infer(
-        self,
-        query: str,
-        prompt: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        try:
-
-            # Tokenize
-            inputs = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=2048
-            )
-            
-            if torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            
-            input_length = inputs['input_ids'].shape[1]
-            
-            # FIXED GENERATION PARAMETERS
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=kwargs.get("max_tokens", self.max_tokens),
-                temperature=kwargs.get("temperature", self.temperature),
-                top_p=kwargs.get("top_p", self.top_p),
-                top_k=50,  # ADD: Limit vocabulary
-                repetition_penalty=kwargs.get("repetition_penalty", self.repetition_penalty),  # FIX
-                no_repeat_ngram_size=3,  # ADD: Prevent 3-gram repetition
-                do_sample=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-                length_penalty=1.0,  # ADD: Encourage appropriate length
-                bad_words_ids=None,  # Could add forbidden sequences
-                min_length=10,  # Ensure some minimum response
-            )
-            
-            # Decode
-            generated_text = self.tokenizer.decode(
-                outputs[0][input_length:],
-                skip_special_tokens=True
-            )
-            
-            # POST-PROCESSING: Remove repetitive patterns
-            generated_text = self._remove_repetitions(generated_text)
-            
-            return {
-                "generated_text": generated_text.strip(),
-                "input_tokens": input_length,
-                "output_tokens": outputs.shape[1] - input_length,
-                "success": True
-            }
-        
-        except Exception as e:
-            logger.error(f"BLOOM generation error: {str(e)}")
-            return {
-                "generated_text": f"Error: {str(e)}",
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "success": False
-            }
-    
-    def _remove_repetitions(self, text: str, max_repeat: int = 3) -> str:
-        """Remove excessive repetitions from generated text"""
-        import re
-        
-        # Find repeated phrases
-        words = text.split()
-        cleaned_words = []
-        
-        for i, word in enumerate(words):
-            # Check if this starts a repetitive sequence
-            if i < len(words) - max_repeat:
-                phrase = " ".join(words[i:i+5])  # Check 5-word phrases
-                remaining_text = " ".join(words[i+5:])
-                if phrase in remaining_text:
-                    # Found repetition, truncate here
-                    return " ".join(cleaned_words)
-            cleaned_words.append(word)
-        
-        return " ".join(cleaned_words)
-
-
 class FlanT5Large:
     """Google Flan-T5 Large"""
     
@@ -207,7 +90,6 @@ class ModelFactory:
     MODEL_CLASSES = {
         # Smaller/faster options
         "flan_t5": FlanT5Large,
-        "bloom": Bloom
     }
     
     @staticmethod
