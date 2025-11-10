@@ -174,7 +174,6 @@ class ModelFactory:
     @staticmethod
     def create_model(
         model_key: str,
-        max_tokens: int = 500,
         temperature: float = 0.7,
         top_p: float = 0.9,
         **kwargs,
@@ -184,7 +183,7 @@ class ModelFactory:
                 f"Unknown model '{model_key}'. Available: {list(ModelFactory.MODEL_CLASSES.keys())}"
             )
         cls = ModelFactory.MODEL_CLASSES[model_key]
-        return cls(max_tokens=max_tokens, temperature=temperature, top_p=top_p, **kwargs)
+        return cls(temperature=temperature, top_p=top_p, **kwargs)
 
     @staticmethod
     def list_models() -> Dict[str, str]:
@@ -193,4 +192,5 @@ class ModelFactory:
             "mistral_7b": "Mistral 7B Instruct v0.2 (vLLM)",
             "flan_t5": "Google Flan-T5 Base (Transformers)",
             "bloom_560m": "BigScience BLOOM-560M (Transformers)",
+            
         }

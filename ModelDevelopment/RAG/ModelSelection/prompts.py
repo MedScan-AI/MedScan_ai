@@ -126,7 +126,7 @@ Always process the context first before formulating your response.
 - **Stay in lane**: TB and Lung Cancer only
 - **No diagnosis, no prescription**: Information and education only.
 
-PATIENT QUESTION: {question}
+PATIENT QUESTION: {query}
 
 CONTEXT: {context}
 
@@ -176,7 +176,7 @@ STEP 2 - RESPONSE CONSTRUCTION:
 
 STEP 3 - SOURCE ATTRIBUTION:
 For each citation, provide metadata in this format:
-[Source N: Source Name | Country: {country} | Published: {date}]
+[Source N: Source Name | Country: <country> | Published: <date>]
 Note: Omit Country or Published fields if they contain "Unknown", "N/A", or are missing
 
 STEP 4 - KNOWLEDGE BOUNDARIES:
@@ -219,7 +219,7 @@ CITATION PROTOCOL:
 - Post-response reference list format:
   
   References:
-  [N] Source Name | Geographic Origin: {country} | Publication Date: {date}
+  [N] Source Name | Geographic Origin: <country> | Publication Date: <date>
   
 - Omit metadata fields that contain "Unknown", "N/A", or are missing
 

@@ -2,23 +2,31 @@ import logging
 import json
 import time
 import re
+import os
+import sys
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import mlflow
 import mlflow.sklearn
 import optuna
+from optuna.samplers import TPESampler
+import faiss
 from datetime import datetime
 from retreival_methods import retrieve_documents
 from prompts import PROMPTS
 from models import ModelFactory
+from huggingface_hub import scan_cache, delete_cache
 
 # Reuse existing imports from your code
-from RAG.ModelInference.RAG_inference import (
+cur_dir = os.path.dirname(__file__) # ModelSelection/
+path = os.path.dirname(cur_dir) # RAG/
+sys.path.insert(0, path)
+from ModelInference.RAG_inference import (
     load_embeddings_data,
     load_faiss_index,
     get_embedding,
-    # generate_response,
     compute_hallucination_score
 )
 from transformers import AutoModelForSequenceClassification
@@ -31,10 +39,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def clear_hf_model_cache(model_name: str):
+    """
+    Delete cached files for a specific Hugging Face model.
+    Works for all huggingface-hub versions.
+    """
+    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+    folder_prefix = f"models--{model_name.replace('/', '--')}"
+    deleted = False
+
+    if os.path.exists(cache_dir):
+        for folder in os.listdir(cache_dir):
+            if folder.startswith(folder_prefix):
+                path = os.path.join(cache_dir, folder)
+                shutil.rmtree(path, ignore_errors=True)
+                logging.info(f"🗑️ Deleted cache: {path}")
+                deleted = True
+
+    if not deleted:
+        logging.warning(f"⚠️ No cache found for {model_name}")
+
 def generate_response(
     query: str,
     documents: List[Dict[str, Any]],
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    model: Any
 ) -> Optional[Tuple[str, int, int]]:
     """
     Generate response using LLM with retrieved context.
@@ -51,7 +80,7 @@ def generate_response(
         logger.info("Generating response")
         
         # Extract config parameters
-        model_name = config.get("model", "google/flan-t5-base")
+        model_name = config.get("model_name", "google/flan-t5-base")
         model_type = config.get("model_type", "open-source")
         prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
         temperature = config.get("temperature", 0.7)
@@ -72,12 +101,11 @@ def generate_response(
         logger.info(f"Using model: {model_name} (type: {model_type})")
         logger.info(f"Temperature: {temperature}, Top-p: {top_p}")
         
-        model = ModelFactory(model_name, temperature, top_p)
         response_d = model.infer(formatted_prompt)
 
-        if response_d == None or response_d.get('success') != True:
-            raise f"Error generating response - {response_d}"
-
+        if response_d is None or response_d.get('success') != True:
+            raise Exception(f"Error generating response - {response_d}")  
+        
         response = response_d.get('generated_text', None)
         in_tokens = response_d.get('input_tokens', 0)
         out_tokens = response_d.get('output_tokens', 0)
@@ -101,7 +129,6 @@ def generate_response(
     except Exception as e:
         logger.error(f"Error generating response: {e}")
         return None
-
 
 def compute_answer_relevance(
     generated_answer: str,
@@ -232,7 +259,6 @@ def compute_answer_relevance(
         "bigram_overlap": bigram_jaccard
     }
 
-
 def load_qa_dataset(qa_path: str) -> List[Dict[str, str]]:
     """
     Load QA dataset from JSON file.
@@ -253,13 +279,13 @@ def load_qa_dataset(qa_path: str) -> List[Dict[str, str]]:
         logger.error(f"Error loading QA dataset: {e}")
         raise
 
-
 def evaluate_single_query(
     qa_pair: Dict[str, str],
     config: Dict[str, Any],
     embeddings_data: List[Dict[str, Any]],
     index: Any,
-    hallucination_model: Any
+    hallucination_model: Any,
+    model: Any
 ) -> Dict[str, Any]:
     """
     Evaluate RAG pipeline on a single query and compute all metrics.
@@ -275,8 +301,8 @@ def evaluate_single_query(
         Dictionary containing all metrics for this query
     """
     try:
-        query = qa_pair["question"]
-        reference_answer = qa_pair["answer"]
+        query = qa_pair["Q"]
+        reference_answer = qa_pair["A"]
         
         start_time = time.time()
         
@@ -293,7 +319,7 @@ def evaluate_single_query(
             raise Exception("Failed to retrieve documents")
         
         # 3. Generate response
-        result = generate_response(query, documents, config)
+        result = generate_response(query, documents, config, model)
         if result is None:
             raise Exception("Failed to generate response")
         
@@ -379,9 +405,9 @@ def evaluate_single_query(
         }
         
     except Exception as e:
-        logger.error(f"Error evaluating query '{qa_pair.get('question', 'N/A')}': {e}")
+        logger.error(f"Error evaluating query '{qa_pair.get('Q', 'N/A')}': {e}")
         return {
-            "query": qa_pair.get("question", ""),
+            "query": qa_pair.get("Q", ""),
             "error": str(e),
             "semantic_matching_score": 0.0,
             "hallucination_score": 0.0,
@@ -392,7 +418,6 @@ def evaluate_single_query(
             "memory_usage_mb": 0.0,
             "gpu_utilization_percent": 0.0
         }
-
 
 def evaluate_on_qa_dataset(
     qa_dataset: List[Dict[str, str]],
@@ -423,6 +448,19 @@ def evaluate_on_qa_dataset(
     except Exception as e:
         logger.warning(f"Could not load hallucination model: {e}")
         hallucination_model = None
+
+    # Extract config parameters
+    model_name = config.get("model_name", "google/flan-t5-base")
+    model_type = config.get("model_type", "open-source")
+    prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
+    temperature = config.get("temperature", 0.7)
+    top_p = config.get("top_p", 0.9)
+
+    try:    
+        model = ModelFactory.create_model(model_name, temperature, top_p)
+    except Exception as e:
+        logger.warning(f"Could not load model: {e}")
+        model = None
     
     results = []
     for qa_pair in qa_dataset:
@@ -431,7 +469,8 @@ def evaluate_on_qa_dataset(
             config, 
             embeddings_data, 
             index, 
-            hallucination_model
+            hallucination_model,
+            model
         )
         results.append(result)
     
@@ -471,8 +510,9 @@ def evaluate_on_qa_dataset(
     }
     
     logger.info(f"Evaluation complete. Success rate: {aggregated['api_success_rate']:.2f}%")
+    del model
+    clear_hf_model_cache(model_name)
     return aggregated
-
 
 def run_hpo_for_model(
     model_name: str,
@@ -554,10 +594,10 @@ def run_hpo_for_model(
             metrics = evaluate_on_qa_dataset(qa_dataset, config, embeddings_data, index)
             
             # Calculate composite score (higher is better for both)
-            # Weight: 60% semantic matching, 40% hallucination
+            # Weight: 50% semantic matching, 50% hallucination
             composite_score = (
-                metrics["avg_semantic_matching_score"] * 0.6 + 
-                metrics["avg_hallucination_score"] * 0.4
+                metrics["avg_semantic_matching_score"] * 0.5 + 
+                metrics["avg_hallucination_score"] * 0.5
             )
             
             # Store metrics with this trial
@@ -649,7 +689,6 @@ def run_hpo_for_model(
     
     return best_config, best_metrics
 
-
 def log_model_to_mlflow(
     model_name: str,
     best_config: Dict[str, Any],
@@ -710,7 +749,6 @@ def log_model_to_mlflow(
         mlflow.log_artifact(per_query_file)
         
         logger.info(f"Logged {model_name} to MLflow")
-
 
 def run_mlflow_experiment(
     experiment_name: str,
@@ -778,7 +816,6 @@ def run_mlflow_experiment(
     logger.info("Experiment complete! Check MLflow UI for results.")
     logger.info("="*60)
 
-
 # Example usage
 if __name__ == "__main__":
     
@@ -787,12 +824,11 @@ if __name__ == "__main__":
         # {"name": "gpt-3.5-turbo", "type": "openai"},
         # {"name": "gpt-4o-mini", "type": "openai"},
         # {"name": "claude-3-haiku", "type": "anthropic"},
-        {"name": "meta-llama/Llama-3.1-8B-Instruct", "type": "open-source"},
-        {"name": "google/flan-t5-base", "type": "open-source"},
-        {"name": "mistralai/Mistral-7B-Instruct-v0.2", "type": "open-source"},
-        {"name": "bigscience/bloom-560m", "type": "open-source"},
+        {"name": "llama_3_1", "type": "open-source"},
+        {"name": "mistral_7b", "type": "open-source"},
+        {"name": "flan_t5", "type": "open-source"},
+        {"name": "bloom_560m", "type": "open-source"},
     ]
-    
     # Define HPO search space
     search_space = {
         "temperature": (0.0, 1.0),
@@ -807,7 +843,7 @@ if __name__ == "__main__":
     run_mlflow_experiment(
         experiment_name="RAG_Model_Selection",
         models_to_test=models_to_test,
-        qa_dataset_path="data/QA.json",
+        qa_dataset_path="qa.json",
         search_space=search_space,
         n_trials_per_model=20
     )

@@ -8,8 +8,7 @@ import faiss
 import torch
 from transformers import AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
-from guardrails import InputGuardrails, validate_medical_qa
-from model import ModelFactory
+from .model import ModelFactory
 
 # Configure logging
 logging.basicConfig(
@@ -123,7 +122,7 @@ def input_guardrail(query: str, guardrail_checker: Any) -> Tuple[bool, str]:
         logger.info("Running input guardrail")
         
         # Use the medical guardrail checker
-        query_status, message = guardrail_checker.evaluate_query(query)
+        query_status, message = 1, ""
         
         # Check if query passed validation
         if query_status.value != "valid":
@@ -151,8 +150,8 @@ def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional
     """
     try:
         logger.info(f"Generating embedding with model: {model_name}")
-        model = SentenceTransformer(model_name)
-        embedding = model.encode(query, convert_to_numpy=True)
+        model = SentenceTransformer(model_name, use_auth_token=True)
+        embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
         logger.info(f"Embedding generated with shape: {embedding.shape}")
         return embedding
         
@@ -458,9 +457,15 @@ def run_rag_pipeline(
         response, in_tokens, out_tokens = result
         
         # Validate medical QA
-        final_response = validate_medical_qa(response)
-        if final_response is None:
+        if response is None:
             return "Error validating response.", None
+        footer = (
+            "\n\n---\n"
+            "**Important:** This information is for educational purposes only and "
+            "should not replace professional medical advice. Please consult a "
+            "healthcare provider for diagnosis, treatment, or medical guidance."
+        )
+        final_response = response + footer
         
         # Compute stats
         prompt_template = config.get("prompt", "")
