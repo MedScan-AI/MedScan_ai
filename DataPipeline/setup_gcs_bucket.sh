@@ -1,17 +1,46 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+ENV_FILE="${PROJECT_ROOT}/airflow/.env"
+
 echo "MedScan AI - Unified GCS Bucket Setup"
 echo ""
 
-export GOOGLE_APPLICATION_CREDENTIALS=~/gcp-service-account.json
+if [ -f "${ENV_FILE}" ]; then
+  echo "Loading environment from ${ENV_FILE}"
+  set -a
+  # shellcheck source=/dev/null
+  source "${ENV_FILE}"
+  set +a
+  echo "Environment variables loaded"
+  echo ""
+else
+  echo "No airflow/.env found at ${ENV_FILE}. Using default configuration values."
+  echo ""
+fi
+
+export GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/gcp-service-account.json}
+export DATA_PIPELINE_DIR="${SCRIPT_DIR}"
 
 python3 << 'EOF'
+import os
+import importlib.util
+from pathlib import Path
+
+from google.api_core.exceptions import Conflict, NotFound
 from google.cloud import storage
 
-# Single unified bucket
-project_id = "medscanai-476500"
-bucket_name = "medscan-pipeline-medscanai-476500"
+script_dir = Path(os.environ["DATA_PIPELINE_DIR"]).resolve()
+gcp_config_path = script_dir / "config" / "gcp_config.py"
+
+spec = importlib.util.spec_from_file_location("gcp_config", gcp_config_path)
+gcp_config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gcp_config)
+
+project_id = os.getenv("GCP_PROJECT_ID", gcp_config.PROJECT_ID)
+bucket_name = os.getenv("GCS_BUCKET_NAME", gcp_config.BUCKET_NAME)
 
 client = storage.Client(project=project_id)
 
@@ -19,9 +48,12 @@ client = storage.Client(project=project_id)
 try:
     bucket = client.get_bucket(bucket_name)
     print(f"✓ Using existing bucket: {bucket_name}")
-except:
+except NotFound:
     bucket = client.create_bucket(bucket_name, location="us-central1")
     print(f"✓ Created bucket: {bucket_name}")
+except Conflict:
+    bucket = client.get_bucket(bucket_name)
+    print(f"✓ Bucket already exists and is accessible: {bucket_name}")
 
 print("")
 print("Creating unified folder structure:")
