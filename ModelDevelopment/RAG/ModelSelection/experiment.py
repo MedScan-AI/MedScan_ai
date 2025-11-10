@@ -11,13 +11,14 @@ import optuna
 from datetime import datetime
 from retreival_methods import retrieve_documents
 from prompts import PROMPTS
+from models import ModelFactory
 
 # Reuse existing imports from your code
 from RAG.ModelInference.RAG_inference import (
     load_embeddings_data,
     load_faiss_index,
     get_embedding,
-    generate_response,
+    # generate_response,
     compute_hallucination_score
 )
 from transformers import AutoModelForSequenceClassification
@@ -29,6 +30,77 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def generate_response(
+    query: str,
+    documents: List[Dict[str, Any]],
+    config: Dict[str, Any]
+) -> Optional[Tuple[str, int, int]]:
+    """
+    Generate response using LLM with retrieved context.
+    
+    Args:
+        query: Original user query
+        documents: Retrieved documents with metadata
+        config: Configuration containing model params and prompt
+        
+    Returns:
+        Tuple of (response string, input_tokens, output_tokens) or None on failure
+    """
+    try:
+        logger.info("Generating response")
+        
+        # Extract config parameters
+        model_name = config.get("model", "google/flan-t5-base")
+        model_type = config.get("model_type", "open-source")
+        prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
+        temperature = config.get("temperature", 0.7)
+        top_p = config.get("top_p", 0.9)
+        
+        # Format context from documents with actual content
+        context_parts = []
+        for d in documents:
+            title = d.get('title', 'Unknown')
+            content = d.get('content', '')
+            context_parts.append(f"Document {d['rank']} - {title}:\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # Format prompt
+        formatted_prompt = prompt_template.format(context=context, query=query)
+        
+        logger.info(f"Using model: {model_name} (type: {model_type})")
+        logger.info(f"Temperature: {temperature}, Top-p: {top_p}")
+        
+        model = ModelFactory(model_name, temperature, top_p)
+        response_d = model.infer(formatted_prompt)
+
+        if response_d == None or response_d.get('success') != True:
+            raise f"Error generating response - {response_d}"
+
+        response = response_d.get('generated_text', None)
+        in_tokens = response_d.get('input_tokens', 0)
+        out_tokens = response_d.get('output_tokens', 0)
+
+        
+        # Add references section with links
+        references = "\n\n**References:**\n"
+        for d in documents:
+            link = d.get('metadata', {}).get('link', '')
+            title = d.get('title', 'Unknown')
+            if link:
+                references += f"{d['rank']}. [{title}]({link})\n"
+            else:
+                references += f"{d['rank']}. {title}\n"
+        
+        response += references
+
+        logger.info("Response generated successfully")
+        return response, in_tokens, out_tokens
+        
+    except Exception as e:
+        logger.error(f"Error generating response: {e}")
+        return None
 
 
 def compute_answer_relevance(
@@ -712,11 +784,13 @@ if __name__ == "__main__":
     
     # Define models to test
     models_to_test = [
-        {"name": "gpt-3.5-turbo", "type": "openai"},
-        {"name": "gpt-4o-mini", "type": "openai"},
-        {"name": "claude-3-haiku", "type": "anthropic"},
-        {"name": "llama-3-8b", "type": "open-source"},
-        {"name": "mistral-7b", "type": "open-source"}
+        # {"name": "gpt-3.5-turbo", "type": "openai"},
+        # {"name": "gpt-4o-mini", "type": "openai"},
+        # {"name": "claude-3-haiku", "type": "anthropic"},
+        {"name": "meta-llama/Llama-3.1-8B-Instruct", "type": "open-source"},
+        {"name": "google/flan-t5-base", "type": "open-source"},
+        {"name": "mistralai/Mistral-7B-Instruct-v0.2", "type": "open-source"},
+        {"name": "bigscience/bloom-560m", "type": "open-source"},
     ]
     
     # Define HPO search space
