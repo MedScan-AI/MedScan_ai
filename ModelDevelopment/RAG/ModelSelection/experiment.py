@@ -16,13 +16,14 @@ import faiss
 from datetime import datetime
 from retreival_methods import retrieve_documents
 from prompts import PROMPTS
-from models import ModelFactory
 from vllm import SamplingParams
 
 # Reuse existing imports from your code
 cur_dir = os.path.dirname(__file__) # ModelSelection/
 path = os.path.dirname(cur_dir) # RAG/
 sys.path.insert(0, path)
+
+from models.models import ModelFactory
 from ModelInference.RAG_inference import (
     load_embeddings_data,
     load_faiss_index,
@@ -39,7 +40,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def clear_hf_model_cache(model_name: str):
+QA_PATH = os.path.join(cur_dir, "qa.json")
+
+def clear_hf_model_cache():
     """
     Delete cached files for a specific Hugging Face model.
     Works for all huggingface-hub versions.
@@ -827,8 +830,8 @@ if __name__ == "__main__":
         # {"name": "claude-3-haiku", "type": "anthropic"},
         
         {"name": "smol_lm", "type": "open-source"},
-        {"name": "llama_3.2_3b", "type": "open-source"},
-        {"name": "qwen_2.5_1.5b", "type": "open-source"},
+        # {"name": "llama_3.2_3b", "type": "open-source"},
+        # {"name": "qwen_2.5_1.5b", "type": "open-source"},
         
     ]
     # Define HPO search space
@@ -844,7 +847,7 @@ if __name__ == "__main__":
     run_mlflow_experiment(
         experiment_name="RAG_Model_Selection",
         models_to_test=models_to_test,
-        qa_dataset_path="qa.json",
+        qa_dataset_path=QA_PATH,
         search_space=search_space,
         n_trials_per_model=20
     )

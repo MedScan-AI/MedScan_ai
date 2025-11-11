@@ -202,9 +202,8 @@ class Qwen25_1_5B_Instruct:
         logger.info("Loading Qwen/Qwen2.5-1.5B-Instruct with vLLM")
         self.llm = LLM(
             model="Qwen/Qwen2.5-1.5B-Instruct",
-            dtype="auto",
+            dtype="bfloat16",
             enable_prefix_caching=True,
-            kv_cache_dtype="fp8",  # Critical for long context efficiency
             disable_log_stats=True,
             # max_model_len=100000,  # Uncomment to limit to 100K context
         )
@@ -239,9 +238,8 @@ class Llama32_3B_Instruct:
         logger.info("Loading meta-llama/Llama-3.2-3B-Instruct with vLLM")
         self.llm = LLM(
             model="meta-llama/Llama-3.2-3B-Instruct",
-            dtype="auto",
+            dtype="bfloat16",
             enable_prefix_caching=True,
-            kv_cache_dtype="fp8",  # Critical for long context efficiency
             disable_log_stats=True,
             # max_model_len=100000,  # Uncomment to limit to 100K context
         )

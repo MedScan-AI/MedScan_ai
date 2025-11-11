@@ -10,7 +10,14 @@ import torch
 import multiprocessing
 from transformers import AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
-from .best_model import ModelFactory
+
+import os 
+import sys
+cur_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(cur_dir)
+sys.path.insert(0, parent_dir)
+from models.models import ModelFactory
+
 
 try:
     multiprocessing.set_start_method("spawn", force=True)
@@ -114,37 +121,6 @@ def load_data_pkl() -> Optional[Any]:
         logger.error(f"Error loading data pickle: {e}")
         return None
 
-
-def input_guardrail(query: str, guardrail_checker: Any) -> Tuple[bool, str]:
-    """
-    Validate input query before processing using medical guardrails.
-    
-    Args:
-        query: User input query
-        guardrail_checker: Instance of InputGuardrails class
-        
-    Returns:
-        Tuple of (passed: bool, message: str)
-    """
-    try:
-        logger.info("Running input guardrail")
-        
-        # Use the medical guardrail checker
-        query_status, message = 1, ""
-        
-        # Check if query passed validation
-        if query_status.value != "valid":
-            logger.warning(f"Query failed validation: {query_status.value}")
-            return False, message
-        
-        logger.info("Input guardrail passed")
-        return True, ""
-        
-    except Exception as e:
-        logger.error(f"Error in input guardrail: {e}")
-        return False, "An error occurred while validating your query."
-
-
 def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional[np.ndarray]:
     """
     Generate embedding vector for query using sentence transformer.
@@ -245,11 +221,15 @@ def generate_response(
         logger.info("Generating response")
         
         # Extract config parameters
-        model_name = config.get("model", "gpt-3.5-turbo")
-        model_type = config.get("model_type", "openai")
-        prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
-        temperature = config.get("temperature", 0.7)
-        top_p = config.get("top_p", 0.9)
+        model_name = config.get("model", None)
+        model_type = config.get("model_type", None)
+        prompt_template = config.get("prompt", None)
+        
+        if model_name == None or model_type == None or prompt_template == None:
+            raise f"Model Name/ type/ prompt tempate must be a valid string. Got None!\Model Name: {model_name}\nModel Type: {model_type}\nPrompt: {prompt_template}"
+        
+        temperature = config.get("temperature", 0.0)
+        top_p = config.get("top_p", 0.0)
         
         # Format context from documents with actual content
         context_parts = []
