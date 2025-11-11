@@ -647,14 +647,14 @@ class TestModelFactory:
         mock_tokenizer.return_value = Mock()
         mock_model.return_value = Mock()
         
-        from RAG.ModelInference.model import ModelFactory
+        from ModelDevelopment.RAG.ModelInference.best_model import ModelFactory
         model = ModelFactory.create_model("flan_t5", max_tokens=500)
         
         assert model is not None
     
     def test_list_models(self):
         """Test listing available models"""
-        from RAG.ModelInference.model import ModelFactory
+        from ModelDevelopment.RAG.ModelInference.best_model import ModelFactory
         models = ModelFactory.list_models()
         
         assert "flan_t5" in models
@@ -662,7 +662,7 @@ class TestModelFactory:
     
     def test_invalid_model_key(self):
         """Test invalid model key raises ValueError"""
-        from RAG.ModelInference.model import ModelFactory
+        from ModelDevelopment.RAG.ModelInference.best_model import ModelFactory
         
         with pytest.raises(ValueError) as exc_info:
             ModelFactory.create_model("nonexistent_model")

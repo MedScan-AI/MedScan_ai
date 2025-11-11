@@ -17,7 +17,7 @@ from datetime import datetime
 from retreival_methods import retrieve_documents
 from prompts import PROMPTS
 from models import ModelFactory
-from huggingface_hub import scan_cache, delete_cache
+from vllm import SamplingParams
 
 # Reuse existing imports from your code
 cur_dir = os.path.dirname(__file__) # ModelSelection/
@@ -44,20 +44,38 @@ def clear_hf_model_cache(model_name: str):
     Delete cached files for a specific Hugging Face model.
     Works for all huggingface-hub versions.
     """
-    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-    folder_prefix = f"models--{model_name.replace('/', '--')}"
-    deleted = False
 
-    if os.path.exists(cache_dir):
-        for folder in os.listdir(cache_dir):
-            if folder.startswith(folder_prefix):
-                path = os.path.join(cache_dir, folder)
-                shutil.rmtree(path, ignore_errors=True)
-                logging.info(f"🗑️ Deleted cache: {path}")
+    # Clear GPU memory 
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        # Force reset of memory allocator
+        for i in range(torch.cuda.device_count()):
+            with torch.cuda.device(i):
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+    
+    cache_dir = os.path.expanduser("/projects/aiwell/conda/envs/ToM/.cache/hub/")
+    prefix = "models--"
+
+    if not os.path.exists(cache_dir):
+        logging.warning(f"Cache directory does not exist: {cache_dir}")
+        return
+
+    deleted = False
+    for folder in os.listdir(cache_dir):
+        if folder.startswith(prefix):
+            path = os.path.join(cache_dir, folder)
+            try:
+                shutil.rmtree(path)
+                logging.info(f"Deleted cache: {path}")
                 deleted = True
+            except Exception as e:
+                logging.error(f"Failed to delete {path}: {e}")
 
     if not deleted:
-        logging.warning(f"⚠️ No cache found for {model_name}")
+        logging.warning("No model caches found to delete.")
+
 
 def generate_response(
     query: str,
@@ -80,9 +98,14 @@ def generate_response(
         logger.info("Generating response")
         
         # Extract config parameters
-        model_name = config.get("model_name", "google/flan-t5-base")
-        model_type = config.get("model_type", "open-source")
-        prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
+        model_name = config.get("model_name", None)
+        model_type = config.get("model_type", None)
+        prompt_template = config.get("prompt", None)
+        
+        if model_name == None or model_type == None or prompt_template == None:
+            logger.error("Model details/ Prompt cannot be empty")
+            sys.exit(1)
+        
         temperature = config.get("temperature", 0.7)
         top_p = config.get("top_p", 0.9)
         
@@ -307,7 +330,7 @@ def evaluate_single_query(
         start_time = time.time()
         
         # 1. Get embedding
-        embedding = get_embedding(query, config.get("embedding_model", "BAAI/llm-embedder"))
+        embedding = get_embedding(query, "BAAI/llm-embedder")
         if embedding is None:
             raise Exception("Failed to generate embedding")
         
@@ -386,6 +409,12 @@ def evaluate_single_query(
             # GPU utilization - would need actual monitoring
             gpu_utilization_percent = 75.0  # Placeholder
         
+        # After generating response
+        logger.info(f"Generated response length: {len(response) if response else 0}")
+        logger.info(f"First 200 chars: {response[:200] if response else 'NONE'}")
+        logger.info(f"Semantic score: {semantic_matching_score}")
+        logger.info(f"Hallucination score: {avg_hallucination_score}")
+
         return {
             "query": query,
             "reference_answer": reference_answer,
@@ -423,44 +452,41 @@ def evaluate_on_qa_dataset(
     qa_dataset: List[Dict[str, str]],
     config: Dict[str, Any],
     embeddings_data: List[Dict[str, Any]],
+    model,
+    hallucination_model,
     index: Any
 ) -> Dict[str, Any]:
     """
     Evaluate RAG pipeline on entire QA dataset and aggregate metrics.
-    
-    Args:
-        qa_dataset: List of QA pairs
-        config: Configuration dict
-        embeddings_data: Loaded embeddings data
-        index: FAISS index
-        
-    Returns:
-        Dictionary with aggregated metrics across all queries
     """
     logger.info(f"Evaluating on {len(qa_dataset)} QA pairs")
     
-    # Load hallucination model once
-    try:
-        hallucination_model = AutoModelForSequenceClassification.from_pretrained(
-            "vectara/hallucination_evaluation_model", 
-            trust_remote_code=True
-        )
-    except Exception as e:
-        logger.warning(f"Could not load hallucination model: {e}")
-        hallucination_model = None
+    # # Extract config parameters
+    # model_name = config.get("model_name", None)
+    # if model_name == None:
+    #     logger.error("Incorrect Model Name")
+    #     sys.exit(1)    
+    # temperature = config.get("temperature", 0.7)
+    # top_p = config.get("top_p", 0.9)
 
-    # Extract config parameters
-    model_name = config.get("model_name", "google/flan-t5-base")
-    model_type = config.get("model_type", "open-source")
-    prompt_template = config.get("prompt", "Answer based on context: {context}\n\nQuestion: {query}")
-    temperature = config.get("temperature", 0.7)
-    top_p = config.get("top_p", 0.9)
-
-    try:    
-        model = ModelFactory.create_model(model_name, temperature, top_p)
-    except Exception as e:
-        logger.warning(f"Could not load model: {e}")
-        model = None
+    # try:    
+    #     model = ModelFactory.create_model(model_name, temperature, top_p)
+    # except Exception as e:
+    #     logger.error(f"FAILED to load model: {e}")  # Change to error
+    #     logger.exception(e)  # ADD THIS to see full traceback
+    #     return {
+    #         "avg_semantic_matching_score": 0.0,
+    #         "avg_hallucination_score": 0.0,
+    #         "avg_retrieval_score": 0.0,
+    #         "avg_runtime_per_query_ms": 0.0,
+    #         "avg_cost_per_query_usd": 0.0,
+    #         "api_success_rate": 0.0,
+    #         "avg_memory_usage_mb": 0.0,
+    #         "avg_gpu_utilization_percent": 0.0,
+    #         "total_queries": len(qa_dataset),
+    #         "failed_queries": len(qa_dataset),
+    #         "per_query_results": []
+    #     }
     
     results = []
     for qa_pair in qa_dataset:
@@ -474,8 +500,27 @@ def evaluate_on_qa_dataset(
         )
         results.append(result)
     
+    # Clean up models before aggregating results**
+    try:
+        if model is not None:
+            del model
+        if hallucination_model is not None:
+            del hallucination_model
+        
+        # Clear CUDA cache if using GPU
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        logger.info(f"Cleaned up model")
+    except Exception as e:
+        logger.warning(f"Error during cleanup: {e}")
+    
     # Aggregate metrics
-    successful_results = [r for r in results if "error" not in r]
+    successful_results = [r for r in results if "error" not in list(r.keys())]
     failed_count = len(results) - len(successful_results)
     
     if not successful_results:
@@ -495,14 +540,14 @@ def evaluate_on_qa_dataset(
         }
     
     aggregated = {
-        "avg_semantic_matching_score": np.mean([r["semantic_matching_score"] for r in successful_results]),
-        "avg_hallucination_score": np.mean([r["hallucination_score"] for r in successful_results]),
-        "avg_retrieval_score": np.mean([r["retrieval_score"] for r in successful_results]),
-        "avg_runtime_per_query_ms": np.mean([r["runtime_per_query_ms"] for r in successful_results]),
-        "avg_cost_per_query_usd": np.mean([r["cost_per_query_usd"] for r in successful_results]),
+        "avg_semantic_matching_score": np.mean([r["semantic_matching_score"] for r in successful_results if r]),
+        "avg_hallucination_score": np.mean([r["hallucination_score"] for r in successful_results if r]),
+        "avg_retrieval_score": np.mean([r["retrieval_score"] for r in successful_results if r]),
+        "avg_runtime_per_query_ms": np.mean([r["runtime_per_query_ms"] for r in successful_results if r]),
+        "avg_cost_per_query_usd": np.mean([r["cost_per_query_usd"] for r in successful_results if r]),
         "api_success_rate": (len(successful_results) / len(results)) * 100,
-        "avg_memory_usage_mb": np.mean([r["memory_usage_mb"] for r in successful_results]),
-        "avg_gpu_utilization_percent": np.mean([r["gpu_utilization_percent"] for r in successful_results]),
+        "avg_memory_usage_mb": np.mean([r["memory_usage_mb"] for r in successful_results if r]),
+        "avg_gpu_utilization_percent": np.mean([r["gpu_utilization_percent"] for r in successful_results if r]),
         "total_queries": len(qa_dataset),
         "successful_queries": len(successful_results),
         "failed_queries": failed_count,
@@ -510,8 +555,6 @@ def evaluate_on_qa_dataset(
     }
     
     logger.info(f"Evaluation complete. Success rate: {aggregated['api_success_rate']:.2f}%")
-    del model
-    clear_hf_model_cache(model_name)
     return aggregated
 
 def run_hpo_for_model(
@@ -523,132 +566,115 @@ def run_hpo_for_model(
     search_space: Dict[str, Any],
     n_trials: int = 50
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """
-    Run HPO using Optuna for a specific model and return best configuration and metrics.
+    """Run HPO with a SINGLE model instance shared across trials"""
     
-    Uses TPE (Tree-structured Parzen Estimator) sampler for intelligent search.
-    
-    Args:
-        model_name: Name of the model to test
-        model_type: Type of model ("openai", "anthropic", "open-source", etc.)
-        qa_dataset: QA dataset for evaluation
-        embeddings_data: Loaded embeddings data
-        index: FAISS index
-        search_space: Dictionary defining parameter ranges
-        n_trials: Number of HPO trials to run
-        
-    Returns:
-        Tuple of (best_config, best_metrics)
-    """
     logger.info(f"Starting Optuna HPO for {model_name} with {n_trials} trials")
     
-    # Store best metrics for later
+    # Load model ONCE before trials
+    logger.info(f"Loading model {model_name} (will be reused for all trials)")
+    base_model = ModelFactory.create_model(
+        model_name, 
+        temperature=0.7,  # Dummy values, will be overridden
+        top_p=0.9,
+        max_tokens=500
+    )
+    
+    # Load hallucination model once too
+    hallucination_model = None
+    try:
+        hallucination_model = AutoModelForSequenceClassification.from_pretrained(
+            "vectara/hallucination_evaluation_model", 
+            trust_remote_code=True
+        )
+    except Exception as e:
+        logger.warning(f"Could not load hallucination model: {e}")
+    
     best_metrics_storage = {"metrics": None}
     
     def objective(trial: optuna.Trial) -> float:
-        """
-        Optuna objective function to maximize.
-        
-        Args:
-            trial: Optuna trial object
-            
-        Returns:
-            Composite score to maximize
-        """
-        # Sample hyperparameters using Optuna's suggest methods
+        # Sample hyperparameters
         config = {
             "model_name": model_name,
             "model_type": model_type,
-            "temperature": trial.suggest_float(
-                "temperature", 
+            "temperature": trial.suggest_float("temperature", 
                 search_space["temperature"][0], 
-                search_space["temperature"][1]
-            ),
-            "top_p": trial.suggest_float(
-                "top_p", 
+                search_space["temperature"][1]),
+            "top_p": trial.suggest_float("top_p", 
                 search_space["top_p"][0], 
-                search_space["top_p"][1]
-            ),
-            "num_retrieved_docs": trial.suggest_int(
-                "num_retrieved_docs",
+                search_space["top_p"][1]),
+            "num_retrieved_docs": trial.suggest_int("num_retrieved_docs",
                 search_space["num_retrieved_docs"][0],
-                search_space["num_retrieved_docs"][1] - 1  # Optuna uses inclusive range
-            ),
-            "retrieval_method": trial.suggest_categorical(
-                "retrieval_method",
-                search_space["retrieval_method"]
-            ),
-            "prompt": trial.suggest_categorical(
-                "prompt",
-                search_space["prompt_versions"]
-            ),
+                search_space["num_retrieved_docs"][1] - 1),
+            "retrieval_method": trial.suggest_categorical("retrieval_method",
+                search_space["retrieval_method"]),
+            "prompt": trial.suggest_categorical("prompt",
+                search_space["prompt_versions"]),
             "embedding_model": search_space.get("embedding_model", "BAAI/llm-embedder")
         }
         
         logger.info(f"Trial {trial.number + 1}/{n_trials}")
-        logger.info(f"  Config: temp={config['temperature']:.3f}, top_p={config['top_p']:.3f}, "
-                   f"k={config['num_retrieved_docs']}, method={config['retrieval_method']}")
         
         try:
-            # Evaluate on QA dataset
-            metrics = evaluate_on_qa_dataset(qa_dataset, config, embeddings_data, index)
-            
-            # Calculate composite score (higher is better for both)
-            # Weight: 50% semantic matching, 50% hallucination
-            composite_score = (
-                metrics["avg_semantic_matching_score"] * 0.5 + 
-                metrics["avg_hallucination_score"] * 0.5
+            # Update sampling params instead of reloading model
+            base_model.sampling_params = SamplingParams(
+                temperature=config['temperature'],
+                top_p=config['top_p'],
+                max_tokens=base_model.max_tokens
+            )
+
+            # Evaluate with shared model instance
+            metrics = evaluate_on_qa_dataset(
+                qa_dataset, config, embeddings_data, 
+                base_model, hallucination_model, index  # Pass pre-loaded model
             )
             
-            # Store metrics with this trial
+            composite_score = metrics["avg_semantic_matching_score"] * 0.5 + metrics["avg_hallucination_score"] * 0.5
+            
             metrics["composite_score"] = composite_score
             metrics["config"] = config
             
-            # Update best metrics storage
-            if best_metrics_storage["metrics"] is None or \
-               composite_score > best_metrics_storage["metrics"]["composite_score"]:
+            if best_metrics_storage["metrics"] is None or composite_score > best_metrics_storage["metrics"]["composite_score"]:
                 best_metrics_storage["metrics"] = metrics
             
-            logger.info(f"  Composite Score: {composite_score:.4f} "
-                       f"(semantic={metrics['avg_semantic_matching_score']:.4f}, "
-                       f"hallucination={metrics['avg_hallucination_score']:.4f})")
+            logger.info(f"  Composite Score: {composite_score:.4f}")
             
-            # Log intermediate values for Optuna's visualization
-            trial.set_user_attr("semantic_matching_score", metrics["avg_semantic_matching_score"])
-            trial.set_user_attr("hallucination_score", metrics["avg_hallucination_score"])
-            trial.set_user_attr("retrieval_score", metrics["avg_retrieval_score"])
-            trial.set_user_attr("runtime_ms", metrics["avg_runtime_per_query_ms"])
-            trial.set_user_attr("cost_usd", metrics["avg_cost_per_query_usd"])
-            
+            # Log to Optuna
+            try:
+                trial.set_user_attr("semantic_matching_score", metrics["avg_semantic_matching_score"])
+                trial.set_user_attr("hallucination_score", metrics["avg_hallucination_score"])
+            except Exception as e:
+                logger.warning(f"Failed to set user attr: {e}")
+
             return composite_score
             
         except Exception as e:
             logger.error(f"Trial {trial.number + 1} failed: {e}")
-            # Return a very low score for failed trials
             return -1.0
     
-    # Create Optuna study with TPE sampler
-    sampler = TPESampler(
-        seed=42,  # For reproducibility
-        n_startup_trials=10,  # Random exploration for first 10 trials
-        n_ei_candidates=24  # Number of candidates for TPE
-    )
+    # Create study and optimize
+    sampler = TPESampler(seed=42, n_startup_trials=10, n_ei_candidates=24)
+    study = optuna.create_study(direction="maximize", sampler=sampler)
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
     
-    study = optuna.create_study(
-        direction="maximize",  # Maximize composite score
-        sampler=sampler,
-        study_name=f"{model_name}_hpo"
-    )
+    # Cleanup after ALL trials complete
+    try:
+        del base_model.llm
+        del base_model
+        if hallucination_model is not None:
+            del hallucination_model
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        import gc
+        gc.collect()
+        
+        logger.info(f"Cleaned up {model_name}")
+    except Exception as e:
+        logger.warning(f"Cleanup error: {e}")
     
-    # Run optimization
-    study.optimize(
-        objective, 
-        n_trials=n_trials,
-        show_progress_bar=True,
-        catch=(Exception,)  # Continue on exceptions
-    )
-    
-    # Get best trial
+    # Return best config and metrics
     best_trial = study.best_trial
     best_config = {
         "model_name": model_name,
@@ -661,33 +687,7 @@ def run_hpo_for_model(
         "embedding_model": search_space.get("embedding_model", "BAAI/llm-embedder")
     }
     
-    best_metrics = best_metrics_storage["metrics"]
-    
-    # Log optimization summary
-    logger.info(f"\n{'='*60}")
-    logger.info(f"HPO Complete for {model_name}")
-    logger.info(f"{'='*60}")
-    logger.info(f"Best Score: {study.best_value:.4f}")
-    logger.info(f"Best Parameters:")
-    for key, value in best_trial.params.items():
-        if isinstance(value, float):
-            logger.info(f"  {key}: {value:.4f}")
-        else:
-            logger.info(f"  {key}: {value}")
-    logger.info(f"Number of finished trials: {len(study.trials)}")
-    logger.info(f"Number of pruned trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
-    logger.info(f"Number of complete trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])}")
-    logger.info(f"{'='*60}\n")
-    
-    # Save Optuna study for later analysis
-    best_metrics["optuna_study"] = {
-        "best_trial_number": best_trial.number,
-        "best_value": study.best_value,
-        "n_trials": len(study.trials),
-        "study_name": study.study_name
-    }
-    
-    return best_config, best_metrics
+    return best_config, best_metrics_storage["metrics"]
 
 def log_model_to_mlflow(
     model_name: str,
@@ -815,6 +815,7 @@ def run_mlflow_experiment(
     logger.info("\n" + "="*60)
     logger.info("Experiment complete! Check MLflow UI for results.")
     logger.info("="*60)
+    clear_hf_model_cache(model_name)
 
 # Example usage
 if __name__ == "__main__":
@@ -824,10 +825,12 @@ if __name__ == "__main__":
         # {"name": "gpt-3.5-turbo", "type": "openai"},
         # {"name": "gpt-4o-mini", "type": "openai"},
         # {"name": "claude-3-haiku", "type": "anthropic"},
-        {"name": "llama_3_1", "type": "open-source"},
+        
+        {"name": "qwen_2.5_7b", "type": "open-source"},
         {"name": "mistral_7b", "type": "open-source"},
-        {"name": "flan_t5", "type": "open-source"},
-        {"name": "bloom_560m", "type": "open-source"},
+        # {"name": "llama_3.1_8b", "type": "open-source"},
+        # {"name": "qwen_2.5_14b", "type": "open-source"},
+        {"name": "smol_lm", "type": "open-source"}
     ]
     # Define HPO search space
     search_space = {

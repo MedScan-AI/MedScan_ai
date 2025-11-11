@@ -1,38 +1,43 @@
 """
-models.py - Unified text generation classes with vLLM + Transformers
-Supports both decoder-only (vLLM) and encoder-decoder (HF) models
+models.py - Unified text generation classes with vLLM
+Optimized for long-context summarization (15k-40k tokens)
 """
 
 import logging
 import torch
 from typing import Dict, Any
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    AutoModelForCausalLM,
-)
 from vllm import LLM, SamplingParams
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 # ------------------------------
-# vLLM Models
+# vLLM Models (Sorted by Size)
 # ------------------------------
 
-class Llama31Instruct:
-    """Meta Llama 3.1 8B Instruct via vLLM"""
+class Qwen25_7B_Instruct:
+    """Qwen 2.5 7B Instruct via vLLM - 128K context"""
 
     def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
 
-        logger.info("Loading meta-llama/Llama-3.1-8B-Instruct with vLLM")
-        self.llm = LLM(model="meta-llama/Llama-3.1-8B-Instruct", tensor_parallel_size=1)
+        logger.info("Loading Qwen/Qwen2.5-7B-Instruct with vLLM")
+        self.llm = LLM(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            # tensor_parallel_size=1,
+            dtype="bfloat16",
+            enable_prefix_caching=False,  
+            disable_log_stats=True,
+            # max_model_len=32768,  # Adjust based on your k value
+        )
         self.sampling_params = SamplingParams(
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
         )
 
     def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
@@ -46,21 +51,31 @@ class Llama31Instruct:
                 "success": True,
             }
         except Exception as e:
-            logger.error(f"Llama inference error: {e}")
+            logger.error(f"Qwen 2.5-7B inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
 
+
 class Mistral7BInstruct:
-    """Mistral 7B Instruct via vLLM"""
+    """Mistral 7B Instruct v0.3 via vLLM - 32K context"""
 
     def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
 
-        logger.info("Loading mistralai/Mistral-7B-Instruct-v0.2 with vLLM")
-        self.llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2", tensor_parallel_size=1)
+        logger.info("Loading mistralai/Mistral-7B-Instruct-v0.3 with vLLM")
+        self.llm = LLM(
+            model="mistralai/Mistral-7B-Instruct-v0.3",
+            # tensor_parallel_size=1,
+            dtype="bfloat16",
+            enable_prefix_caching=False,  
+            disable_log_stats=True,
+            # max_model_len=32768,
+        )
         self.sampling_params = SamplingParams(
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
         )
 
     def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
@@ -77,86 +92,105 @@ class Mistral7BInstruct:
             logger.error(f"Mistral inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
 
-# ------------------------------
-# Transformers Models
-# ------------------------------
 
-class FlanT5Base:
-    """Google Flan-T5 Base (encoder-decoder)"""
+class Llama31_8B_Instruct:
+    """Meta Llama 3.1 8B Instruct via vLLM - 128K context"""
 
     def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
 
-        logger.info("Loading google/flan-t5-base (Transformers)")
-        self.tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
-        self.model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
-        if torch.cuda.is_available():
-            self.model = self.model.to("cuda")
+        logger.info("Loading meta-llama/Meta-Llama-3.1-8B-Instruct with vLLM")
+        self.llm = LLM(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            # tensor_parallel_size=1,
+            dtype="bfloat16",
+            enable_prefix_caching=False, 
+            disable_log_stats=True,
+            # max_model_len=32768,
+        )
+        self.sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
 
     def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
         try:
-            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-            if torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=kwargs.get("max_tokens", self.max_tokens),
-                temperature=kwargs.get("temperature", self.temperature),
-                top_p=kwargs.get("top_p", self.top_p),
-                do_sample=True,
-            )
-            text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            outputs = self.llm.generate([prompt], sampling_params=self.sampling_params)
+            out = outputs[0].outputs[0]
             return {
-                "generated_text": text,
-                "input_tokens": len(inputs["input_ids"][0]),
-                "output_tokens": len(outputs[0]),
+                "generated_text": out.text,
+                "input_tokens": len(outputs[0].prompt_token_ids),
+                "output_tokens": len(out.token_ids),
                 "success": True,
             }
         except Exception as e:
-            logger.error(f"Flan-T5 inference error: {e}")
+            logger.error(f"Llama 3.1 inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
 
-class Bloom560M:
-    """BigScience BLOOM-560M (Transformers fallback)"""
+
+class Qwen25_14B_Instruct:
+    """Qwen 2.5 14B Instruct via vLLM - 128K context (BEST for summarization)"""
 
     def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
 
-        logger.info("Loading bigscience/bloom-560m (Transformers)")
-        self.tokenizer = AutoTokenizer.from_pretrained("bigscience/bloom-560m")
-        self.model = AutoModelForCausalLM.from_pretrained(
-            "bigscience/bloom-560m", trust_remote_code=True
+        logger.info("Loading Qwen/Qwen2.5-14B-Instruct with vLLM")
+        self.llm = LLM(
+            model="Qwen/Qwen2.5-14B-Instruct",
+            # tensor_parallel_size=1,
+            dtype="bfloat16",
+            enable_prefix_caching=False,  
+            disable_log_stats=True,
+            # max_model_len=32768,
         )
-        if torch.cuda.is_available():
-            self.model = self.model.to("cuda")
+        self.sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
 
+    def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        try:
+            outputs = self.llm.generate([prompt], sampling_params=self.sampling_params)
+            out = outputs[0].outputs[0]
+            return {
+                "generated_text": out.text,
+                "input_tokens": len(outputs[0].prompt_token_ids),
+                "output_tokens": len(out.token_ids),
+                "success": True,
+            }
+        except Exception as e:
+            logger.error(f"Qwen 2.5-14B inference error: {e}")
+            return {"generated_text": f"Error: {e}", "success": False}
+
+class SmolLM2:
+    def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.top_p = top_p
+        model_id = "HuggingFaceTB/SmolLM2-360M"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+    
     def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
         try:
             inputs = self.tokenizer(prompt, return_tensors="pt")
-            if torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=kwargs.get("max_tokens", self.max_tokens),
-                temperature=kwargs.get("temperature", self.temperature),
-                top_p=kwargs.get("top_p", self.top_p),
-                do_sample=True,
-            )
-            text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            outputs = self.model.generate(**inputs, max_new_tokens=50)
             return {
-                "generated_text": text,
-                "input_tokens": len(inputs["input_ids"][0]),
-                "output_tokens": len(outputs[0]),
+                "generated_text": self.tokenizer.decode(outputs[0], skip_special_tokens=True),
+                "input_tokens": 0,
+                "output_tokens": 0,
                 "success": True,
             }
         except Exception as e:
-            logger.error(f"BLOOM inference error: {e}")
+            logger.error(f"SmolLM2 inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
-
+    
 # ------------------------------
 # Model Factory
 # ------------------------------
@@ -165,10 +199,11 @@ class ModelFactory:
     """Factory for unified model creation"""
 
     MODEL_CLASSES = {
-        "llama_3_1": Llama31Instruct,
+        "qwen_2.5_7b": Qwen25_7B_Instruct,
         "mistral_7b": Mistral7BInstruct,
-        "flan_t5": FlanT5Base,
-        "bloom_560m": Bloom560M,
+        "llama_3.1_8b": Llama31_8B_Instruct,
+        "qwen_2.5_14b": Qwen25_14B_Instruct,
+        "smol_lm" : SmolLM2
     }
 
     @staticmethod
@@ -176,6 +211,7 @@ class ModelFactory:
         model_key: str,
         temperature: float = 0.7,
         top_p: float = 0.9,
+        max_tokens: int = 500,
         **kwargs,
     ):
         if model_key not in ModelFactory.MODEL_CLASSES:
@@ -183,14 +219,14 @@ class ModelFactory:
                 f"Unknown model '{model_key}'. Available: {list(ModelFactory.MODEL_CLASSES.keys())}"
             )
         cls = ModelFactory.MODEL_CLASSES[model_key]
-        return cls(temperature=temperature, top_p=top_p, **kwargs)
+        return cls(temperature=temperature, top_p=top_p, max_tokens=max_tokens, **kwargs)
 
     @staticmethod
     def list_models() -> Dict[str, str]:
         return {
-            "llama_3_1": "Meta Llama 3.1 8B Instruct (vLLM)",
-            "mistral_7b": "Mistral 7B Instruct v0.2 (vLLM)",
-            "flan_t5": "Google Flan-T5 Base (Transformers)",
-            "bloom_560m": "BigScience BLOOM-560M (Transformers)",
-            
+            "qwen_2.5_7b": "Qwen 2.5 7B Instruct (7B, 128K ctx, vLLM)",
+            "mistral_7b": "Mistral 7B Instruct v0.3 (7B, 32K ctx, vLLM)",
+            "llama_3.1_8b": "Meta Llama 3.1 8B Instruct (8B, 128K ctx, vLLM)",
+            "qwen_2.5_14b": "Qwen 2.5 14B Instruct (14B, 128K ctx, vLLM)",
+            "smol_lm": "SmolLM2 (360M)"
         }

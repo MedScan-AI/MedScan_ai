@@ -1,14 +1,22 @@
 import logging
 import json
 import pickle
+import gc
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import faiss
 import torch
+import multiprocessing
 from transformers import AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
-from .model import ModelFactory
+from .best_model import ModelFactory
+
+try:
+    multiprocessing.set_start_method("spawn", force=True)
+except RuntimeError:
+    # already set
+    pass
 
 # Configure logging
 logging.basicConfig(
@@ -23,7 +31,7 @@ INDEX_PATH = Path("/opt/airflow/DataPipeline/data/RAG/index/index.bin")
 DATA_PATH = Path("/opt/airflow/DataPipeline/data/RAG/index/data.pkl")
 
 
-def load_config(config_path: str = "utils/config.json") -> Dict[str, Any]:
+def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
     """
     Load configuration from JSON file.
     
@@ -150,9 +158,13 @@ def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional
     """
     try:
         logger.info(f"Generating embedding with model: {model_name}")
-        model = SentenceTransformer(model_name, use_auth_token=True)
-        embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
+        
+        model = SentenceTransformer(model_name, device = 'cpu')
+        embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
         logger.info(f"Embedding generated with shape: {embedding.shape}")
+        del model
+        gc.collect()
+        
         return embedding
         
     except Exception as e:
