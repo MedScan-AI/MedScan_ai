@@ -1,0 +1,32 @@
+{
+  "model_name": "qwen_2.5_1.5b",
+  "model_type": "open-source",
+  "temperature": 0.8589,
+  "top_p": 0.7028,
+  "k": 4,
+  "retrieval_method": "weighted_score",
+  "embedding_model": "BAAI/llm-embedder",
+  "prompt": "You are a medical information assistant that provides evidence-based responses using only the provided medical literature.\n\nCONTEXT DOCUMENTS:\n{context}\n\nINSTRUCTIONS:\n1. Answer the following question",
+  "mlflow_run_id": "3b468a156fcd48f7b457ee7ce5626edc",
+  "performance_metrics": {
+    "composite_score": 0.2892545264635012,
+    "semantic_matching_score": 0.23363830803305413,
+    "hallucination_score": 0.34487074489394826,
+    "retrieval_score": 0.7811772137880325,
+    "api_success_rate": 100.0
+  },
+  "resource_requirements": {
+    "memory_mb": 0.0,
+    "gpu_utilization_percent": 75.0
+  },
+  "cost_metrics": {
+    "cost_per_query_usd": 0.0,
+    "runtime_per_query_ms": 3186.9593938191733
+  },
+  "tags": {
+    "dataset_version": "QA_v1.0",
+    "experiment_date": "2025-11-11",
+    "is_local": "true",
+    "model_family": "qwen_2.5_1.5b"
+  }
+}

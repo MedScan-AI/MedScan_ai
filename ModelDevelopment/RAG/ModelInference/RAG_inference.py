@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import faiss
 import torch
-import multiprocessing
 from transformers import AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
 
@@ -16,6 +15,10 @@ import sys
 cur_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(cur_dir)
 sys.path.insert(0, parent_dir)
+
+import multiprocessing
+multiprocessing.set_start_method('spawn', force=True)
+
 from models.models import ModelFactory
 
 
@@ -221,15 +224,15 @@ def generate_response(
         logger.info("Generating response")
         
         # Extract config parameters
-        model_name = config.get("model", None)
+        model_name = config.get("model_name", None)
         model_type = config.get("model_type", None)
         prompt_template = config.get("prompt", None)
-        
+
         if model_name == None or model_type == None or prompt_template == None:
-            raise f"Model Name/ type/ prompt tempate must be a valid string. Got None!\Model Name: {model_name}\nModel Type: {model_type}\nPrompt: {prompt_template}"
-        
-        temperature = config.get("temperature", 0.0)
-        top_p = config.get("top_p", 0.0)
+            raise f"""Empty/ None values detected\n\nModel Name: {model_name}\nModel type: {model_type}\nPrompt:{prompt_template}"""
+
+        temperature = config.get("temperature", 0.7)
+        top_p = config.get("top_p", 0.9)
         
         # Format context from documents with actual content
         context_parts = []
@@ -246,7 +249,7 @@ def generate_response(
         logger.info(f"Using model: {model_name} (type: {model_type})")
         logger.info(f"Temperature: {temperature}, Top-p: {top_p}")
         
-        model = ModelFactory(model_name, temperature, top_p)
+        model = ModelFactory.create_model(model_name, temperature, top_p)
         response_d = model.infer(formatted_prompt)
 
         if response_d == None or response_d.get('success') != True:
@@ -423,12 +426,6 @@ def run_rag_pipeline(
         if embeddings_data is None or index is None:
             return "Error loading required data files.", None
         
-        # Input guardrail
-        if guardrail_checker:
-            passed, message = input_guardrail(query, guardrail_checker)
-            if not passed:
-                return message, None
-        
         # Get embedding
         embedding = get_embedding(query, config.get("embedding_model", "BAAI/llm-embedder"))
         if embedding is None:
@@ -476,3 +473,11 @@ def run_rag_pipeline(
     except Exception as e:
         logger.error(f"Error in RAG pipeline: {e}")
         return "An error occurred processing your query.", None
+
+if __name__ == "__main__":
+    query = "What is Tuberculosis (TB)?"
+    response, stats = run_rag_pipeline(query)
+
+    logger.info(response)
+    logger.info("*"*80)
+    logger.info(stats)
