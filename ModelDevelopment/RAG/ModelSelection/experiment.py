@@ -609,7 +609,7 @@ def run_hpo_for_model(
                 search_space["retrieval_method"]),
             "prompt": trial.suggest_categorical("prompt",
                 search_space["prompt_versions"]),
-            "embedding_model": search_space.get("embedding_model", "BAAI/llm-embedder")
+            "embedding_model": "BAAI/llm-embedder", 
         }
         
         logger.info(f"Trial {trial.number + 1}/{n_trials}")
@@ -826,11 +826,10 @@ if __name__ == "__main__":
         # {"name": "gpt-4o-mini", "type": "openai"},
         # {"name": "claude-3-haiku", "type": "anthropic"},
         
-        {"name": "qwen_2.5_7b", "type": "open-source"},
-        {"name": "mistral_7b", "type": "open-source"},
-        # {"name": "llama_3.1_8b", "type": "open-source"},
-        # {"name": "qwen_2.5_14b", "type": "open-source"},
-        {"name": "smol_lm", "type": "open-source"}
+        {"name": "smol_lm", "type": "open-source"},
+        {"name": "llama_3.2_3b", "type": "open-source"},
+        {"name": "qwen_2.5_1.5b", "type": "open-source"},
+        
     ]
     # Define HPO search space
     search_space = {
@@ -839,7 +838,6 @@ if __name__ == "__main__":
         "num_retrieved_docs": (3, 8),  # range is [3, 8) for randint
         "retrieval_method": ["similarity", "mmr", "weighted_score", "rerank"],
         "prompt_versions": [v for _,v in PROMPTS.version.items()],
-        "embedding_model": "BAAI/llm-embedder"
     }
     
     # Run experiment

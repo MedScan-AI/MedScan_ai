@@ -54,7 +54,6 @@ class Qwen25_7B_Instruct:
             logger.error(f"Qwen 2.5-7B inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
 
-
 class Mistral7BInstruct:
     """Mistral 7B Instruct v0.3 via vLLM - 32K context"""
 
@@ -92,7 +91,6 @@ class Mistral7BInstruct:
             logger.error(f"Mistral inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
 
-
 class Llama31_8B_Instruct:
     """Meta Llama 3.1 8B Instruct via vLLM - 128K context"""
 
@@ -129,7 +127,6 @@ class Llama31_8B_Instruct:
         except Exception as e:
             logger.error(f"Llama 3.1 inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
-
 
 class Qwen25_14B_Instruct:
     """Qwen 2.5 14B Instruct via vLLM - 128K context (BEST for summarization)"""
@@ -180,17 +177,94 @@ class SmolLM2:
     def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
         try:
             inputs = self.tokenizer(prompt, return_tensors="pt")
+            input_length = inputs["input_ids"].shape[1]
             outputs = self.model.generate(**inputs, max_new_tokens=50)
+            generated_tokens = outputs[0][input_length:]
+            output_text = self.tokenizer.decode(generated_tokens, skip_special_tokens=True) 
             return {
-                "generated_text": self.tokenizer.decode(outputs[0], skip_special_tokens=True),
-                "input_tokens": 0,
-                "output_tokens": 0,
+                "generated_text": output_text,
+                "input_tokens": int(input_length),
+                "output_tokens": len(generated_tokens),
                 "success": True,
             }
         except Exception as e:
             logger.error(f"SmolLM2 inference error: {e}")
             return {"generated_text": f"Error: {e}", "success": False}
-    
+
+class Qwen25_1_5B_Instruct:
+    """Qwen 2.5 1.5B Instruct via vLLM - 128K context (BEST for efficiency & multilingual)"""
+
+    def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.top_p = top_p
+
+        logger.info("Loading Qwen/Qwen2.5-1.5B-Instruct with vLLM")
+        self.llm = LLM(
+            model="Qwen/Qwen2.5-1.5B-Instruct",
+            dtype="auto",
+            enable_prefix_caching=True,
+            kv_cache_dtype="fp8",  # Critical for long context efficiency
+            disable_log_stats=True,
+            # max_model_len=100000,  # Uncomment to limit to 100K context
+        )
+        self.sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+
+    def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        try:
+            outputs = self.llm.generate([prompt], sampling_params=self.sampling_params)
+            out = outputs[0].outputs[0]
+            return {
+                "generated_text": out.text,
+                "input_tokens": len(outputs[0].prompt_token_ids),
+                "output_tokens": len(out.token_ids),
+                "success": True,
+            }
+        except Exception as e:
+            logger.error(f"Qwen 2.5-1.5B inference error: {e}")
+            return {"generated_text": f"Error: {e}", "success": False}
+
+class Llama32_3B_Instruct:
+    """Llama 3.2 3B Instruct via vLLM - 128K context (BEST overall performance)"""
+
+    def __init__(self, max_tokens=500, temperature=0.7, top_p=0.9, **kwargs):
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.top_p = top_p
+
+        logger.info("Loading meta-llama/Llama-3.2-3B-Instruct with vLLM")
+        self.llm = LLM(
+            model="meta-llama/Llama-3.2-3B-Instruct",
+            dtype="auto",
+            enable_prefix_caching=True,
+            kv_cache_dtype="fp8",  # Critical for long context efficiency
+            disable_log_stats=True,
+            # max_model_len=100000,  # Uncomment to limit to 100K context
+        )
+        self.sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+
+    def infer(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        try:
+            outputs = self.llm.generate([prompt], sampling_params=self.sampling_params)
+            out = outputs[0].outputs[0]
+            return {
+                "generated_text": out.text,
+                "input_tokens": len(outputs[0].prompt_token_ids),
+                "output_tokens": len(out.token_ids),
+                "success": True,
+            }
+        except Exception as e:
+            logger.error(f"Llama 3.2-3B inference error: {e}")
+            return {"generated_text": f"Error: {e}", "success": False}
+
 # ------------------------------
 # Model Factory
 # ------------------------------
@@ -203,7 +277,9 @@ class ModelFactory:
         "mistral_7b": Mistral7BInstruct,
         "llama_3.1_8b": Llama31_8B_Instruct,
         "qwen_2.5_14b": Qwen25_14B_Instruct,
-        "smol_lm" : SmolLM2
+        "smol_lm" : SmolLM2,
+        "llama_3.2_3b": Llama32_3B_Instruct,
+        "qwen_2.5_1.5b": Qwen25_1_5B_Instruct,
     }
 
     @staticmethod
@@ -228,5 +304,8 @@ class ModelFactory:
             "mistral_7b": "Mistral 7B Instruct v0.3 (7B, 32K ctx, vLLM)",
             "llama_3.1_8b": "Meta Llama 3.1 8B Instruct (8B, 128K ctx, vLLM)",
             "qwen_2.5_14b": "Qwen 2.5 14B Instruct (14B, 128K ctx, vLLM)",
-            "smol_lm": "SmolLM2 (360M)"
+
+            "smol_lm": "SmolLM2 (360M)",
+            "llama_3.2_3b": "Llama (3B)",
+            "qwen_2.5_1.5b": "Qwen Instruct multilingual (1.5B)"
         }
