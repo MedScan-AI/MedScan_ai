@@ -818,7 +818,7 @@ def run_mlflow_experiment(
     logger.info("\n" + "="*60)
     logger.info("Experiment complete! Check MLflow UI for results.")
     logger.info("="*60)
-    clear_hf_model_cache(model_name)
+    clear_hf_model_cache()
 
 # Example usage
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 """
-select_model.py - Select best RAG model from MLflow experiments
+select_model.py - Select best RAG model from MLflow experiments.
+
 Uses heuristic: composite_score = semantic_score * 0.5 + hallucination_score * 0.5
 """
 
-import logging
-import mlflow
-import pandas as pd
-from typing import Dict, Any, List, Optional
 import json
-from pathlib import Path
+import logging
+from typing import Any, Dict, Optional
+
+from mlflow.tracking import MlflowClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,28 +18,38 @@ logger = logging.getLogger(__name__)
 
 
 class ModelSelector:
-    """Select best model from MLflow experiment results"""
+    """Select best model from MLflow experiment results."""
     
     def __init__(self, experiment_name: str = "RAG_Model_Selection"):
         """
-        Initialize model selector
+        Initialize model selector.
         
         Args:
             experiment_name: Name of MLflow experiment to query
         """
         self.experiment_name = experiment_name
+        self.client = MlflowClient()
         self.experiment = None
-        self.runs_df = None
+        self.runs = None
         
     def load_experiment(self) -> bool:
-        """Load MLflow experiment"""
+        """
+        Load MLflow experiment.
+        
+        Returns:
+            True if experiment loaded successfully, False otherwise
+        """
         try:
-            self.experiment = mlflow.get_experiment_by_name(self.experiment_name)
+            self.experiment = self.client.get_experiment_by_name(
+                self.experiment_name
+            )
             
             if self.experiment is None:
-                logger.error(f"Experiment '{self.experiment_name}' not found")
+                logger.error(
+                    f"Experiment '{self.experiment_name}' not found"
+                )
                 logger.info("Available experiments:")
-                for exp in mlflow.search_experiments():
+                for exp in self.client.search_experiments():
                     logger.info(f"  - {exp.name}")
                 return False
             
@@ -51,265 +61,259 @@ class ModelSelector:
             logger.error(f"Error loading experiment: {e}")
             return False
     
-    def get_all_runs(self) -> pd.DataFrame:
-        """Retrieve all runs from experiment"""
+    def get_all_runs(self) -> list:
+        """
+        Retrieve all runs from experiment ordered by composite score.
+        
+        Returns:
+            List of MLflow run objects
+        """
         try:
-            runs = mlflow.search_runs(
+            self.runs = self.client.search_runs(
                 experiment_ids=[self.experiment.experiment_id],
+                filter_string="",
                 order_by=["metrics.composite_score DESC"]
             )
             
-            if runs.empty:
+            if not self.runs:
                 logger.warning("No runs found in experiment")
-                return pd.DataFrame()
+                return []
             
-            logger.info(f"Retrieved {len(runs)} runs")
-            self.runs_df = runs
-            return runs
+            logger.info(f"Retrieved {len(self.runs)} runs")
+            return self.runs
             
         except Exception as e:
             logger.error(f"Error retrieving runs: {e}")
-            return pd.DataFrame()
+            return []
     
-    def calculate_composite_scores(self, runs_df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_composite_score(self, run) -> float:
         """
-        Calculate composite scores if not already present
+        Calculate composite score from individual metrics.
         
         Args:
-            runs_df: DataFrame of MLflow runs
+            run: MLflow run object
             
         Returns:
-            DataFrame with composite_score column added
+            Composite score (semantic * 0.5 + hallucination * 0.5)
         """
-        if 'metrics.composite_score' not in runs_df.columns:
-            logger.info("Calculating composite scores from individual metrics")
-            
-            semantic_col = 'metrics.semantic_matching_score'
-            hallucination_col = 'metrics.hallucination_score'
-            
-            if semantic_col in runs_df.columns and hallucination_col in runs_df.columns:
-                runs_df['metrics.composite_score'] = (
-                    runs_df[semantic_col] * 0.5 + 
-                    runs_df[hallucination_col] * 0.5
-                )
-            else:
-                logger.error("Required metrics not found in runs")
-                return runs_df
+        metrics = run.data.metrics
         
-        return runs_df
+        # Check if composite score already exists
+        if "composite_score" in metrics:
+            return metrics["composite_score"]
+        
+        # Calculate from individual metrics
+        semantic_score = metrics.get("semantic_matching_score", 0.0)
+        hallucination_score = metrics.get("hallucination_score", 0.0)
+        
+        return semantic_score * 0.5 + hallucination_score * 0.5
     
     def select_best_model(self) -> Optional[Dict[str, Any]]:
         """
-        Select best model based on composite score
+        Select best model based on composite score.
         
         Returns:
-            Dictionary containing best model info and metrics
+            Dictionary containing best model info and metrics, or None
         """
-        if self.runs_df is None or self.runs_df.empty:
+        if not self.runs:
             logger.error("No runs available for selection")
             return None
         
-        # Calculate composite scores if needed
-        self.runs_df = self.calculate_composite_scores(self.runs_df)
+        # Get best run (already sorted by composite_score DESC)
+        best_run = self.runs[0]
         
-        # Sort by composite score (descending)
-        sorted_runs = self.runs_df.sort_values(
-            'metrics.composite_score', 
-            ascending=False
-        )
+        # Extract metrics, params, and info
+        metrics = best_run.data.metrics
+        params = best_run.data.params
+        tags = best_run.data.tags
+        run_info = best_run.info
         
-        if sorted_runs.empty:
-            logger.error("No valid runs with composite scores")
-            return None
-        
-        # Get best run
-        best_run = sorted_runs.iloc[0]
+        # Calculate composite score if not present
+        composite_score = self.calculate_composite_score(best_run)
         
         # Extract key information
         best_model_info = {
-            "run_id": best_run["run_id"],
-            "model_name": best_run.get("params.model_name", "Unknown"),
-            "model_type": best_run.get("params.model_type", "Unknown"),
-            "composite_score": best_run["metrics.composite_score"],
-            "semantic_matching_score": best_run.get("metrics.semantic_matching_score", 0.0),
-            "hallucination_score": best_run.get("metrics.hallucination_score", 0.0),
-            "retrieval_score": best_run.get("metrics.retrieval_score", 0.0),
-            "runtime_per_query_ms": best_run.get("metrics.runtime_per_query_ms", 0.0),
-            "cost_per_query_usd": best_run.get("metrics.cost_per_query_usd", 0.0),
-            "api_success_rate": best_run.get("metrics.api_success_rate", 0.0),
-            "memory_usage_mb": best_run.get("metrics.memory_usage_mb", 0.0),
-            "gpu_utilization_percent": best_run.get("metrics.gpu_utilization_percent", 0.0),
+            "run_id": run_info.run_id,
+            "model_name": params.get("model_name", "Unknown"),
+            "model_type": params.get("model_type", "Unknown"),
+            "composite_score": composite_score,
+            "semantic_matching_score": metrics.get(
+                "semantic_matching_score", 0.0
+            ),
+            "hallucination_score": metrics.get("hallucination_score", 0.0),
+            "retrieval_score": metrics.get("retrieval_score", 0.0),
+            "runtime_per_query_ms": metrics.get("runtime_per_query_ms", 0.0),
+            "cost_per_query_usd": metrics.get("cost_per_query_usd", 0.0),
+            "api_success_rate": metrics.get("api_success_rate", 0.0),
+            "memory_usage_mb": metrics.get("memory_usage_mb", 0.0),
+            "gpu_utilization_percent": metrics.get(
+                "gpu_utilization_percent", 0.0
+            ),
             "hyperparameters": {
-                "temperature": best_run.get("params.temperature", None),
-                "top_p": best_run.get("params.top_p", None),
-                "num_retrieved_docs": best_run.get("params.num_retrieved_docs", None),
-                "retrieval_method": best_run.get("params.retrieval_method", None),
+                "temperature": params.get("temperature", None),
+                "top_p": params.get("top_p", None),
+                "num_retrieved_docs": params.get("num_retrieved_docs", None),
+                "retrieval_method": params.get("retrieval_method", None),
+            },
+            "tags": {
+                k: v for k, v in tags.items() 
+                if not k.startswith("mlflow.")
             }
         }
         
         return best_model_info
     
-    def get_top_n_models(self, n: int = 5) -> List[Dict[str, Any]]:
-        """
-        Get top N models by composite score
-        
-        Args:
-            n: Number of top models to return
-            
-        Returns:
-            List of model info dictionaries
-        """
-        if self.runs_df is None or self.runs_df.empty:
-            return []
-        
-        # Calculate composite scores if needed
-        self.runs_df = self.calculate_composite_scores(self.runs_df)
-        
-        # Sort and get top N
-        sorted_runs = self.runs_df.sort_values(
-            'metrics.composite_score', 
-            ascending=False
-        ).head(n)
-        
-        top_models = []
-        for _, run in sorted_runs.iterrows():
-            model_info = {
-                "rank": len(top_models) + 1,
-                "model_name": run.get("params.model_name", "Unknown"),
-                "composite_score": run["metrics.composite_score"],
-                "semantic_score": run.get("metrics.semantic_matching_score", 0.0),
-                "hallucination_score": run.get("metrics.hallucination_score", 0.0),
-                "runtime_ms": run.get("metrics.runtime_per_query_ms", 0.0),
-                "cost_usd": run.get("metrics.cost_per_query_usd", 0.0),
-            }
-            top_models.append(model_info)
-        
-        return top_models
-    
     def display_results(self, best_model: Dict[str, Any]):
         """
-        Display best model results in a formatted way
+        Display best model results in a formatted way.
         
         Args:
-            best_model: Best model information
+            best_model: Best model information dictionary
         """
-        print("\n" + "="*80)
-        print("🏆 BEST MODEL SELECTED")
-        print("="*80)
+        separator = "=" * 80
+        
+        print(f"\n{separator}")
+        print("BEST MODEL SELECTED")
+        print(separator)
         
         print(f"\nModel Name:           {best_model['model_name']}")
         print(f"Model Type:           {best_model['model_type']}")
         print(f"Run ID:               {best_model['run_id']}")
-        print(f"\n📊 COMPOSITE SCORE:    {best_model['composite_score']:.4f}")
-        print(f"   └─ Semantic Score:  {best_model['semantic_matching_score']:.4f} (50%)")
-        print(f"   └─ Hallucination:   {best_model['hallucination_score']:.4f} (50%)")
         
-        print(f"\n📈 OTHER METRICS:")
-        print(f"   Retrieval Score:    {best_model['retrieval_score']:.4f}")
-        print(f"   Runtime per Query:  {best_model['runtime_per_query_ms']:.2f} ms")
-        print(f"   Cost per Query:     ${best_model['cost_per_query_usd']:.6f}")
-        print(f"   API Success Rate:   {best_model['api_success_rate']:.2f}%")
-        print(f"   Memory Usage:       {best_model['memory_usage_mb']:.2f} MB")
-        print(f"   GPU Utilization:    {best_model['gpu_utilization_percent']:.2f}%")
+        print(f"\nCOMPOSITE SCORE:      "
+              f"{best_model['composite_score']:.4f}")
+        print(f"  Semantic Score:     "
+              f"{best_model['semantic_matching_score']:.4f} (50%)")
+        print(f"  Hallucination:      "
+              f"{best_model['hallucination_score']:.4f} (50%)")
         
-        print(f"\n⚙️  HYPERPARAMETERS:")
+        print("\nOTHER METRICS:")
+        print(f"  Retrieval Score:    "
+              f"{best_model['retrieval_score']:.4f}")
+        print(f"  Runtime per Query:  "
+              f"{best_model['runtime_per_query_ms']:.2f} ms")
+        print(f"  Cost per Query:     "
+              f"${best_model['cost_per_query_usd']:.6f}")
+        print(f"  API Success Rate:   "
+              f"{best_model['api_success_rate']:.2f}%")
+        print(f"  Memory Usage:       "
+              f"{best_model['memory_usage_mb']:.2f} MB")
+        print(f"  GPU Utilization:    "
+              f"{best_model['gpu_utilization_percent']:.2f}%")
+        
+        print("\nHYPERPARAMETERS:")
         for param, value in best_model['hyperparameters'].items():
             if value is not None:
-                print(f"   {param:20} {value}")
+                print(f"  {param:20} {value}")
         
-        print("="*80 + "\n")
+        if best_model['tags']:
+            print("\nTAGS:")
+            for tag_key, tag_value in best_model['tags'].items():
+                print(f"  {tag_key}: {tag_value}")
+        
+        print(f"{separator}\n")
     
-    def save_best_model_config(self, best_model: Dict[str, Any], output_path: str = "best_model_config.json"):
+    def save_best_model_config(
+        self, 
+        best_model: Dict[str, Any]
+    ):
         """
-        Save best model configuration to JSON file
+        Save best model configuration to JSON file.
         
         Args:
-            best_model: Best model information
+            best_model: Best model information dictionary
             output_path: Path to save configuration file
         """
         try:
+            # Get the full run to access params
+            run = self.client.get_run(best_model["run_id"])
+            params = run.data.params
+            
+            # Get prompt and embedding model from params
+            prompt_text = params.get("prompt", "")
+            embedding_model = params.get(
+                "embedding_model", 
+                "BAAI/llm-embedder"
+            )
+            
             # Create config for deployment
+            # (compatible with run_rag_pipeline)
             deployment_config = {
+                # Model configuration
                 "model_name": best_model["model_name"],
                 "model_type": best_model["model_type"],
+                "temperature": float(params.get("temperature", 0.7)),
+                "top_p": float(params.get("top_p", 0.9)),
+                
+                # RAG pipeline configuration
+                "k": int(params.get("num_retrieved_docs", 5)),
+                "retrieval_method": params.get(
+                    "retrieval_method", 
+                    "similarity"
+                ),
+                "embedding_model": embedding_model,
+                "prompt": prompt_text,
+                
+                # MLflow tracking
                 "mlflow_run_id": best_model["run_id"],
+                
+                # Performance metrics
                 "performance_metrics": {
                     "composite_score": best_model["composite_score"],
-                    "semantic_matching_score": best_model["semantic_matching_score"],
+                    "semantic_matching_score": best_model[
+                        "semantic_matching_score"
+                    ],
                     "hallucination_score": best_model["hallucination_score"],
                     "retrieval_score": best_model["retrieval_score"],
                     "api_success_rate": best_model["api_success_rate"]
                 },
-                "hyperparameters": best_model["hyperparameters"],
+                
+                # Resource requirements
                 "resource_requirements": {
                     "memory_mb": best_model["memory_usage_mb"],
-                    "gpu_utilization_percent": best_model["gpu_utilization_percent"]
+                    "gpu_utilization_percent": best_model[
+                        "gpu_utilization_percent"
+                    ]
                 },
+                
+                # Cost metrics
                 "cost_metrics": {
                     "cost_per_query_usd": best_model["cost_per_query_usd"],
-                    "runtime_per_query_ms": best_model["runtime_per_query_ms"]
-                }
+                    "runtime_per_query_ms": best_model[
+                        "runtime_per_query_ms"
+                    ]
+                },
+                
+                # Tags
+                "tags": best_model["tags"]
             }
-            
-            with open(output_path, 'w') as f:
+
+            import os
+            import sys
+            cur_dir = os.path.dirname(__file__) #ModelSelection
+            parent_dir = os.path.dirname(cur_dir) #RAG
+            sys.path.insert(0, parent_dir)
+
+            save_path = os.path.join(parent_dir, "utils")
+            if not os.path.exists(save_path):
+                os.makedirs(save_path, exist_ok=True)
+
+            save_path = os.path.join(save_path, "RAG_config.json")
+
+            with open(save_path, 'w') as f:
                 json.dump(deployment_config, f, indent=2)
             
-            logger.info(f"Best model config saved to: {output_path}")
+            logger.info(f"Best model config saved to: {save_path}")
+            logger.info(
+                "Config contains all fields needed by run_rag_pipeline()"
+            )
             
         except Exception as e:
             logger.error(f"Error saving config: {e}")
-    
-    def compare_models_by_criteria(self, criteria: str = "cost") -> pd.DataFrame:
-        """
-        Compare models by specific criteria (cost, speed, accuracy)
-        
-        Args:
-            criteria: One of 'cost', 'speed', 'accuracy', 'balanced'
-            
-        Returns:
-            DataFrame with models sorted by criteria
-        """
-        if self.runs_df is None or self.runs_df.empty:
-            return pd.DataFrame()
-        
-        df = self.runs_df.copy()
-        
-        # Add composite score if missing
-        df = self.calculate_composite_scores(df)
-        
-        # Define sorting columns based on criteria
-        sort_configs = {
-            "cost": ("metrics.cost_per_query_usd", True),  # Lower is better
-            "speed": ("metrics.runtime_per_query_ms", True),  # Lower is better
-            "accuracy": ("metrics.composite_score", False),  # Higher is better
-            "balanced": ("metrics.composite_score", False)  # Higher is better
-        }
-        
-        if criteria not in sort_configs:
-            logger.warning(f"Unknown criteria '{criteria}', using 'accuracy'")
-            criteria = "accuracy"
-        
-        sort_col, ascending = sort_configs[criteria]
-        
-        # Select relevant columns
-        cols_to_show = [
-            "params.model_name",
-            "metrics.composite_score",
-            "metrics.semantic_matching_score",
-            "metrics.hallucination_score",
-            "metrics.runtime_per_query_ms",
-            "metrics.cost_per_query_usd",
-            "metrics.api_success_rate"
-        ]
-        
-        available_cols = [col for col in cols_to_show if col in df.columns]
-        comparison_df = df[available_cols].sort_values(sort_col, ascending=ascending)
-        
-        return comparison_df
 
 
 def main():
-    """Main function to select best model"""
+    """Main function to select best model."""
     
     # Initialize selector
     selector = ModelSelector(experiment_name="RAG_Model_Selection")
@@ -320,8 +324,8 @@ def main():
         return
     
     # Get all runs
-    runs_df = selector.get_all_runs()
-    if runs_df.empty:
+    runs = selector.get_all_runs()
+    if not runs:
         logger.error("No runs found. Exiting.")
         return
     
@@ -331,25 +335,14 @@ def main():
         logger.error("Could not select best model. Exiting.")
         return
     
-    # Get top 5 models
-    top_models = selector.get_top_n_models(n=5)
-    
     # Display results
-    selector.display_results(best_model, top_models)
+    selector.display_results(best_model)
     
     # Save best model config
     selector.save_best_model_config(best_model)
     
-    # Additional comparisons
-    print("\n💰 TOP 3 BY COST:")
-    print(selector.compare_models_by_criteria("cost").head(3).to_string(index=False))
-    
-    print("\n⚡ TOP 3 BY SPEED:")
-    print(selector.compare_models_by_criteria("speed").head(3).to_string(index=False))
-    
-    print("\n" + "="*80)
-    print("Model selection complete! Check 'best_model_config.json' for deployment config.")
-    print("="*80 + "\n")
+    print("Model selection complete! "
+          "Check 'utils/RAG_config.json' for deployment config.\n")
 
 
 if __name__ == "__main__":
