@@ -17,6 +17,7 @@ from datetime import datetime
 from retreival_methods import retrieve_documents
 from prompts import PROMPTS
 from vllm import SamplingParams
+from rag_bias_adapter import run_bias_check
 
 # Reuse existing imports from your code
 cur_dir = os.path.dirname(__file__) # ModelSelection/
@@ -752,6 +753,12 @@ def log_model_to_mlflow(
         mlflow.log_artifact(per_query_file)
         
         logger.info(f"Logged {model_name} to MLflow")
+        
+        try:
+            logger.info("Running bias detection...")
+            bias_results = run_bias_check(best_metrics)
+        except Exception as e:
+            logger.warning(f"Bias detection failed: {e}")
 
 def run_mlflow_experiment(
     experiment_name: str,
