@@ -1,0 +1,19 @@
+# TensorFlow packages
+tensorflow
+keras-tuner  # For hyperparameter tuning
+
+# Core dependencies
+numpy
+pandas
+Pillow
+pyyaml  # For config file loading
+
+# MLflow for experiment tracking
+mlflow
+mlflow[tensorflow]
+
+# Additional utilities
+scikit-learn
+matplotlib
+seaborn
+
