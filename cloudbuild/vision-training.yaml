@@ -1,0 +1,104 @@
+# Cloud Build configuration for Vision model training
+steps:
+  # Step 1: Setup Python environment
+  - name: 'python:3.10'
+    id: 'setup'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --upgrade pip
+        pip install -r ModelDevelopment/Vision/requirements.txt
+
+  # Step 2: Download preprocessed data from GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-data'
+    args:
+      - '-m'
+      - 'rsync'
+      - '-r'
+      - 'gs://medscan-data/vision/preprocessed/'
+      - '/workspace/data/preprocessed/'
+
+  # Step 3: Train ResNet50 model
+  - name: 'python:3.10'
+    id: 'train-resnet'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/Vision/train_resnet.py'
+      - '--config'
+      - 'ModelDevelopment/config/vision_training.yml'
+      - '--data_path'
+      - '/workspace/data/preprocessed'
+      - '--output_path'
+      - '/workspace/models'
+      - '--datasets'
+      - 'tb'
+    env:
+      - 'TF_CPP_MIN_LOG_LEVEL=2'
+
+  # Step 4: Validate model
+  - name: 'python:3.10'
+    id: 'validate-model'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/Vision/validate.py'
+      - '--model_path'
+      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
+      - '--test_data_path'
+      - '/workspace/data/preprocessed/tb/*/test'
+      - '--output_file'
+      - '/workspace/validation_results.json'
+
+  # Step 5: Bias detection
+  - name: 'python:3.10'
+    id: 'bias-check'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/Vision/bias_check.py'
+      - '--model_path'
+      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
+      - '--metadata_path'
+      - '/workspace/models/*/*/*/training_metadata.json'
+      - '--output_file'
+      - '/workspace/bias_results.json'
+
+  # Step 6: Deploy to Vertex AI
+  - name: 'python:3.10'
+    id: 'deploy-model'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/Vision/deploy.py'
+      - '--model_path'
+      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
+      - '--dataset'
+      - 'tb'
+      - '--model_name'
+      - 'CNN_ResNet50'
+      - '--test_accuracy'
+      - '${_TEST_ACCURACY}'
+      - '--metadata_file'
+      - '/workspace/models/*/*/*/training_metadata.json'
+    env:
+      - 'GOOGLE_APPLICATION_CREDENTIALS=/workspace/gcp-key.json'
+
+  # Step 7: Upload artifacts to GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-artifacts'
+    args:
+      - '-m'
+      - 'cp'
+      - '-r'
+      - '/workspace/models/*'
+      - 'gs://medscan-data/vision/trained_models/${BUILD_ID}/'
+
+# Timeout for entire build
+timeout: 7200s  # 2 hours
+
+# Substitution variables
+substitutions:
+  _TEST_ACCURACY: '0.85'
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  diskSizeGb: 100

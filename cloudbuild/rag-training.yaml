@@ -1,0 +1,71 @@
+# Cloud Build configuration for RAG model selection
+steps:
+  # Step 1: Setup environment
+  - name: 'python:3.10'
+    id: 'setup'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --upgrade pip
+        cd ModelDevelopment/RAG
+        pip install -r requirements.txt
+
+  # Step 2: Download RAG data from GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-data'
+    args:
+      - '-m'
+      - 'rsync'
+      - '-r'
+      - 'gs://medscan-data/RAG/'
+      - '/workspace/data/RAG/'
+
+  # Step 3: Run model selection experiments
+  - name: 'python:3.10'
+    id: 'model-selection'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/RAG/ModelSelection/experiment.py'
+    env:
+      - 'MLFLOW_TRACKING_URI=file:///workspace/mlruns'
+
+  # Step 4: Select best model
+  - name: 'python:3.10'
+    id: 'select-best'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/RAG/ModelSelection/select_best_model.py'
+    env:
+      - 'MLFLOW_TRACKING_URI=file:///workspace/mlruns'
+
+  # Step 5: Deploy to Vertex AI
+  - name: 'python:3.10'
+    id: 'deploy'
+    entrypoint: 'python'
+    args:
+      - 'ModelDevelopment/RAG/deploy.py'
+      - '--config'
+      - 'ModelDevelopment/RAG/utils/RAG_config.json'
+      - '--index'
+      - '/workspace/data/RAG/index/index.bin'
+      - '--embeddings'
+      - '/workspace/data/RAG/index/embeddings.json'
+      - '--metadata'
+      - 'ModelDevelopment/RAG/utils/RAG_config.json'
+
+  # Step 6: Upload artifacts
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload'
+    args:
+      - '-m'
+      - 'cp'
+      - '-r'
+      - '/workspace/mlruns'
+      - 'gs://medscan-data/RAG/experiments/${BUILD_ID}/'
+
+timeout: 3600s
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  diskSizeGb: 100
