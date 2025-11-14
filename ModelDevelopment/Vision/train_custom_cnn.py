@@ -955,6 +955,17 @@ def train_dataset(
     logger.info(f"Metadata saved to: {metadata_dir}")
     logger.info(f"{'='*60}\n")
 
+    return {
+        'model_path': str(model_path),
+        'model_name': model_name,
+        'dataset_name': dataset_name,
+        'test_accuracy': metrics['test_accuracy'],
+        'test_loss': metrics['test_loss'],
+        'metadata_file': str(summary_file),
+        'metadata': model_info,
+        'dry_run': dry_run
+    }
+
 
 def main():
     """Main training function."""
@@ -1023,9 +1034,10 @@ def main():
     datasets = args.datasets or config.get('training.datasets', ['tb', 'lung_cancer_ct_scan'])
     
     # Train models for each dataset
+    results = []
     for dataset_name in datasets:
         try:
-            train_dataset(
+            result = train_dataset(
                 dataset_name=dataset_name,
                 base_data_path=data_path,
                 output_base_path=output_path,
@@ -1035,11 +1047,18 @@ def main():
                 image_size=image_size,
                 dry_run=args.dry_run
             )
+            results.append(result)
         except Exception as e:
             logger.error(f"Error training {dataset_name}: {e}", exc_info=True)
             continue
     
     logger.info("Custom CNN training completed!")
+
+    if results and not args.dry_run:
+        deployment_info_path = Path(output_path) / "deployment_info.json"
+        with open(deployment_info_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        logger.info(f"Deployment info saved to {deployment_info_path}")
 
 
 if __name__ == "__main__":
