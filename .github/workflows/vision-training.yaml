@@ -1,0 +1,137 @@
+name: Vision Model Training & Deployment
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "ModelDevelopment/Vision/**"
+            - "ModelDevelopment/config/vision_training.yml"
+            - "cloudbuild/vision-training.yaml"
+
+    pull_request:
+        branches: [main]
+        paths:
+            - "ModelDevelopment/Vision/**"
+
+    workflow_dispatch:
+        inputs:
+            dataset:
+                description: "Dataset (tb or lung_cancer_ct_scan)"
+                required: true
+                default: "tb"
+                type: choice
+                options:
+                    - tb
+                    - lung_cancer_ct_scan
+            epochs:
+                description: "Number of epochs"
+                required: false
+                default: "50"
+            dry_run:
+                description: "Dry run mode (only 64 images, 2 epochs)"
+                required: false
+                default: false
+                type: boolean
+
+jobs:
+    trigger-cloud-build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: Authenticate to Google Cloud
+              uses: google-github-actions/auth@v1
+              with:
+                  credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+            - name: Set up Cloud SDK
+              uses: google-github-actions/setup-gcloud@v1
+              with:
+                  project_id: medscanai-476203
+
+            - name: Submit Cloud Build
+              id: build
+              run: |
+                  DATASET="${{ github.event.inputs.dataset || 'tb' }}"
+                  EPOCHS="${{ github.event.inputs.epochs || '50' }}"
+
+                  echo "Triggering Cloud Build for Vision model training"
+                  echo "Dataset: $DATASET"
+                  echo "Epochs: $EPOCHS"
+
+                  BUILD_ID=$(gcloud builds submit \
+                    --config=cloudbuild/vision-training.yaml \
+                    --project=medscanai-476203 \
+                    --region=us-central1 \
+                    --substitutions=_DATASET=$DATASET,_EPOCHS=$EPOCHS \
+                    --format="value(id)")
+
+                  echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+                  echo "Build triggered: $BUILD_ID"
+
+            - name: Monitor build progress
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  echo "Monitoring build $BUILD_ID..."
+                  echo "View in console: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=medscanai-476203"
+
+                  gcloud builds log $BUILD_ID \
+                    --stream \
+                    --project=medscanai-476203
+
+            - name: Check build status
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  STATUS=$(gcloud builds describe $BUILD_ID \
+                    --project=medscanai-476203 \
+                    --format="value(status)")
+
+                  echo "Build status: $STATUS"
+
+                  if [ "$STATUS" != "SUCCESS" ]; then
+                    echo "Build failed"
+                    exit 1
+                  fi
+
+                  echo "Build succeeded"
+
+            - name: Get build artifacts
+              if: success()
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  echo "Build artifacts:"
+                  gsutil ls gs://medscan-data/vision/trained_models/$BUILD_ID/ || echo "No artifacts found"
+
+            - name: Send email notification
+              if: always()
+              uses: dawidd6/action-send-mail@v3
+              with:
+                  server_address: smtp.gmail.com
+                  server_port: 587
+                  username: ${{ secrets.SMTP_USER }}
+                  password: ${{ secrets.SMTP_PASSWORD }}
+                  subject: Vision Model Training - ${{ job.status }}
+                  to: harshitha8.shekar@gmail.com,kothari.sau@northeastern.edu
+                  from: MedScan AI <${{ secrets.SMTP_USER }}>
+                  body: |
+                      Vision Model Training Status: ${{ job.status }}
+
+                      Details:
+                      - Dataset: ${{ github.event.inputs.dataset || 'tb' }}
+                      - Build ID: ${{ steps.build.outputs.build_id }}
+                      - Triggered by: ${{ github.actor }}
+                      - Branch: ${{ github.ref }}
+
+                      View build logs:
+                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476203
+
+                      View artifacts:
+                      gs://medscan-data/vision/trained_models/${{ steps.build.outputs.build_id }}/
+
+                      ---
+                      MedScan AI - Automated Model Training System

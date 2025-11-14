@@ -1,3 +1,7 @@
+"""
+RAG_inference.py - Updated to read directly from GCS with local fallback
+Supports running in Airflow, Cloud Build, and local development
+"""
 import logging
 import json
 import pickle
@@ -9,6 +13,8 @@ import faiss
 import torch
 from transformers import AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
+from google.cloud import storage
+import tempfile
 
 import os 
 import sys
@@ -17,16 +23,12 @@ parent_dir = os.path.dirname(cur_dir)
 sys.path.insert(0, parent_dir)
 
 import multiprocessing
-multiprocessing.set_start_method('spawn', force=True)
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass
 
 from models.models import ModelFactory
-
-
-try:
-    multiprocessing.set_start_method("spawn", force=True)
-except RuntimeError:
-    # already set
-    pass
 
 # Configure logging
 logging.basicConfig(
@@ -35,94 +37,275 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Define data paths
-EMBEDDING_PATH = Path("/opt/airflow/DataPipeline/data/RAG/index/embeddings.json")
-INDEX_PATH = Path("/opt/airflow/DataPipeline/data/RAG/index/index.bin")
-DATA_PATH = Path("/opt/airflow/DataPipeline/data/RAG/index/data.pkl")
 
+# ==================== GCS- Data Loading ====================
 
-def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
-    """
-    Load configuration from JSON file.
+class RAGDataLoader:
+    """Load RAG data from GCS with local fallback"""
     
-    Args:
-        config_path: Path to config file
+    def __init__(
+        self,
+        bucket_name: str = "medscan-data",
+        project_id: str = "medscanai-476203"
+    ):
+        """
+        Initialize data loader.
         
-    Returns:
-        Dictionary containing configuration parameters
+        Args:
+            bucket_name: GCS bucket name
+            project_id: GCP project ID
+        """
+        self.bucket_name = bucket_name
+        self.project_id = project_id
         
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        json.JSONDecodeError: If config file is invalid JSON
-    """
-    try:
-        logger.info(f"Loading config from {config_path}")
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        logger.info("Config loaded successfully")
-        return config
-    except FileNotFoundError as e:
-        logger.error(f"Config file not found: {config_path}")
-        raise
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in config file: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error loading config: {e}")
-        raise
+        # Try to initialize GCS client
+        try:
+            self.storage_client = storage.Client(project=project_id)
+            self.bucket = self.storage_client.bucket(bucket_name)
+            self.gcs_available = True
+            logger.info(f"GCS client initialized (bucket: {bucket_name})")
+        except Exception as e:
+            logger.warning(f"⚠️  GCS not available: {e}")
+            logger.warning("Will use local paths as fallback")
+            self.gcs_available = False
+    
+    def _get_gcs_path(self, data_type: str) -> str:
+        """Get GCS path for data type"""
+        paths = {
+            'embeddings': 'RAG/index/embeddings.json',
+            'index': 'RAG/index/index.bin',
+            'data': 'RAG/index/data.pkl'
+        }
+        return paths.get(data_type, '')
+    
+    def _get_local_fallback(self, data_type: str) -> Path:
+        """Get local fallback path - tries multiple locations"""
+        files = {
+            'embeddings': 'embeddings.json',
+            'index': 'index.bin',
+            'data': 'data.pkl'
+        }
+        
+        filename = files.get(data_type, '')
+        
+        # Try multiple base paths in order
+        possible_bases = [
+            Path('/opt/airflow/DataPipeline/data/RAG/index'),  # Airflow
+            Path('/workspace/data/RAG/index'),  # Cloud Build
+            Path(__file__).parent.parent.parent.parent / 'DataPipeline' / 'data' / 'RAG' / 'index',  # Local dev
+        ]
+        
+        # Try each base path
+        for base in possible_bases:
+            full_path = base / filename
+            if full_path.exists():
+                return full_path
+        
+        # Return first option as default (will fail later if doesn't exist)
+        return possible_bases[0] / filename
+    
+    def load_embeddings(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Load embeddings from GCS or local fallback.
+        
+        Returns:
+            List of embedding records or None
+        """
+        try:
+            # Try GCS first
+            if self.gcs_available:
+                gcs_path = self._get_gcs_path('embeddings')
+                logger.info(f"Loading embeddings from GCS: gs://{self.bucket_name}/{gcs_path}")
+                
+                blob = self.bucket.blob(gcs_path)
+                if blob.exists():
+                    content = blob.download_as_text()
+                    data = json.loads(content)
+                    logger.info(f"Loaded {len(data)} embeddings from GCS")
+                    return data
+                else:
+                    logger.warning(f"Embeddings not found in GCS: {gcs_path}")
+            
+            # Fallback to local
+            local_path = self._get_local_fallback('embeddings')
+            logger.info(f"Loading embeddings from local: {local_path}")
+            
+            if not local_path.exists():
+                logger.error(f"Embeddings not found: {local_path}")
+                return None
+            
+            with open(local_path, 'r') as f:
+                data = json.load(f)
+            
+            logger.info(f"Loaded {len(data)} embeddings from local")
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error loading embeddings: {e}")
+            return None
+    
+    def load_faiss_index(self) -> Optional[faiss.Index]:
+        """
+        Load FAISS index from GCS or local fallback.
+        
+        Returns:
+            FAISS index or None
+        """
+        try:
+            # Try GCS first
+            if self.gcs_available:
+                gcs_path = self._get_gcs_path('index')
+                logger.info(f"Loading FAISS index from GCS: gs://{self.bucket_name}/{gcs_path}")
+                
+                blob = self.bucket.blob(gcs_path)
+                if blob.exists():
+                    # Download to temp file (FAISS needs file path)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tmp:
+                        blob.download_to_filename(tmp.name)
+                        index = faiss.read_index(tmp.name)
+                        os.unlink(tmp.name)  # Clean up temp file
+                    
+                    logger.info(f"Loaded FAISS index from GCS ({index.ntotal} vectors)")
+                    return index
+                else:
+                    logger.warning(f"Index not found in GCS: {gcs_path}")
+            
+            # Fallback to local
+            local_path = self._get_local_fallback('index')
+            logger.info(f"Loading FAISS index from local: {local_path}")
+            
+            if not local_path.exists():
+                logger.error(f"Index not found: {local_path}")
+                return None
+            
+            index = faiss.read_index(str(local_path))
+            logger.info(f"Loaded FAISS index from local ({index.ntotal} vectors)")
+            return index
+            
+        except Exception as e:
+            logger.error(f"Error loading FAISS index: {e}")
+            return None
+    
+    def load_data_pkl(self) -> Optional[Any]:
+        """
+        Load pickled data from GCS or local fallback.
+        
+        Returns:
+            Unpickled data or None
+        """
+        try:
+            # Try GCS first
+            if self.gcs_available:
+                gcs_path = self._get_gcs_path('data')
+                logger.info(f"Loading data.pkl from GCS: gs://{self.bucket_name}/{gcs_path}")
+                
+                blob = self.bucket.blob(gcs_path)
+                if blob.exists():
+                    content = blob.download_as_bytes()
+                    data = pickle.loads(content)
+                    logger.info(f"Loaded data.pkl from GCS")
+                    return data
+                else:
+                    logger.warning(f"data.pkl not found in GCS: {gcs_path}")
+            
+            # Fallback to local
+            local_path = self._get_local_fallback('data')
+            logger.info(f"Loading data.pkl from local: {local_path}")
+            
+            if not local_path.exists():
+                logger.error(f"data.pkl not found: {local_path}")
+                return None
+            
+            with open(local_path, 'rb') as f:
+                data = pickle.load(f)
+            
+            logger.info(f"Loaded data.pkl from local")
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error loading data.pkl: {e}")
+            return None
 
+
+# Create global loader instance
+_data_loader = RAGDataLoader()
+
+
+# ==================== Wrapper Functions (Backward Compatibility) ====================
 
 def load_embeddings_data() -> Optional[List[Dict[str, Any]]]:
-    """
-    Load embeddings data from JSON file.
-    
-    Returns:
-        List of embedding records or None on failure
-    """
-    try:
-        logger.info(f"Loading embeddings from {EMBEDDING_PATH}")
-        with open(EMBEDDING_PATH, 'r') as f:
-            data = json.load(f)
-        logger.info(f"Loaded {len(data)} embedding records")
-        return data
-    except Exception as e:
-        logger.error(f"Error loading embeddings data: {e}")
-        return None
+    """Load embeddings data (wrapper for backward compatibility)"""
+    return _data_loader.load_embeddings()
 
 
 def load_faiss_index() -> Optional[faiss.Index]:
-    """
-    Load FAISS index from binary file.
-    
-    Returns:
-        FAISS index or None on failure
-    """
-    try:
-        logger.info(f"Loading FAISS index from {INDEX_PATH}")
-        index = faiss.read_index(str(INDEX_PATH))
-        logger.info(f"FAISS index loaded with {index.ntotal} vectors")
-        return index
-    except Exception as e:
-        logger.error(f"Error loading FAISS index: {e}")
-        return None
+    """Load FAISS index (wrapper for backward compatibility)"""
+    return _data_loader.load_faiss_index()
 
 
 def load_data_pkl() -> Optional[Any]:
+    """Load pickled data (wrapper for backward compatibility)"""
+    return _data_loader.load_data_pkl()
+
+
+# ==================== Config Loading with GCS Support ====================
+
+def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
     """
-    Load pickled data file.
+    Load configuration from GCS or local file.
     
+    Args:
+        config_path: Path to config file (can be GCS URI or local path)
+        
     Returns:
-        Unpickled data or None on failure
+        Dictionary containing configuration parameters
     """
     try:
-        logger.info(f"Loading data from {DATA_PATH}")
-        with open(DATA_PATH, 'rb') as f:
-            data = pickle.load(f)
-        logger.info("Data loaded successfully")
-        return data
+        # Check if it's a GCS URI
+        if config_path.startswith('gs://'):
+            logger.info(f"Loading config from GCS: {config_path}")
+            
+            # Parse GCS URI
+            parts = config_path.replace('gs://', '').split('/', 1)
+            bucket_name = parts[0]
+            blob_path = parts[1] if len(parts) > 1 else ''
+            
+            # Download from GCS
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+            
+            content = blob.download_as_text()
+            config = json.loads(content)
+            logger.info("Config loaded from GCS")
+            return config
+        
+        # Local file - try multiple locations
+        logger.info(f"Loading config from local: {config_path}")
+        
+        possible_paths = [
+            Path(config_path),
+            Path(__file__).parent.parent / 'utils' / 'RAG_config.json',
+            Path('/workspace/RAG_config.json'),  # Cloud Build
+            Path(__file__).parent.parent.parent.parent / 'ModelDevelopment' / 'RAG' / 'utils' / 'RAG_config.json',  # Absolute
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                with open(path, 'r') as f:
+                    config = json.load(f)
+                logger.info(f"Config loaded from {path}")
+                return config
+        
+        # If none found, raise error
+        raise FileNotFoundError(f"Config not found in any location. Tried: {[str(p) for p in possible_paths]}")
+        
     except Exception as e:
-        logger.error(f"Error loading data pickle: {e}")
-        return None
+        logger.error(f"Error loading config: {e}")
+        raise
+
+
+# ==================== Core RAG Functions (Unchanged) ====================
 
 def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional[np.ndarray]:
     """
@@ -138,7 +321,7 @@ def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional
     try:
         logger.info(f"Generating embedding with model: {model_name}")
         
-        model = SentenceTransformer(model_name, device = 'cpu')
+        model = SentenceTransformer(model_name, device='cpu')
         embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
         logger.info(f"Embedding generated with shape: {embedding.shape}")
         del model
@@ -228,8 +411,8 @@ def generate_response(
         model_type = config.get("model_type", None)
         prompt_template = config.get("prompt", None)
 
-        if model_name == None or model_type == None or prompt_template == None:
-            raise f"""Empty/ None values detected\n\nModel Name: {model_name}\nModel type: {model_type}\nPrompt:{prompt_template}"""
+        if model_name is None or model_type is None or prompt_template is None:
+            raise ValueError(f"Empty/None values detected\n\nModel Name: {model_name}\nModel type: {model_type}\nPrompt:{prompt_template}")
 
         temperature = config.get("temperature", 0.7)
         top_p = config.get("top_p", 0.9)
@@ -252,13 +435,12 @@ def generate_response(
         model = ModelFactory.create_model(model_name, temperature, top_p)
         response_d = model.infer(formatted_prompt)
 
-        if response_d == None or response_d.get('success') != True:
-            raise f"Error generating response - {response_d}"
+        if response_d is None or response_d.get('success') != True:
+            raise ValueError(f"Error generating response - {response_d}")
 
         response = response_d.get('generated_text', None)
         in_tokens = response_d.get('input_tokens', 0)
         out_tokens = response_d.get('output_tokens', 0)
-
         
         # Add references section with links
         references = "\n\n**References:**\n"
@@ -280,12 +462,12 @@ def generate_response(
         return None
 
 
-def compute_hallucination_score(pairs:tuple, context: str, model) -> Optional[float]:
+def compute_hallucination_score(pairs: tuple, context: str, model) -> Optional[float]:
     """
     Compute hallucination score for response given context.
     
     Args:
-        response: Generated response text
+        pairs: Tuple of (response, context) pairs
         context: Source context text
         model: Hallucination evaluation model
         
@@ -351,8 +533,8 @@ def compute_stats(
                 pairs = []
                 for doc in retrieved_docs:
                     content = doc.get("content", "")
-                    pairs.append(response, content)
-                scores_list = compute_hallucination_score(pairs, hallucination_model)
+                    pairs.append((response, content))
+                scores_list = compute_hallucination_score(pairs, content, hallucination_model)
                 # Calculate average hallucination score
                 if scores_list:
                     hallucination_scores["avg"] = round(sum(scores_list) / len(scores_list), 4)
@@ -445,9 +627,7 @@ def run_rag_pipeline(
         
         response, in_tokens, out_tokens = result
         
-        # Validate medical QA
-        if response is None:
-            return "Error validating response.", None
+        # Add medical disclaimer footer
         footer = (
             "\n\n---\n"
             "**Important:** This information is for educational purposes only and "
@@ -473,6 +653,7 @@ def run_rag_pipeline(
     except Exception as e:
         logger.error(f"Error in RAG pipeline: {e}")
         return "An error occurred processing your query.", None
+
 
 if __name__ == "__main__":
     query = "What is Tuberculosis (TB)?"

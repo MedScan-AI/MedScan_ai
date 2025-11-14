@@ -167,3 +167,26 @@ logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+# Deployment Configuration
+deployment:
+  # Validation thresholds
+  min_accuracy: 0.70
+  min_f1_score: 0.65
+  
+  # Bias detection thresholds
+  max_accuracy_disparity: 0.10
+  max_f1_disparity: 0.10
+  
+  # Vertex AI configuration
+  vertex_ai:
+    region: "us-central1"
+    serving_container: "us-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-13:latest"
+    machine_type: "n1-standard-4"
+    min_replicas: 1
+    max_replicas: 3
+  
+  # Monitoring configuration
+  monitoring:
+    check_interval_hours: 24
+    alert_on_accuracy_drop: true
+    alert_on_bias_detected: true

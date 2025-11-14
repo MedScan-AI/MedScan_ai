@@ -1,0 +1,182 @@
+# Monitoring configuration for deployed models
+# Email-based notifications
+
+alert_policies:
+  # Vision model accuracy monitoring
+  - name: vision-model-accuracy-drop
+    display_name: "Vision Model Accuracy Drop"
+    conditions:
+      - threshold: 0.70
+        comparison: LESS_THAN
+        duration: 300s  # 5 minutes
+        metric: custom.googleapis.com/vision/model_accuracy
+    notification_channels:
+      - email
+    severity: WARNING
+    
+  # RAG model performance monitoring
+  - name: rag-model-performance-degradation
+    display_name: "RAG Model Performance Degradation"
+    conditions:
+      - threshold: 0.60
+        comparison: LESS_THAN
+        duration: 600s  # 10 minutes
+        metric: custom.googleapis.com/rag/composite_score
+    notification_channels:
+      - email
+    severity: WARNING
+
+  # Bias detection alert
+  - name: bias-detected
+    display_name: "Model Bias Detected"
+    conditions:
+      - threshold: 0.10
+        comparison: GREATER_THAN
+        duration: 0s  # Immediate
+        metric: custom.googleapis.com/model/bias_disparity
+    notification_channels:
+      - email
+    severity: CRITICAL
+
+  # API endpoint health check
+  - name: endpoint-health-check
+    display_name: "Model Endpoint Health"
+    conditions:
+      - threshold: 95.0  # 95% uptime
+        comparison: LESS_THAN
+        duration: 300s
+        metric: serviceruntime.googleapis.com/api/request_count
+    notification_channels:
+      - email
+    severity: HIGH
+
+# Email notification channels
+notification_channels:
+  email:
+    primary:
+      address: harshitha8.shekar@gmail.com
+      display_name: "MedScan Primary Alert"
+    
+    secondary:
+      address: kothari.sau@northeastern.edu
+      display_name: "MedScan Secondary Alert"
+
+# SMTP configuration (for Cloud Functions if needed)
+smtp_settings:
+  host: smtp.gmail.com
+  port: 587
+  use_tls: true
+  # Credentials stored in Secret Manager
+  username_secret: projects/medscanai-476203/secrets/smtp-username
+  password_secret: projects/medscanai-476203/secrets/smtp-password
+
+# Alert message templates
+message_templates:
+  accuracy_drop:
+    subject: "MedScan AI - Model Accuracy Drop Alert"
+    body: |
+      Model accuracy has dropped below the threshold.
+      
+      Details:
+      - Model: {model_name}
+      - Dataset: {dataset}
+      - Current Accuracy: {current_accuracy}%
+      - Threshold: {threshold}%
+      - Detection Time: {timestamp}
+      
+      Action Required:
+      - Review model performance metrics
+      - Check for data drift or bias
+      - Consider triggering retraining
+      
+      View details: {dashboard_url}
+  
+  performance_degradation:
+    subject: "MedScan AI - RAG Performance Degradation"
+    body: |
+      RAG model performance has degraded.
+      
+      Details:
+      - Composite Score: {composite_score}
+      - Threshold: {threshold}
+      - Detection Time: {timestamp}
+      
+      Metrics:
+      - Semantic Matching: {semantic_score}
+      - Hallucination Score: {hallucination_score}
+      - Retrieval Score: {retrieval_score}
+      
+      Action Required:
+      - Review model configuration
+      - Check knowledge base quality
+      - Consider model reselection
+      
+      View details: {dashboard_url}
+  
+  bias_detected:
+    subject: "MedScan AI - CRITICAL: Model Bias Detected"
+    body: |
+      CRITICAL: Bias has been detected in model predictions.
+      
+      Details:
+      - Model: {model_name}
+      - Bias Disparity: {disparity}%
+      - Threshold: 10%
+      - Detection Time: {timestamp}
+      
+      Affected Slices:
+      {affected_slices}
+      
+      IMMEDIATE ACTION REQUIRED:
+      - Review bias analysis report
+      - Implement mitigation strategies
+      - Do NOT deploy to production
+      
+      View bias report: {report_url}
+  
+  training_complete:
+    subject: "MedScan AI - Model Training Complete"
+    body: |
+      Model training has completed successfully.
+      
+      Details:
+      - Model: {model_name}
+      - Dataset: {dataset}
+      - Test Accuracy: {accuracy}%
+      - Training Duration: {duration}
+      - Build ID: {build_id}
+      
+      Validation Results:
+      - Accuracy: {accuracy}% (threshold: 70%)
+      - Bias Check: {bias_status}
+      
+      Model Location:
+      {model_uri}
+      
+      View training logs:
+      {build_url}
+  
+  training_failed:
+    subject: "MedScan AI - Model Training Failed"
+    body: |
+      Model training has failed.
+      
+      Details:
+      - Model: {model_name}
+      - Dataset: {dataset}
+      - Error: {error_message}
+      - Build ID: {build_id}
+      
+      Action Required:
+      - Review build logs
+      - Check data availability
+      - Verify configuration
+      
+      View error logs:
+      {build_url}
+
+# Monitoring dashboard URLs
+dashboards:
+  vision_model: "https://console.cloud.google.com/monitoring/dashboards/custom/vision-model?project=medscanai-476203"
+  rag_model: "https://console.cloud.google.com/monitoring/dashboards/custom/rag-model?project=medscanai-476203"
+  cloud_build: "https://console.cloud.google.com/cloud-build/builds?project=medscanai-476203"

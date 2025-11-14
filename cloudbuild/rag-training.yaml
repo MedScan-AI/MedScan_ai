@@ -1,71 +1,150 @@
 # Cloud Build configuration for RAG model selection
+# Reads data directly from GCS (no download step needed)
 steps:
-  # Step 1: Setup environment
+  # Step 1: Install dependencies
   - name: 'python:3.10'
-    id: 'setup'
+    id: 'install-deps'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        echo "Installing RAG dependencies..."
         pip install --upgrade pip
         cd ModelDevelopment/RAG
         pip install -r requirements.txt
+        echo "Dependencies installed"
 
-  # Step 2: Download RAG data from GCS
+  # Step 2: Verify GCS data exists
   - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'download-data'
+    id: 'verify-gcs-data'
+    entrypoint: 'bash'
     args:
-      - '-m'
-      - 'rsync'
-      - '-r'
-      - 'gs://medscan-data/RAG/'
-      - '/workspace/data/RAG/'
+      - '-c'
+      - |
+        echo "Verifying RAG data in GCS..."
+        
+        # Check index
+        if gsutil ls gs://medscan-data/RAG/index/index.bin > /dev/null 2>&1; then
+          echo "FAISS index found"
+        else
+          echo "FAISS index not found at gs://medscan-data/RAG/index/index.bin"
+          echo "Run DataPipeline first: docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc"
+          exit 1
+        fi
+        
+        # Check embeddings
+        if gsutil ls gs://medscan-data/RAG/index/embeddings.json > /dev/null 2>&1; then
+          echo "Embeddings found"
+        else
+          echo "Embeddings not found"
+          exit 1
+        fi
+        
+        # Check data.pkl (optional - may not exist)
+        gsutil ls gs://medscan-data/RAG/index/data.pkl > /dev/null 2>&1 && echo "data.pkl found" || echo "  data.pkl not found (optional)"
+        
+        echo " GCS data verification complete"
 
   # Step 3: Run model selection experiments
+  # RAG_inference.py will read directly from GCS
   - name: 'python:3.10'
-    id: 'model-selection'
-    entrypoint: 'python'
+    id: 'run-experiments'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/RAG/ModelSelection/experiment.py'
-    env:
-      - 'MLFLOW_TRACKING_URI=file:///workspace/mlruns'
+      - '-c'
+      - |
+        echo "Starting RAG model selection experiments..."
+        cd ModelDevelopment/RAG
+        
+        # Set MLflow tracking to local workspace
+        export MLFLOW_TRACKING_URI=file:///workspace/mlruns
+        
+        # Run experiments - data will be loaded from GCS automatically
+        python ModelSelection/experiment.py
+        
+        echo "Experiments completed"
+    timeout: 3000s
 
   # Step 4: Select best model
   - name: 'python:3.10'
-    id: 'select-best'
-    entrypoint: 'python'
+    id: 'select-best-model'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/RAG/ModelSelection/select_best_model.py'
-    env:
-      - 'MLFLOW_TRACKING_URI=file:///workspace/mlruns'
+      - '-c'
+      - |
+        echo "Selecting best model..."
+        cd ModelDevelopment/RAG
+        
+        export MLFLOW_TRACKING_URI=file:///workspace/mlruns
+        
+        python ModelSelection/select_best_model.py
+        
+        # Verify config was created
+        if [ ! -f "utils/RAG_config.json" ]; then
+          echo "Config file not created"
+          exit 1
+        fi
+        
+        echo "Best model selected"
+        cat utils/RAG_config.json | python -m json.tool
 
   # Step 5: Deploy to Vertex AI
   - name: 'python:3.10'
-    id: 'deploy'
-    entrypoint: 'python'
+    id: 'deploy-rag'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/RAG/deploy.py'
-      - '--config'
-      - 'ModelDevelopment/RAG/utils/RAG_config.json'
-      - '--index'
-      - '/workspace/data/RAG/index/index.bin'
-      - '--embeddings'
-      - '/workspace/data/RAG/index/embeddings.json'
-      - '--metadata'
-      - 'ModelDevelopment/RAG/utils/RAG_config.json'
+      - '-c'
+      - |
+        echo "Deploying RAG model to Vertex AI..."
+        cd ModelDevelopment/RAG
+        
+        # Deployment will upload from GCS directly
+        python deploy.py \
+          --config utils/RAG_config.json \
+          --index gs://medscan-data/RAG/index/index.bin \
+          --embeddings gs://medscan-data/RAG/index/embeddings.json \
+          --metadata utils/RAG_config.json
+        
+        echo "RAG deployment completed"
 
-  # Step 6: Upload artifacts
+  # Step 6: Upload MLflow experiments to GCS
   - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'upload'
+    id: 'upload-experiments'
     args:
       - '-m'
       - 'cp'
       - '-r'
-      - '/workspace/mlruns'
+      - '/workspace/mlruns/'
       - 'gs://medscan-data/RAG/experiments/${BUILD_ID}/'
 
-timeout: 3600s
+  # Step 7: Upload best model config
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-config'
+    args:
+      - 'cp'
+      - 'ModelDevelopment/RAG/utils/RAG_config.json'
+      - 'gs://medscan-data/RAG/models/${BUILD_ID}/config.json'
+
+  # Step 8: Create summary
+  - name: 'ubuntu'
+    id: 'build-summary'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Build Summary"
+        echo "================"
+        echo "Build ID: ${BUILD_ID}"
+        echo "Artifacts:"
+        echo "  - MLflow: gs://medscan-data/RAG/experiments/${BUILD_ID}/"
+        echo "  - Config: gs://medscan-data/RAG/models/${BUILD_ID}/config.json"
+
+timeout: 3600s  # 1 hour
+
+substitutions:
+  _TRIGGER_REASON: 'manual'
 
 options:
   machineType: 'N1_HIGHCPU_8'
-  diskSizeGb: 100
+  diskSizeGb: 50  # Reduced since we're not downloading data
+  logging: CLOUD_LOGGING_ONLY

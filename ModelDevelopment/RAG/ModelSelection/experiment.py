@@ -827,6 +827,53 @@ def run_mlflow_experiment(
     logger.info("="*60)
     clear_hf_model_cache()
 
+
+def save_experiment_summary(output_path: str = "experiment_summary.json"):
+    """
+    Save experiment summary for deployment pipeline.
+    Extracts best model info from MLflow.
+    """
+    import mlflow
+    from pathlib import Path
+    
+    # Get best run
+    client = mlflow.tracking.MlflowClient()
+    experiment = client.get_experiment_by_name("RAG_Model_Selection")
+    
+    if not experiment:
+        logger.error("No experiment found")
+        return
+    
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        order_by=["metrics.composite_score DESC"],
+        max_results=1
+    )
+    
+    if not runs:
+        logger.error("No runs found")
+        return
+    
+    best_run = runs[0]
+    
+    summary = {
+        "run_id": best_run.info.run_id,
+        "composite_score": best_run.data.metrics.get("composite_score", 0.0),
+        "semantic_score": best_run.data.metrics.get("semantic_matching_score", 0.0),
+        "hallucination_score": best_run.data.metrics.get("hallucination_score", 0.0),
+        "model_name": best_run.data.params.get("model_name", "unknown"),
+        "timestamp": best_run.info.start_time
+    }
+    
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_file, 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    logger.info(f"Experiment summary saved to {output_path}")
+    return summary
+
 # Example usage
 if __name__ == "__main__":
     
@@ -858,3 +905,4 @@ if __name__ == "__main__":
         search_space=search_space,
         n_trials_per_model=20
     )
+    save_experiment_summary("experiment_summary.json")

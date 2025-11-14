@@ -1,104 +1,273 @@
 # Cloud Build configuration for Vision model training
 steps:
-  # Step 1: Setup Python environment
+  # Step 1: Install dependencies
   - name: 'python:3.10'
-    id: 'setup'
+    id: 'install-deps'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        echo "Installing dependencies..."
         pip install --upgrade pip
         pip install -r ModelDevelopment/Vision/requirements.txt
+        echo "Dependencies installed"
 
   # Step 2: Download preprocessed data from GCS
   - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'download-data'
+    id: 'download-preprocessed-data'
     args:
       - '-m'
       - 'rsync'
       - '-r'
+      - '-x'
+      - '.*\.dvc$|.*\.gitkeep$'
       - 'gs://medscan-data/vision/preprocessed/'
       - '/workspace/data/preprocessed/'
+    env:
+      - 'CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED=true'
 
-  # Step 3: Train ResNet50 model
+  # Step 3: Verify data downloaded
+  - name: 'ubuntu'
+    id: 'verify-data'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Verifying downloaded data..."
+        ls -la /workspace/data/preprocessed/
+        echo "Finding latest partition..."
+        find /workspace/data/preprocessed/ -type d -name "20*" | head -5
+
+  # Step 4: Train ResNet50 model
   - name: 'python:3.10'
     id: 'train-resnet'
-    entrypoint: 'python'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/Vision/train_resnet.py'
-      - '--config'
-      - 'ModelDevelopment/config/vision_training.yml'
-      - '--data_path'
-      - '/workspace/data/preprocessed'
-      - '--output_path'
-      - '/workspace/models'
-      - '--datasets'
-      - 'tb'
+      - '-c'
+      - |
+        echo "Starting ResNet50 training..."
+        cd ModelDevelopment/Vision
+        python train_resnet.py \
+          --config ../config/vision_training.yml \
+          --data_path /workspace/data/preprocessed \
+          --output_path /workspace/models \
+          --datasets ${_DATASET} \
+          --epochs ${_EPOCHS}
+        echo "Training completed"
     env:
       - 'TF_CPP_MIN_LOG_LEVEL=2'
+      - 'PYTHONUNBUFFERED=1'
 
-  # Step 4: Validate model
+  # Step 5: Validate model performance
   - name: 'python:3.10'
     id: 'validate-model'
-    entrypoint: 'python'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/Vision/validate.py'
-      - '--model_path'
-      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
-      - '--test_data_path'
-      - '/workspace/data/preprocessed/tb/*/test'
-      - '--output_file'
-      - '/workspace/validation_results.json'
+      - '-c'
+      - |
+        echo "Validating model..."
+        cd ModelDevelopment/Vision
+        
+        MODEL_PATH=$(find /workspace/models/models -name "CNN_ResNet50_best.keras" | head -1)
+        TEST_DATA=$(find /workspace/data/preprocessed/${_DATASET} -type d -name "test" | head -1)
+        
+        echo "Model: $MODEL_PATH"
+        echo "Test data: $TEST_DATA"
+        
+        python validate.py \
+          --model_path "$MODEL_PATH" \
+          --test_data_path "$TEST_DATA" \
+          --output_file /workspace/validation_results.json
+        
+        if [ $? -ne 0 ]; then
+          echo "Validation FAILED - stopping deployment"
+          exit 1
+        fi
+        
+        echo "Validation PASSED"
 
-  # Step 5: Bias detection
+  # Step 6: Bias detection
   - name: 'python:3.10'
     id: 'bias-check'
-    entrypoint: 'python'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/Vision/bias_check.py'
-      - '--model_path'
-      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
-      - '--metadata_path'
-      - '/workspace/models/*/*/*/training_metadata.json'
-      - '--output_file'
-      - '/workspace/bias_results.json'
+      - '-c'
+      - |
+        echo "Running bias detection..."
+        cd ModelDevelopment/Vision
+        
+        MODEL_PATH=$(find /workspace/models/models -name "CNN_ResNet50_best.keras" | head -1)
+        METADATA_PATH=$(find /workspace/models -name "training_metadata.json" | head -1)
+        
+        python bias_check.py \
+          --model_path "$MODEL_PATH" \
+          --metadata_path "$METADATA_PATH" \
+          --output_file /workspace/bias_results.json
+        
+        echo "Bias check completed"
 
-  # Step 6: Deploy to Vertex AI
+  # Step 7: Deploy to Vertex AI
   - name: 'python:3.10'
-    id: 'deploy-model'
-    entrypoint: 'python'
+    id: 'deploy-to-vertex-ai'
+    entrypoint: 'bash'
     args:
-      - 'ModelDevelopment/Vision/deploy.py'
-      - '--model_path'
-      - '/workspace/models/models/*/*/*/CNN_ResNet50_best.keras'
-      - '--dataset'
-      - 'tb'
-      - '--model_name'
-      - 'CNN_ResNet50'
-      - '--test_accuracy'
-      - '${_TEST_ACCURACY}'
-      - '--metadata_file'
-      - '/workspace/models/*/*/*/training_metadata.json'
-    env:
-      - 'GOOGLE_APPLICATION_CREDENTIALS=/workspace/gcp-key.json'
+      - '-c'
+      - |
+        echo "🚀 Deploying to Vertex AI..."
+        cd ModelDevelopment/Vision
+        
+        pip install google-cloud-aiplatform
+        
+        MODEL_PATH=$(find /workspace/models/models -name "CNN_ResNet50_best.keras" | head -1)
+        METADATA_PATH=$(find /workspace/models -name "training_metadata.json" | head -1)
+        TEST_ACCURACY=$(python -c "import json; print(json.load(open('$METADATA_PATH'))['metrics']['test_accuracy'])")
+        
+        python deploy.py \
+          --model_path "$MODEL_PATH" \
+          --dataset ${_DATASET} \
+          --model_name CNN_ResNet50 \
+          --test_accuracy "$TEST_ACCURACY" \
+          --metadata_file "$METADATA_PATH"
+        
+        echo "Deployment completed"
 
-  # Step 7: Upload artifacts to GCS
+  # Step 8: Upload artifacts to GCS
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-artifacts'
     args:
       - '-m'
       - 'cp'
       - '-r'
-      - '/workspace/models/*'
+      - '/workspace/models/'
       - 'gs://medscan-data/vision/trained_models/${BUILD_ID}/'
 
-# Timeout for entire build
-timeout: 7200s  # 2 hours
+  # Step 9: Upload validation results
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-logs'
+    args:
+      - 'cp'
+      - '/workspace/validation_results.json'
+      - 'gs://medscan-data/vision/validation/${BUILD_ID}/'
 
-# Substitution variables
+  # Step 10: Send email notification on SUCCESS
+  - name: 'python:3.10'
+    id: 'send-success-email'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Sending success notification..."
+        
+        # Get test accuracy from metadata
+        METADATA_PATH=$(find /workspace/models -name "training_metadata.json" | head -1)
+        TEST_ACCURACY=$(python -c "import json; print(json.load(open('$METADATA_PATH'))['metrics']['test_accuracy'])")
+        
+        # Install email dependencies
+        pip install secure-smtplib
+        
+        # Create email script
+        cat > /tmp/send_email.py << 'PYEOF'
+        import smtplib
+        import os
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        smtp_user = os.getenv('SMTP_USER')
+        smtp_password = os.getenv('SMTP_PASSWORD')
+
+        if not smtp_user or not smtp_password:
+            print("No SMTP credentials - skipping email")
+            exit(0)
+
+        recipients = ['harshitha8.shekar@gmail.com', 'kothari.sau@northeastern.edu']
+
+        msg = MIMEMultipart('alternative')
+        msg['From'] = f'MedScan AI <{smtp_user}>'
+        msg['To'] = ', '.join(recipients)
+        msg['Subject'] = ' Vision Model Training Complete - ${_DATASET}'
+
+        plain_text = """Vision Model Training Completed Successfully!
+
+        Model Details:
+        - Model: CNN_ResNet50
+        - Dataset: ${_DATASET}
+        - Test Accuracy: """ + os.getenv('TEST_ACCURACY', '0.0') + """%
+        - Build ID: ${BUILD_ID}
+
+        Results:
+        - Validation: PASSED
+        - Bias Check: COMPLETED
+        - Deployment: SUCCESS
+
+        View build:
+        https://console.cloud.google.com/cloud-build/builds/${BUILD_ID}?project=medscanai-476203
+
+        Model artifacts:
+        gs://medscan-data/vision/trained_models/${BUILD_ID}/
+
+        ---
+        MedScan AI - Automated Training System
+        """
+
+        html = """
+        <html>
+        <body style="font-family: Arial, sans-serif;">
+            <div style="background-color: #4CAF50; color: white; padding: 20px;">
+                <h2>Vision Model Training Complete</h2>
+            </div>
+            <div style="padding: 20px;">
+                <h3>Model Details</h3>
+                <ul>
+                    <li><strong>Model:</strong> CNN_ResNet50</li>
+                    <li><strong>Dataset:</strong> ${_DATASET}</li>
+                    <li><strong>Test Accuracy:</strong> """ + os.getenv('TEST_ACCURACY', '0.0') + """%</li>
+                    <li><strong>Build ID:</strong> ${BUILD_ID}</li>
+                </ul>
+                
+                <h3>Results</h3>
+                <ul style="color: green;">
+                    <li>Validation: PASSED</li>
+                    <li>Bias Check: COMPLETED</li>
+                    <li>Deployment: SUCCESS</li>
+                </ul>
+                
+                <p><a href="https://console.cloud.google.com/cloud-build/builds/${BUILD_ID}?project=medscanai-476203">View Build Logs →</a></p>
+            </div>
+            <div style="background-color: #f5f5f5; padding: 15px; text-align: center;">
+                <p>MedScan AI - Automated Training System</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        msg.attach(MIMEText(plain_text, 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+
+        try:
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+            print("Email sent successfully")
+        except Exception as e:
+            print(f"Email failed: {e}")
+        PYEOF
+        
+        # Run email script with credentials from Secret Manager
+        export SMTP_USER=$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476203 2>/dev/null || echo "")
+        export SMTP_PASSWORD=$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476203 2>/dev/null || echo "")
+        export TEST_ACCURACY="$TEST_ACCURACY"
+        
+        python /tmp/send_email.py || echo "Email notification failed (non-critical)"
+
+# Build configuration
+timeout: 7200s
+
 substitutions:
-  _TEST_ACCURACY: '0.85'
+  _DATASET: 'tb'
+  _EPOCHS: '50'
 
 options:
   machineType: 'N1_HIGHCPU_8'
   diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
