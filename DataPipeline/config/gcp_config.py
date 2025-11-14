@@ -76,7 +76,7 @@ GCS_PATHS = {
 
 # Alert Configuration
 ALERT_CONFIG = {
-    'enabled': os.getenv("ALERTS_ENABLED", "true").lower() == "true",
+    'enabled': os.getenv("ALERTS_ENABLED", "false").lower() == "true",
     'email_recipients': [
         email.strip() 
         for email in os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",")
