@@ -13,6 +13,10 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Get GCP config from environment variables (with defaults for backward compatibility)
+DEFAULT_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "medscanai-476203")
+DEFAULT_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "medscan-data")
+
 
 def send_training_notification(
     status: str,
@@ -85,10 +89,10 @@ Validation Results:
 - Status: PASSED
 
 View build logs:
-https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203
+https://console.cloud.google.com/cloud-build/builds/{build_id}?project={DEFAULT_PROJECT_ID}
 
 Model artifacts:
-gs://medscan-data/vision/trained_models/{build_id}/
+gs://{DEFAULT_BUCKET_NAME}/vision/trained_models/{build_id}/
 
 ---
 MedScan AI - Automated Training System
@@ -111,7 +115,7 @@ Action Required:
 - Verify configuration
 
 View error logs:
-https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203
+https://console.cloud.google.com/cloud-build/builds/{build_id}?project={DEFAULT_PROJECT_ID}
 
 ---
 MedScan AI - Automated Training System
@@ -141,7 +145,7 @@ MedScan AI - Automated Training System
                     <li> Status: PASSED</li>
                 </ul>
                 
-                <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203" 
+                <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project={DEFAULT_PROJECT_ID}" 
                    style="background-color: #2196F3; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">
                    View Build Logs →
                 </a></p>
@@ -180,7 +184,7 @@ MedScan AI - Automated Training System
                     <li>Verify training configuration</li>
                 </ul>
                 
-                <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203" 
+                <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project={DEFAULT_PROJECT_ID}" 
                    style="background-color: #2196F3; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">
                    View Error Logs →
                 </a></p>

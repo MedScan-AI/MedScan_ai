@@ -4,9 +4,25 @@
 
 set -e
 
-PROJECT_ID="medscanai-476203"
-REGION="us-central1"
-BUCKET_NAME="medscan-data"
+# Get from environment variables or use defaults
+PROJECT_ID="${GCP_PROJECT_ID:-medscanai-476203}"
+REGION="${GCP_REGION:-us-central1}"
+BUCKET_NAME="${GCS_BUCKET_NAME:-medscan-data}"
+
+# Validate required variables
+if [ -z "$PROJECT_ID" ]; then
+    echo "Error: GCP_PROJECT_ID environment variable is not set"
+    exit 1
+fi
+
+if [ -z "$BUCKET_NAME" ]; then
+    echo "Error: GCS_BUCKET_NAME environment variable is not set"
+    exit 1
+fi
+
+echo "Using GCP Project ID: $PROJECT_ID"
+echo "Using GCS Bucket: $BUCKET_NAME"
+echo ""
 
 echo "Setting up GCP resources for MedScan AI"
 echo ""

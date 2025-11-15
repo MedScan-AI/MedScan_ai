@@ -68,9 +68,54 @@ chmod 600 ~/.kaggle/kaggle.json
 pip install -r requirements.txt
 ```
 
-#### 5. Configure Environment
+#### 5. Configure Environment Variables
 
-Create `airflow/.env` file:
+**Environment Variable Management:**
+
+The project uses **two `.env` files** for different purposes:
+
+1. **Root `.env`** (optional for local ModelDevelopment): For running ModelDevelopment scripts locally
+2. **`airflow/.env`** (required for Airflow): For Docker Compose and Airflow execution
+
+**Option 1: Single Root `.env` (Recommended for Local Development)**
+
+Create a `.env` file at the project root:
+```bash
+# Copy the template
+cp .env.example .env
+
+# Edit and fill in your values
+nano .env
+```
+
+**Option 2: System Environment Variables**
+
+Set environment variables in your shell:
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export GCP_PROJECT_ID="your-gcp-project-id"
+export GCS_BUCKET_NAME="your-gcs-bucket-name"
+```
+
+**Required Environment Variables:**
+```bash
+GCP_PROJECT_ID=your-gcp-project-id
+GCS_BUCKET_NAME=your-gcs-bucket-name
+```
+
+**Where Environment Variables Are Used:**
+
+| Context | Source | Notes |
+|---------|--------|-------|
+| **Local ModelDevelopment** | System env vars or root `.env` | Scripts use `os.getenv()` directly |
+| **Airflow/Docker** | `airflow/.env` | Loaded by Docker Compose |
+| **Cloud Build** | Substitution variables | Set in Cloud Build config |
+
+**Note:** If environment variables are not set, some scripts may fall back to default values (for backward compatibility), but this is **not recommended for production use**.
+
+**Create `airflow/.env` file (for Docker/Airflow):**
+
+The `airflow/.env` file is specifically for Airflow Docker Compose. It should include both Airflow-specific settings AND the shared GCP configuration.
 
 ```bash
 cd airflow
@@ -98,9 +143,11 @@ AIRFLOW_FIRSTNAME=Admin
 AIRFLOW_LASTNAME=User
 AIRFLOW_EMAIL=admin@example.com
 
-# GCP Configuration
+# GCP Configuration (REQUIRED - Set these values)
 GCP_PROJECT_ID=medscanai-476203
 GCS_BUCKET_NAME=medscan-data
+# Note: All Python scripts and components now use these environment variables
+# instead of hardcoded values. Make sure these match your actual GCP project.
 GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp-service-account.json
 
 # Email Alerts (optional)

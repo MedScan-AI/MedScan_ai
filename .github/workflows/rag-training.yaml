@@ -35,14 +35,14 @@ jobs:
             - name: Set up Cloud SDK
               uses: google-github-actions/setup-gcloud@v1
               with:
-                  project_id: medscanai-476203
+                  project_id: medscanai-476500
 
             - name: Verify RAG data exists in GCS
               run: |
                   echo "Checking for RAG data in GCS..."
 
                   # Check if index exists
-                  if gsutil ls gs://medscan-data/RAG/index/index.bin > /dev/null 2>&1; then
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index.bin > /dev/null 2>&1; then
                     echo "FAISS index found"
                   else
                     echo "FAISS index not found - run DataPipeline first"
@@ -50,7 +50,7 @@ jobs:
                   fi
 
                   # Check embeddings
-                  if gsutil ls gs://medscan-data/RAG/index/embeddings.json > /dev/null 2>&1; then
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/embeddings.json > /dev/null 2>&1; then
                     echo "Embeddings found"
                   else
                     echo "Embeddings not found"
@@ -64,7 +64,7 @@ jobs:
 
                   BUILD_ID=$(gcloud builds submit \
                     --config=cloudbuild/rag-training.yaml \
-                    --project=medscanai-476203 \
+                    --project=medscanai-476500 \
                     --region=us-central1 \
                     --format="value(id)")
 
@@ -79,14 +79,14 @@ jobs:
 
                   gcloud builds log $BUILD_ID \
                     --stream \
-                    --project=medscanai-476203
+                    --project=medscanai-476500
 
             - name: Check build status
               run: |
                   BUILD_ID="${{ steps.build.outputs.build_id }}"
 
                   STATUS=$(gcloud builds describe $BUILD_ID \
-                    --project=medscanai-476203 \
+                    --project=medscanai-476500 \
                     --format="value(status)")
 
                   if [ "$STATUS" != "SUCCESS" ]; then
@@ -102,7 +102,7 @@ jobs:
                   BUILD_ID="${{ steps.build.outputs.build_id }}"
 
                   echo "Best model configuration:"
-                  gsutil cat gs://medscan-data/RAG/models/$BUILD_ID/config.json | jq '.'
+                  gsutil cat gs://medscan-pipeline-medscanai-476500/RAG/models/$BUILD_ID/config.json | jq '.' || echo "Config file not found"
 
             - name: Send email notification
               if: always()
@@ -124,13 +124,13 @@ jobs:
                       - Branch: ${{ github.ref }}
 
                       View build logs:
-                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476203
+                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476500
 
                       View experiments:
-                      gs://medscan-data/RAG/experiments/${{ steps.build.outputs.build_id }}/
+                      gs://medscan-pipeline-medscanai-476500/RAG/experiments/${{ steps.build.outputs.build_id }}/
 
                       Best model config:
-                      gs://medscan-data/RAG/models/${{ steps.build.outputs.build_id }}/config.json
+                      gs://medscan-pipeline-medscanai-476500/RAG/models/${{ steps.build.outputs.build_id }}/config.json
 
                       ---
                       MedScan AI - Automated Model Training System

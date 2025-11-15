@@ -1,6 +1,7 @@
 """
 gcp_utils.py - Common GCP utility functions
 """
+import os
 import logging
 from pathlib import Path
 from google.cloud import storage
@@ -16,10 +17,24 @@ class GCPHelper:
     
     def __init__(
         self,
-        project_id: str = "medscanai-476203",
-        bucket_name: str = "medscan-data",
+        project_id: str = None,
+        bucket_name: str = None,
         region: str = "us-central1"
     ):
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to GCPHelper(project_id='...')"
+                )
+        if bucket_name is None:
+            bucket_name = os.getenv("GCS_BUCKET_NAME")
+            if not bucket_name:
+                raise ValueError(
+                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
+                    "or pass it to GCPHelper(bucket_name='...')"
+                )
         self.project_id = project_id
         self.bucket_name = bucket_name
         self.region = region

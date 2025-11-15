@@ -29,8 +29,11 @@ dvc:
     - "index"
   
 gcs:
-  bucket_name: "medscan-data"
-  project_id: "medscanai-476203"
+  # These values should be set via environment variables:
+  # GCS_BUCKET_NAME and GCP_PROJECT_ID
+  # Default values below are for backward compatibility only
+  bucket_name: "${GCS_BUCKET_NAME:-medscan-data}"  # Uses env var if set, otherwise default
+  project_id: "${GCP_PROJECT_ID:-medscanai-476203}"  # Uses env var if set, otherwise default
 
 # Alert thresholds
 alerts:

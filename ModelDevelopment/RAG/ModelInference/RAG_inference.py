@@ -45,16 +45,30 @@ class RAGDataLoader:
     
     def __init__(
         self,
-        bucket_name: str = "medscan-data",
-        project_id: str = "medscanai-476203"
+        bucket_name: str = None,
+        project_id: str = None
     ):
         """
         Initialize data loader.
         
         Args:
-            bucket_name: GCS bucket name
-            project_id: GCP project ID
+            bucket_name: GCS bucket name (defaults to GCS_BUCKET_NAME env var)
+            project_id: GCP project ID (defaults to GCP_PROJECT_ID env var)
         """
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to RAGDataLoader(project_id='...')"
+                )
+        if bucket_name is None:
+            bucket_name = os.getenv("GCS_BUCKET_NAME")
+            if not bucket_name:
+                raise ValueError(
+                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
+                    "or pass it to RAGDataLoader(bucket_name='...')"
+                )
         self.bucket_name = bucket_name
         self.project_id = project_id
         

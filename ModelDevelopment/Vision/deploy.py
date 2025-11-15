@@ -1,6 +1,7 @@
 """
 deploy.py - Deploy Vision models to Vertex AI
 """
+import os
 import logging
 from pathlib import Path
 from typing import Optional
@@ -17,10 +18,24 @@ class VisionModelDeployer:
     
     def __init__(
         self,
-        project_id: str = "medscanai-476203",
+        project_id: str = None,
         region: str = "us-central1",
-        bucket_name: str = "medscan-data"
+        bucket_name: str = None
     ):
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to VisionModelDeployer(project_id='...')"
+                )
+        if bucket_name is None:
+            bucket_name = os.getenv("GCS_BUCKET_NAME")
+            if not bucket_name:
+                raise ValueError(
+                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
+                    "or pass it to VisionModelDeployer(bucket_name='...')"
+                )
         self.project_id = project_id
         self.region = region
         self.bucket_name = bucket_name

@@ -67,8 +67,10 @@ smtp_settings:
   port: 587
   use_tls: true
   # Credentials stored in Secret Manager
-  username_secret: projects/medscanai-476203/secrets/smtp-username
-  password_secret: projects/medscanai-476203/secrets/smtp-password
+  # Note: These use the GCP_PROJECT_ID environment variable
+  # The project ID should match the one set in your environment
+  username_secret: projects/${GCP_PROJECT_ID:-medscanai-476203}/secrets/smtp-username
+  password_secret: projects/${GCP_PROJECT_ID:-medscanai-476203}/secrets/smtp-password
 
 # Alert message templates
 message_templates:
@@ -177,6 +179,7 @@ message_templates:
 
 # Monitoring dashboard URLs
 dashboards:
-  vision_model: "https://console.cloud.google.com/monitoring/dashboards/custom/vision-model?project=medscanai-476203"
-  rag_model: "https://console.cloud.google.com/monitoring/dashboards/custom/rag-model?project=medscanai-476203"
-  cloud_build: "https://console.cloud.google.com/cloud-build/builds?project=medscanai-476203"
+  # Dashboard URLs - use ${GCP_PROJECT_ID} substitution in deployment
+  vision_model: "https://console.cloud.google.com/monitoring/dashboards/custom/vision-model?project=${GCP_PROJECT_ID:-medscanai-476203}"
+  rag_model: "https://console.cloud.google.com/monitoring/dashboards/custom/rag-model?project=${GCP_PROJECT_ID:-medscanai-476203}"
+  cloud_build: "https://console.cloud.google.com/cloud-build/builds?project=${GCP_PROJECT_ID:-medscanai-476203}"

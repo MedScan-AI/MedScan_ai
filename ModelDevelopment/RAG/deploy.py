@@ -2,6 +2,7 @@
 deploy.py - Deploy RAG model to Vertex AI
 Supports both local files and GCS URIs
 """
+import os
 import logging
 import json
 from pathlib import Path
@@ -18,10 +19,24 @@ class RAGModelDeployer:
     
     def __init__(
         self,
-        project_id: str = "medscanai-476203",
+        project_id: str = None,
         region: str = "us-central1",
-        bucket_name: str = "medscan-data"
+        bucket_name: str = None
     ):
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to RAGModelDeployer(project_id='...')"
+                )
+        if bucket_name is None:
+            bucket_name = os.getenv("GCS_BUCKET_NAME")
+            if not bucket_name:
+                raise ValueError(
+                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
+                    "or pass it to RAGModelDeployer(bucket_name='...')"
+                )
         self.project_id = project_id
         self.region = region
         self.bucket_name = bucket_name

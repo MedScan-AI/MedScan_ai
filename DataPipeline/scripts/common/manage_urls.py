@@ -13,10 +13,16 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-PROJECT_ID = "medscanai-476203"
-BUCKET_NAME = "medscan-data"
+# Get from environment variables with fallback to None (will raise error if not set)
+PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 URLS_PATH = "RAG/config/urls.txt"
 VERSIONS_PATH = "RAG/config/versions/"
+
+if not PROJECT_ID:
+    raise ValueError("GCP_PROJECT_ID environment variable is not set")
+if not BUCKET_NAME:
+    raise ValueError("GCS_BUCKET_NAME environment variable is not set")
 
 
 def get_gcs_client():

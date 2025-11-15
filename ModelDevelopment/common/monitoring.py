@@ -1,6 +1,7 @@
 """
 monitoring.py - Monitoring utilities with Email notifications
 """
+import os
 import logging
 from google.cloud import monitoring_v3
 from google.cloud import pubsub_v1
@@ -87,10 +88,17 @@ class ModelMonitor:
     
     def __init__(
         self,
-        project_id: str = "medscanai-476203",
+        project_id: str = None,
         smtp_user: str = None,
         smtp_password: str = None
     ):
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to ModelMonitor(project_id='...')"
+                )
         self.project_id = project_id
         self.monitoring_client = monitoring_v3.MetricServiceClient()
         self.publisher = pubsub_v1.PublisherClient()
@@ -199,7 +207,7 @@ Message:
         body += """
 ---
 MedScan AI - Automated Monitoring System
-Dashboard: https://console.cloud.google.com/monitoring?project=medscanai-476203
+Dashboard: https://console.cloud.google.com/monitoring?project={self.project_id}
 """
         
         # Format HTML body
@@ -238,7 +246,7 @@ Dashboard: https://console.cloud.google.com/monitoring?project=medscanai-476203
             html_body += '</ul></div>'
         
         html_body += """
-                <p><a href="https://console.cloud.google.com/monitoring?project=medscanai-476203">View Monitoring Dashboard →</a></p>
+                <p><a href="https://console.cloud.google.com/monitoring?project={self.project_id}">View Monitoring Dashboard →</a></p>
             </div>
             <div class="footer">
                 <p>MedScan AI - Automated Monitoring System</p>
@@ -333,7 +341,7 @@ Model Details:
 - Build ID: {build_id}
 
 View Results:
-https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203
+https://console.cloud.google.com/cloud-build/builds/{build_id}?project={self.project_id}
 
 Next Steps:
 - Review validation metrics
@@ -368,7 +376,7 @@ MedScan AI - Automated Training System
                 <p><strong>Build ID:</strong> {build_id}</p>
             </div>
             
-            <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project=medscanai-476203">View Build Logs →</a></p>
+            <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project={self.project_id}">View Build Logs →</a></p>
             
             <h3>Next Steps</h3>
             <ul>

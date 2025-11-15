@@ -49,7 +49,7 @@ jobs:
             - name: Set up Cloud SDK
               uses: google-github-actions/setup-gcloud@v1
               with:
-                  project_id: medscanai-476203
+                  project_id: medscanai-476500
 
             - name: Submit Cloud Build
               id: build
@@ -63,7 +63,7 @@ jobs:
 
                   BUILD_ID=$(gcloud builds submit \
                     --config=cloudbuild/vision-training.yaml \
-                    --project=medscanai-476203 \
+                    --project=medscanai-476500 \
                     --region=us-central1 \
                     --substitutions=_DATASET=$DATASET,_EPOCHS=$EPOCHS \
                     --format="value(id)")
@@ -76,18 +76,18 @@ jobs:
                   BUILD_ID="${{ steps.build.outputs.build_id }}"
 
                   echo "Monitoring build $BUILD_ID..."
-                  echo "View in console: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=medscanai-476203"
+                  echo "View in console: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=medscanai-476500"
 
                   gcloud builds log $BUILD_ID \
                     --stream \
-                    --project=medscanai-476203
+                    --project=medscanai-476500
 
             - name: Check build status
               run: |
                   BUILD_ID="${{ steps.build.outputs.build_id }}"
 
                   STATUS=$(gcloud builds describe $BUILD_ID \
-                    --project=medscanai-476203 \
+                    --project=medscanai-476500 \
                     --format="value(status)")
 
                   echo "Build status: $STATUS"
@@ -128,10 +128,10 @@ jobs:
                       - Branch: ${{ github.ref }}
 
                       View build logs:
-                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476203
+                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476500
 
                       View artifacts:
-                      gs://medscan-data/vision/trained_models/${{ steps.build.outputs.build_id }}/
+                      gs://medscan-pipeline-medscanai-476500/vision/trained_models/${{ steps.build.outputs.build_id }}/
 
                       ---
                       MedScan AI - Automated Model Training System

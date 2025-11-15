@@ -1,6 +1,7 @@
 """
 trigger_retraining.py - Trigger model retraining based on performance
 """
+import os
 import logging
 from google.cloud import monitoring_v3
 from google.cloud import build_v1
@@ -13,7 +14,14 @@ logger = logging.getLogger(__name__)
 class RetrainingTrigger:
     """Trigger retraining based on performance metrics"""
     
-    def __init__(self, project_id: str = "medscanai-476203"):
+    def __init__(self, project_id: str = None):
+        if project_id is None:
+            project_id = os.getenv("GCP_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                    "or pass it to RetrainingTrigger(project_id='...')"
+                )
         self.project_id = project_id
         self.monitoring_client = monitoring_v3.MetricServiceClient()
         self.build_client = build_v1.CloudBuildClient()
