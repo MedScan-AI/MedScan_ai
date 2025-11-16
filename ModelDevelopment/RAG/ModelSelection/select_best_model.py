@@ -238,9 +238,25 @@ class ModelSelector:
             
             # Create config for deployment
             # (compatible with run_rag_pipeline)
+            model_map = {
+                "qwen_2.5_7b": "Qwen/Qwen2.5-7B-Instruct",
+                "mistral_7b": "mistralai/Mistral-7B-Instruct-v0.3",
+                "llama_3.1_8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+                "qwen_2.5_14b": "Qwen/Qwen2.5-14B-Instruct",
+                "smol_lm": "HuggingFaceTB/SmolLM2-360M",
+                "llama_3.2_3b": "meta-llama/Llama-3.2-3B-Instruct",
+                "qwen_2.5_1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
+            }
+
+            hf_id = model_map.get(best_model["model_name"], None)
+            if hf_id is None:
+                raise ValueError(
+                    f"model ID cannot be none for : {best_model['model_name']}"
+                )
             deployment_config = {
                 # Model configuration
-                "model_name": best_model["model_name"],
+                "model_name": hf_id,
+                "display_name": best_model["model_name"],
                 "model_type": best_model["model_type"],
                 "temperature": float(params.get("temperature", 0.7)),
                 "top_p": float(params.get("top_p", 0.9)),

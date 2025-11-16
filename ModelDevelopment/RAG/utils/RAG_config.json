@@ -1,5 +1,6 @@
 {
-  "model_name": "qwen_2.5_1.5b",
+  "model_name": "Qwen/Qwen2.5-1.5B-Instruct",
+  "display_name": "qwen_2.5_1.5b",
   "model_type": "open-source",
   "temperature": 0.8589,
   "top_p": 0.7028,
