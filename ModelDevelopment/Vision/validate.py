@@ -67,7 +67,8 @@ class ModelValidator:
             logger.info(f"  {name}: {value:.4f}")
         
         # Check thresholds
-        accuracy = validation_results.get('accuracy', 0.0)
+        # Keras 3 may return 'compile_metrics' or 'accuracy' depending on version
+        accuracy = validation_results.get('accuracy') or validation_results.get('compile_metrics') or 0.0
         passed = accuracy >= 0.7  # 70% accuracy threshold
         
         validation_results['passed'] = passed

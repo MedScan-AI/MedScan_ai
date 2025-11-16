@@ -1,0 +1,93 @@
+# Cloud Build ignore file
+# Files excluded from Cloud Build source upload
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+docs/
+PROJECT_STRUCTURE.md
+
+# Logs
+*.log
+logs/
+
+# Environment files (sensitive)
+.env
+*.env
+*service-account*.json
+*-key.json
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# Data (exclude actual data but keep .dvc metadata files)
+*.csv
+*.json.gz
+
+# Exclude top-level data/ directory (if it exists)
+# NOTE: Do NOT exclude DataPipeline/data/ entirely - we need the .dvc files there!
+/data/
+
+# DataPipeline: Exclude data subdirectories but keep .dvc files at DataPipeline/data/*.dvc
+# By only excluding subdirectories (ending with /), .dvc files at the data/ level are included
+DataPipeline/data/raw/
+DataPipeline/data/preprocessed/
+DataPipeline/data/synthetic_metadata/
+DataPipeline/data/synthetic_metadata_mitigated/
+DataPipeline/data/RAG/
+DataPipeline/data/ge_outputs/
+DataPipeline/data/mlflow_store/
+
+# .dvc files at DataPipeline/data/*.dvc will be included because patterns ending with /
+# only match directories, not files at that level
+
+# Models (too large to upload)
+*.h5
+*.keras
+*.pkl
+*.bin
+models/
+ModelDevelopment/*/models/
+
+# MLflow
+mlruns/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if any)
+node_modules/
+
+# Duplicate files
+* 2.*
+* 2/
+

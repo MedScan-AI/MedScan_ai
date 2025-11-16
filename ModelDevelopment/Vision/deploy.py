@@ -8,6 +8,9 @@ from typing import Optional
 from google.cloud import aiplatform
 from google.cloud import storage
 import json
+import tempfile
+import shutil
+from tensorflow import keras
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +49,29 @@ class VisionModelDeployer:
         # Initialize GCS client
         self.storage_client = storage.Client(project=project_id)
         self.bucket = self.storage_client.bucket(bucket_name)
+    
+    def _upload_directory(self, local_dir: Path, gcs_prefix: str) -> str:
+        """
+        Upload a local directory (recursively) to GCS under gcs_prefix.
+        
+        Args:
+            local_dir: Path to local directory
+            gcs_prefix: GCS prefix (e.g., 'vision/models/tb/CNN_ResNet50/saved_model')
+        
+        Returns:
+            GCS URI of the uploaded directory
+        """
+        local_dir = Path(local_dir)
+        if not local_dir.exists() or not local_dir.is_dir():
+            raise ValueError(f"Local directory does not exist: {local_dir}")
+        
+        for path in local_dir.rglob("*"):
+            if path.is_file():
+                rel_path = path.relative_to(local_dir)
+                blob_path = f"{gcs_prefix}/{rel_path.as_posix()}"
+                blob = self.bucket.blob(blob_path)
+                blob.upload_from_filename(str(path))
+        return f"gs://{self.bucket_name}/{gcs_prefix}"
     
     def upload_model_to_gcs(
         self,
@@ -183,14 +209,29 @@ class VisionModelDeployer:
         logger.info("Starting Vision Model Deployment")
         logger.info("="*80)
         
-        # 1. Upload to GCS
-        gcs_uri = self.upload_model_to_gcs(
-            model_path,
-            model_name,
-            dataset_name
-        )
+        # 1. Upload Keras model file to GCS for archival
+        gcs_keras_uri = self.upload_model_to_gcs(model_path, model_name, dataset_name)
         
-        # 2. Register in Model Registry
+        # 2. Export TensorFlow SavedModel and upload directory to GCS for Vertex AI
+        tmp_dir = Path(tempfile.mkdtemp(prefix="export_saved_model_"))
+        try:
+            logger.info("Exporting Keras model to TensorFlow SavedModel format...")
+            model = keras.models.load_model(model_path)
+            export_dir = tmp_dir / "saved_model"
+            model.export(str(export_dir))
+            
+            # Upload exported directory to GCS under saved_model/
+            saved_model_prefix = f"vision/models/{dataset_name}/{model_name}/saved_model"
+            logger.info(f"Uploading SavedModel directory to gs://{self.bucket_name}/{saved_model_prefix}")
+            gcs_saved_model_uri = self._upload_directory(export_dir, saved_model_prefix)
+        finally:
+            # Clean up temp directory
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+        
+        # 3. Register in Model Registry (use SavedModel directory as artifact_uri)
         display_name = f"{dataset_name}_{model_name}".replace("_", "-")
         description = (
             f"Vision model for {dataset_name} classification. "
@@ -207,23 +248,24 @@ class VisionModelDeployer:
         
         model = self.register_model(
             display_name=display_name,
-            model_gcs_uri=gcs_uri,
+            model_gcs_uri=gcs_saved_model_uri,
             description=description,
             labels=labels
         )
         
-        # 3. Deploy to endpoint
+        # 4. Deploy to endpoint
         endpoint_name = f"{dataset_name}-vision-endpoint".replace("_", "-")
         endpoint = self.deploy_model(
             model=model,
             endpoint_display_name=endpoint_name
         )
         
-        # 4. Save deployment info
+        # 5. Save deployment info
         deployment_info = {
             "model_resource_name": model.resource_name,
             "endpoint_resource_name": endpoint.resource_name,
-            "gcs_uri": gcs_uri,
+            "gcs_saved_model_uri": gcs_saved_model_uri,
+            "gcs_keras_uri": gcs_keras_uri,
             "test_accuracy": test_accuracy,
             "metadata": metadata
         }
