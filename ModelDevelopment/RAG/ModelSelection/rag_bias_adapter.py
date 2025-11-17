@@ -152,28 +152,30 @@ class RAGBiasAdapter:
         
         return analysis_dict
     
-    def log_to_mlflow(self, results: Dict[str, Any]):
-        """Log bias results to MLflow"""
+    # # <MLflow logging is disabled - its legacy code>
+    # 
+    #  def log_to_mlflow(self, results: Dict[str, Any]):
+    #     """Log bias results to MLflow"""
         
-        mlflow.log_metric("bias_detected", int(results["bias_detected"]))
-        mlflow.log_metric("bias_violations_count", results["num_violations"])
-        mlflow.log_metric("bias_overall_accuracy", results["overall_accuracy"])
-        mlflow.log_metric("bias_overall_f1", results["overall_f1"])
+    #     mlflow.log_metric("bias_detected", int(results["bias_detected"]))
+    #     mlflow.log_metric("bias_violations_count", results["num_violations"])
+    #     mlflow.log_metric("bias_overall_accuracy", results["overall_accuracy"])
+    #     mlflow.log_metric("bias_overall_f1", results["overall_f1"])
         
-        # Log violations
-        if results["violations"]:
-            mlflow.log_dict(
-                {"violations": results["violations"]},
-                "bias_violations.json"
-            )
+    #     # Log violations
+    #     if results["violations"]:
+    #         mlflow.log_dict(
+    #             {"violations": results["violations"]},
+    #             "bias_violations.json"
+    #         )
         
-        # Log recommendations
-        mlflow.log_dict(
-            {"recommendations": results["recommendations"]},
-            "bias_recommendations.json"
-        )
+    #     # Log recommendations
+    #     mlflow.log_dict(
+    #         {"recommendations": results["recommendations"]},
+    #         "bias_recommendations.json"
+    #     )
         
-        logger.info("Bias results logged to MLflow")
+    #     logger.info("Bias results logged to MLflow")
 
 
 def run_bias_check(best_metrics: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,7 +193,7 @@ def run_bias_check(best_metrics: Dict[str, Any]) -> Dict[str, Any]:
         per_query_results=best_metrics["per_query_results"]
     )
     
-    bias_adapter.log_to_mlflow(bias_results)
+    # bias_adapter.log_to_mlflow(bias_results)
     
     # Print summary
     print("\n" + "="*60)
