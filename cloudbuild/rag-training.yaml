@@ -1,85 +1,78 @@
-# Cloud Build configuration for RAG model selection
-# Reads data directly from GCS (no download step needed)
+# Cloud Build configuration for RAG model selection and deployment
+# Optimized for cost and efficiency
 steps:
-  # Step 1: Install dependencies
   - name: 'python:3.10'
     id: 'install-deps'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Installing RAG dependencies..."
+        echo "Installing RAG dependencies"
         pip install --upgrade pip
         cd ModelDevelopment/RAG
         pip install -r requirements.txt
         echo "Dependencies installed"
 
-  # Step 2: Verify GCS data exists
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'verify-gcs-data'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Verifying RAG data in GCS..."
+        echo "Verifying RAG data in GCS"
         
-        # Check index
-        if gsutil ls gs://medscan-data/RAG/index/index.bin > /dev/null 2>&1; then
+        BUCKET="gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}"
+        
+        if gsutil ls $$BUCKET/RAG/index/index_latest.bin > /dev/null 2>&1; then
           echo "FAISS index found"
         else
-          echo "FAISS index not found at gs://medscan-data/RAG/index/index.bin"
+          echo "FAISS index not found at $$BUCKET/RAG/index/index_latest.bin"
           echo "Run DataPipeline first: docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc"
           exit 1
         fi
         
-        # Check embeddings
-        if gsutil ls gs://medscan-data/RAG/index/embeddings.json > /dev/null 2>&1; then
+        if gsutil ls $$BUCKET/RAG/index/embeddings_latest.json > /dev/null 2>&1; then
           echo "Embeddings found"
         else
           echo "Embeddings not found"
           exit 1
         fi
         
-        # Check data.pkl (optional - may not exist)
-        gsutil ls gs://medscan-data/RAG/index/data.pkl > /dev/null 2>&1 && echo "data.pkl found" || echo "  data.pkl not found (optional)"
+        gsutil ls $$BUCKET/RAG/index/data_latest.pkl > /dev/null 2>&1 && echo "data.pkl found" || echo "data.pkl not found (optional)"
         
-        echo " GCS data verification complete"
+        echo "GCS data verification complete"
 
-  # Step 3: Run model selection experiments
-  # RAG_inference.py will read directly from GCS
   - name: 'python:3.10'
     id: 'run-experiments'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Starting RAG model selection experiments..."
+        echo "Starting RAG model selection experiments"
         cd ModelDevelopment/RAG
         
-        # Set MLflow tracking to local workspace
         export MLFLOW_TRACKING_URI=file:///workspace/mlruns
+        export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
+        export GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
         
-        # Run experiments - data will be loaded from GCS automatically
         python ModelSelection/experiment.py
         
         echo "Experiments completed"
     timeout: 3000s
 
-  # Step 4: Select best model
   - name: 'python:3.10'
     id: 'select-best-model'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Selecting best model..."
+        echo "Selecting best model"
         cd ModelDevelopment/RAG
         
         export MLFLOW_TRACKING_URI=file:///workspace/mlruns
         
         python ModelSelection/select_best_model.py
         
-        # Verify config was created
         if [ ! -f "utils/RAG_config.json" ]; then
           echo "Config file not created"
           exit 1
@@ -88,26 +81,29 @@ steps:
         echo "Best model selected"
         cat utils/RAG_config.json | python -m json.tool
 
-  # Step 5: Deploy to Vertex AI
   - name: 'python:3.10'
     id: 'deploy-rag'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Deploying RAG model to Vertex AI..."
+        echo "Deploying RAG to Vertex AI"
         cd ModelDevelopment/RAG
         
-        # Deployment will upload from GCS directly
+        export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
+        export GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
+        
+        BUCKET="gs://$$GCS_BUCKET_NAME"
+        
         python deploy.py \
           --config utils/RAG_config.json \
-          --index gs://medscan-data/RAG/index/index.bin \
-          --embeddings gs://medscan-data/RAG/index/embeddings.json \
-          --metadata utils/RAG_config.json
+          --index $$BUCKET/RAG/index/index_latest.bin \
+          --embeddings $$BUCKET/RAG/index/embeddings_latest.json \
+          --metadata utils/RAG_config.json \
+          --machine-size small
         
         echo "RAG deployment completed"
 
-  # Step 6: Upload MLflow experiments to GCS
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-experiments'
     args:
@@ -115,17 +111,129 @@ steps:
       - 'cp'
       - '-r'
       - '/workspace/mlruns/'
-      - 'gs://medscan-data/RAG/experiments/${BUILD_ID}/'
+      - 'gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/experiments/${BUILD_ID}/'
 
-  # Step 7: Upload best model config
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-config'
     args:
       - 'cp'
       - 'ModelDevelopment/RAG/utils/RAG_config.json'
-      - 'gs://medscan-data/RAG/models/${BUILD_ID}/config.json'
+      - 'gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/models/${BUILD_ID}/config.json'
 
-  # Step 8: Create summary
+  - name: 'python:3.10'
+    id: 'send-success-email'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Sending deployment notification"
+        
+        CONFIG_PATH="ModelDevelopment/RAG/utils/RAG_config.json"
+        
+        if [ ! -f "$$CONFIG_PATH" ]; then
+          echo "Config not found"
+          exit 1
+        fi
+        
+        MODEL_NAME=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['model_name'])")
+        COMPOSITE_SCORE=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['performance_metrics']['composite_score'])")
+        
+        pip install --quiet secure-smtplib
+        
+        cat > /tmp/send_email.py << 'PYEOF'
+        import smtplib
+        import os
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        smtp_user = os.getenv('SMTP_USER')
+        smtp_password = os.getenv('SMTP_PASSWORD')
+        
+        if not smtp_user or not smtp_password:
+            print("No SMTP credentials - skipping email")
+            exit(0)
+        
+        recipients = ['harshitha8.shekar@gmail.com', 'chandrashekar.h@northeastern.edu']
+        
+        msg = MIMEMultipart('alternative')
+        msg['From'] = f'MedScan AI <{smtp_user}>'
+        msg['To'] = ', '.join(recipients)
+        msg['Subject'] = 'RAG Model Deployment Complete - ${BUILD_ID}'
+        
+        model_name = os.getenv('MODEL_NAME', 'Unknown')
+        composite_score = os.getenv('COMPOSITE_SCORE', '0.0')
+        
+        plain_text = f"""RAG Model Deployment Completed Successfully
+
+        Model Details:
+        - Model: {model_name}
+        - Composite Score: {composite_score}
+        - Build ID: ${{BUILD_ID}}
+        
+        Results:
+        - Model Selection: COMPLETE
+        - Deployment: SUCCESS
+        - Endpoint: medscan-rag-endpoint
+        
+        View build:
+        https://console.cloud.google.com/cloud-build/builds/${{BUILD_ID}}?project=${{GCP_PROJECT_ID}}
+        
+        Model artifacts:
+        gs://${{GCS_BUCKET_NAME}}/RAG/models/${{BUILD_ID}}/
+        
+        MedScan AI - Automated Training System
+        """
+        
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif;">
+            <div style="background-color: #4CAF50; color: white; padding: 20px;">
+                <h2>RAG Model Deployment Complete</h2>
+            </div>
+            <div style="padding: 20px;">
+                <h3>Model Details</h3>
+                <ul>
+                    <li><strong>Model:</strong> {model_name}</li>
+                    <li><strong>Composite Score:</strong> {composite_score}</li>
+                    <li><strong>Build ID:</strong> ${{BUILD_ID}}</li>
+                </ul>
+                
+                <h3>Results</h3>
+                <ul style="color: green;">
+                    <li>Model Selection: COMPLETE</li>
+                    <li>Deployment: SUCCESS</li>
+                    <li>Endpoint: medscan-rag-endpoint</li>
+                </ul>
+                
+                <p><a href="https://console.cloud.google.com/cloud-build/builds/${{BUILD_ID}}?project=${{GCP_PROJECT_ID}}">View Build Logs</a></p>
+            </div>
+            <div style="background-color: #f5f5f5; padding: 15px; text-align: center;">
+                <p>MedScan AI - Automated Training System</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(plain_text, 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+        
+        try:
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+            print("Email sent successfully")
+        except Exception as e:
+            print(f"Email failed: {e}")
+        PYEOF
+        
+        export SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>/dev/null || echo "")
+        export SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>/dev/null || echo "")
+        export MODEL_NAME="$$MODEL_NAME"
+        export COMPOSITE_SCORE="$$COMPOSITE_SCORE"
+        
+        python /tmp/send_email.py || echo "Email notification failed (non-critical)"
+
   - name: 'ubuntu'
     id: 'build-summary'
     entrypoint: 'bash'
@@ -136,15 +244,16 @@ steps:
         echo "================"
         echo "Build ID: ${BUILD_ID}"
         echo "Artifacts:"
-        echo "  - MLflow: gs://medscan-data/RAG/experiments/${BUILD_ID}/"
-        echo "  - Config: gs://medscan-data/RAG/models/${BUILD_ID}/config.json"
+        echo "  - MLflow: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/experiments/${BUILD_ID}/"
+        echo "  - Config: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/models/${BUILD_ID}/config.json"
+        echo "  - Deployment: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/deployments/latest/deployment_info.json"
 
-timeout: 3600s  # 1 hour
+timeout: 3600s
 
 substitutions:
   _TRIGGER_REASON: 'manual'
 
 options:
   machineType: 'N1_HIGHCPU_8'
-  diskSizeGb: 50  # Reduced since we're not downloading data
+  diskSizeGb: 50
   logging: CLOUD_LOGGING_ONLY
