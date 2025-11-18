@@ -6,7 +6,7 @@ Retrieval-Augmented Generation (RAG) system for medical question answering, spec
 
 This system combines semantic search with large language models to provide evidence-based medical information from curated literature.
 
-### Key Features
+### Model Selection/Experimentation Considerations
 
 - 7 optimized LLM models (360M to 14B parameters)
 - 4 retrieval strategies (similarity, MMR, weighted scoring, reranking)
@@ -128,14 +128,6 @@ embeddings = loader.load_embeddings()      # From GCS or local
 index = loader.load_faiss_index()          # From GCS or local
 data = loader.load_data_pkl()              # From GCS or local
 ```
-
-**Fallback Logic:**
-
-- **GCS paths**: `gs://bucket/RAG/index/embeddings_latest.json`
-- **Local paths** (priority order):
-  1. `/opt/airflow/DataPipeline/data/RAG/index/` (Airflow)
-  2. `/workspace/data/RAG/index/` (Cloud Build)
-  3. `../DataPipeline/data/RAG/index/` (Local dev)
 
 #### Key Functions
 ```python
@@ -532,11 +524,11 @@ bias_results = run_bias_check(best_metrics)
 
 # 3. Review results
 if bias_results['bias_detected']:
-    print("⚠️ Bias violations found:")
+    print("Bias violations found:")
     for violation in bias_results['violations']:
         print(f"  - {violation}")
     
-    print("\n📋 Recommendations:")
+    print("\nRecommendations:")
     for rec in bias_results['recommendations']:
         print(rec)
 
@@ -585,131 +577,11 @@ pytest ModelInference/test_rag_pipeline.py --cov=ModelInference --cov-report=htm
 #### Key Test Classes:
 
 - `TestLoadConfig` - Config file loading
-- `TestRAGDataLoader` - GCS/local data loading
 - `TestGetEmbedding` - Embedding generation
 - `TestRetrieveDocuments` - All retrieval methods
 - `TestGenerateResponse` - LLM inference
 - `TestComputeStats` - Statistics calculation
 - `TestRunRagPipeline` - Integration tests
-
-### Pre-Flight Checks (ModelInference/test_deployment.py)
-
-Verify system readiness before deployment.
-```bash
-# Run pre-flight checks
-python ModelInference/test_deployment.py
-```
-
-#### Checks Performed:
-
-- Environment variables (GCP_PROJECT_ID, GCS_BUCKET_NAME)
-- GCS data availability (index, embeddings)
-- Data loading from GCS
-- Model selection files (qa.json)
-- Config generation (RAG_config.json)
-
-## Deployment
-
-### Vertex AI Deployment (ModelInference/deploy.py)
-
-Deploy RAG model and artifacts to Google Cloud Vertex AI.
-
-#### RAGModelDeployer Class
-```python
-from ModelInference.deploy import RAGModelDeployer
-
-# Initialize deployer
-deployer = RAGModelDeployer(
-    project_id="your-project-id",
-    region="us-central1",
-    bucket_name="your-bucket"
-)
-
-# Upload artifacts (supports local paths or GCS URIs)
-uris = deployer.upload_model_artifacts(
-    config_path="utils/RAG_config.json",           # Local file
-    index_path="gs://bucket/RAG/index/index.bin",  # Or GCS URI
-    embeddings_path="data/embeddings.json"
-)
-
-# Register model in Vertex AI Model Registry
-model = deployer.register_rag_model(
-    display_name="medscan-rag-model",
-    artifact_uri=uris['artifact_dir'],
-    metadata={...}
-)
-
-# Complete deployment workflow
-model = deployer.deploy_rag_model(
-    config_path="utils/RAG_config.json",
-    index_path="gs://bucket/index.bin",
-    embeddings_path="gs://bucket/embeddings.json",
-    metadata_path="metadata.json"
-)
-```
-
-#### Deployment Workflow
-```bash
-# 1. Run pre-flight checks
-python ModelInference/test_deployment.py
-
-# 2. Deploy to Vertex AI
-python ModelInference/deploy.py \
-  --config utils/RAG_config.json \
-  --index gs://my-bucket/RAG/index/index_latest.bin \
-  --embeddings gs://my-bucket/RAG/index/embeddings_latest.json \
-  --metadata deployment_metadata.json
-
-# 3. Verify deployment
-gcloud ai models list --region=us-central1 --filter="displayName:medscan-rag-model"
-```
-
-#### What Gets Deployed:
-
-- Config copied to `gs://bucket/RAG/models/latest/config.json`
-- Index copied to `gs://bucket/RAG/models/latest/index.bin`
-- Embeddings copied to `gs://bucket/RAG/models/latest/embeddings.json`
-- Dummy `saved_model.pb` created (for Vertex AI validation)
-- Model registered in Vertex AI Model Registry
-- Deployment info saved to `gs://bucket/RAG/deployments/latest/deployment_info.json`
-
-**Note**: The deployed model uses a standard TensorFlow container for registration but doesn't serve predictions directly. Your inference service loads artifacts from GCS.
-
-### Querying Deployed Endpoint (ModelInference/vertex_rag_client.py)
-
-Client for querying Vertex AI RAG endpoint.
-```python
-from ModelInference.vertex_rag_client import VertexRAGClient
-
-# Initialize client
-client = VertexRAGClient(
-    project_id="your-project-id",
-    region="us-central1",
-    endpoint_name="medscan-rag-endpoint"
-)
-
-# Query endpoint
-response = client.query(
-    question="What are the symptoms of tuberculosis?",
-    temperature=0.7,
-    top_p=0.9,
-    max_tokens=500
-)
-
-if response['success']:
-    print(response['answer'])
-    print(f"\nTokens: {response['input_tokens']} in, {response['output_tokens']} out")
-else:
-    print(f"Error: {response['answer']}")
-
-# Batch queries
-questions = [
-    "What causes lung cancer?",
-    "How is TB treated?",
-    "What are the risk factors for TB?"
-]
-results = client.batch_query(questions)
-```
 
 ## Configuration
 
