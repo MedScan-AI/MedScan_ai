@@ -1,0 +1,5 @@
+# Minimal requirements for RAG model deployment
+# Only includes packages needed for Vertex AI deployment
+google-cloud-aiplatform>=1.0.0
+google-cloud-storage>=2.0.0
+

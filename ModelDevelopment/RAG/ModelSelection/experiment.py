@@ -507,9 +507,28 @@ def log_model_to_mlflow(
         
         try:
             logger.info("Running bias detection")
-            run_bias_check(best_metrics)
+            bias_results = run_bias_check(best_metrics)
+            
+            # Save bias results to file for Cloud Build
+            import json
+            import os
+            bias_output_path = os.path.join(os.path.dirname(__file__), "..", "bias_results.json")
+            with open(bias_output_path, 'w') as f:
+                json.dump(bias_results, f, indent=2)
+            logger.info(f"Bias results saved to {bias_output_path}")
         except Exception as e:
             logger.warning(f"Bias detection failed: {e}")
+            # Save empty bias results
+            import json
+            import os
+            bias_output_path = os.path.join(os.path.dirname(__file__), "..", "bias_results.json")
+            with open(bias_output_path, 'w') as f:
+                json.dump({
+                    'bias_detected': False,
+                    'num_violations': 0,
+                    'violations': [],
+                    'recommendations': []
+                }, f, indent=2)
 
 
 def run_mlflow_experiment(

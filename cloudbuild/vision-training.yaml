@@ -308,7 +308,7 @@ steps:
         pip install --upgrade pip
         pip install -r ModelDevelopment/Vision/requirements.txt
         pip install google-cloud-aiplatform
-        echo " Deploying to Vertex AI..."
+        echo "🚀 Deploying to Vertex AI..."
         cd ModelDevelopment/Vision
         
         # Find model in date-partitioned structure

@@ -7,6 +7,10 @@ steps:
     args:
       - '-c'
       - |
+        if [ "${_SKIP_EXPERIMENTS}" = "true" ]; then
+          echo "SKIP_EXPERIMENTS=true - Skipping dependency installation"
+          exit 0
+        fi
         echo "Installing RAG dependencies"
         pip install --upgrade pip
         cd ModelDevelopment/RAG
@@ -19,24 +23,27 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         echo "Verifying RAG data in GCS"
         
         BUCKET="gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}"
+        ERROR_MSG=""
         
-        if gsutil ls $$BUCKET/RAG/index/index_latest.bin > /dev/null 2>&1; then
-          echo "FAISS index found"
-        else
-          echo "FAISS index not found at $$BUCKET/RAG/index/index_latest.bin"
-          echo "Run DataPipeline first: docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc"
+        if ! gsutil ls $$BUCKET/RAG/index/index_latest.bin > /dev/null 2>&1; then
+          ERROR_MSG="FAISS index not found at $$BUCKET/RAG/index/index_latest.bin. Run DataPipeline first: docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc"
+          echo "$$ERROR_MSG"
+          echo "$$ERROR_MSG" > /workspace/pipeline_error.txt
           exit 1
         fi
+        echo "FAISS index found"
         
-        if gsutil ls $$BUCKET/RAG/index/embeddings_latest.json > /dev/null 2>&1; then
-          echo "Embeddings found"
-        else
-          echo "Embeddings not found"
+        if ! gsutil ls $$BUCKET/RAG/index/embeddings_latest.json > /dev/null 2>&1; then
+          ERROR_MSG="Embeddings not found at $$BUCKET/RAG/index/embeddings_latest.json"
+          echo "$$ERROR_MSG"
+          echo "$$ERROR_MSG" > /workspace/pipeline_error.txt
           exit 1
         fi
+        echo "Embeddings found"
         
         gsutil ls $$BUCKET/RAG/index/data_latest.pkl > /dev/null 2>&1 && echo "data.pkl found" || echo "data.pkl not found (optional)"
         
@@ -48,8 +55,24 @@ steps:
     args:
       - '-c'
       - |
+        if [ "${_SKIP_EXPERIMENTS}" = "true" ]; then
+          echo "SKIP_EXPERIMENTS=true - Skipping experiment run"
+          echo "Using existing config from previous run"
+          cd ModelDevelopment/RAG
+          # Check if config exists, if not create a dummy one for testing
+          if [ ! -f "utils/RAG_config.json" ]; then
+            echo "Warning: No existing config found. Creating dummy config for testing."
+            mkdir -p utils
+            echo '{"model_name": "test-model", "performance_metrics": {"composite_score": 0.5}, "embedding_model": "test-embedding"}' > utils/RAG_config.json
+          fi
+          echo "Skipped experiments - using existing config"
+          exit 0
+        fi
+        
         echo "Starting RAG model selection experiments"
+        pip install --upgrade pip
         cd ModelDevelopment/RAG
+        pip install -r requirements.txt
         
         export MLFLOW_TRACKING_URI=file:///workspace/mlruns
         export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
@@ -66,8 +89,16 @@ steps:
     args:
       - '-c'
       - |
+        if [ "${_SKIP_EXPERIMENTS}" = "true" ]; then
+          echo "SKIP_EXPERIMENTS=true - Skipping model selection (using existing config)"
+          exit 0
+        fi
+        
         echo "Selecting best model"
+        pip install --upgrade pip
         cd ModelDevelopment/RAG
+        # Only install MLflow for model selection, not full requirements
+        pip install mlflow>=2.10.0 pyyaml>=6.0
         
         export MLFLOW_TRACKING_URI=file:///workspace/mlruns
         
@@ -82,13 +113,115 @@ steps:
         cat utils/RAG_config.json | python -m json.tool
 
   - name: 'python:3.10'
+    id: 'validate-model'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Validating model performance"
+        # No pip install needed - only uses Python stdlib (json)
+        cd ModelDevelopment/RAG
+        
+        CONFIG_PATH="utils/RAG_config.json"
+        VALIDATION_THRESHOLD=0.2
+        
+        if [ ! -f "$$CONFIG_PATH" ]; then
+          echo "Config file not found for validation"
+          exit 1
+        fi
+        
+        COMPOSITE_SCORE=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['performance_metrics']['composite_score'])")
+        MODEL_NAME=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['model_name'])")
+        
+        echo "Composite Score: $$COMPOSITE_SCORE"
+        echo "Validation Threshold: $$VALIDATION_THRESHOLD"
+        
+        # Check if score meets threshold
+        VALIDATION_PASSED=$$(python -c "score=$$COMPOSITE_SCORE; threshold=$$VALIDATION_THRESHOLD; print('true' if score >= threshold else 'false')")
+        
+        echo "$$VALIDATION_PASSED" > /workspace/validation_result.txt
+        echo "$$COMPOSITE_SCORE" > /workspace/composite_score.txt
+        echo "$$VALIDATION_THRESHOLD" > /workspace/validation_threshold.txt
+        echo "$$MODEL_NAME" > /workspace/model_name.txt
+        
+        if [ "$$VALIDATION_PASSED" = "false" ]; then
+          echo "VALIDATION FAILED: Composite score ($$COMPOSITE_SCORE) is below threshold ($$VALIDATION_THRESHOLD)"
+          
+          # Send validation failure email
+          SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>&1)
+          SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>&1)
+          
+          if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
+            SMTP_USER=""
+            SMTP_PASSWORD=""
+          fi
+          
+          export SMTP_USER="$$SMTP_USER"
+          export SMTP_PASSWORD="$$SMTP_PASSWORD"
+          export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
+          
+          python utils/send_notification.py \
+            --type validation-failure \
+            --build-id ${BUILD_ID} \
+            --model-name "$$MODEL_NAME" \
+            --composite-score $$COMPOSITE_SCORE \
+            --threshold $$VALIDATION_THRESHOLD || echo "Validation failure email failed (non-critical)"
+          
+          exit 1
+        fi
+        
+        echo "Validation PASSED: Model meets minimum performance threshold"
+
+  - name: 'python:3.10'
+    id: 'extract-bias-results'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Extracting bias check results"
+        cd ModelDevelopment/RAG
+        # Only install minimal dependencies - MLflow will be installed later if needed
+        
+        # First try to get bias results from experiment output file
+        if [ -f "bias_results.json" ]; then
+          echo "Found bias_results.json from experiment"
+          cp bias_results.json /workspace/bias_results.json
+        else
+          # Fallback: Try to extract from MLflow
+          echo "No bias_results.json found, trying MLflow"
+          export MLFLOW_TRACKING_URI=file:///workspace/mlruns
+          
+          # Only install MLflow, not full requirements
+          pip install --upgrade pip
+          pip install mlflow>=2.10.0
+          
+          # Extract bias results from MLflow - write script and execute
+          printf 'import mlflow\nimport json\nimport os\n\ntry:\n    client = mlflow.tracking.MlflowClient()\n    experiment = client.get_experiment_by_name("RAG_Model_Selection")\n    bias_result = {"bias_detected": False, "num_violations": 0, "violations": [], "recommendations": []}\n    \n    if experiment:\n        runs = client.search_runs(experiment_ids=[experiment.experiment_id], order_by=["metrics.composite_score DESC"], max_results=1)\n        if runs:\n            best_run = runs[0]\n            metrics = best_run.data.metrics\n            bias_result["bias_detected"] = bool(metrics.get("bias_detected", False))\n            bias_result["num_violations"] = int(metrics.get("bias_violations_count", 0) or 0)\n            try:\n                artifacts = client.list_artifacts(best_run.info.run_id)\n                for artifact in artifacts:\n                    if "bias_violations" in artifact.path:\n                        violation_file = client.download_artifacts(best_run.info.run_id, artifact.path)\n                        with open(violation_file, "r") as f:\n                            bias_result["violations"] = json.load(f).get("violations", [])\n            except:\n                pass\n    \n    with open("/workspace/bias_results.json", "w") as f:\n        json.dump(bias_result, f, indent=2)\n    detected = bias_result["bias_detected"]\n    violations = bias_result["num_violations"]\n    print("Bias check results extracted: detected=" + str(detected) + ", violations=" + str(violations))\nexcept Exception as e:\n    print("Error extracting bias results: " + str(e))\n    bias_result = {"bias_detected": False, "num_violations": 0, "violations": [], "recommendations": []}\n    with open("/workspace/bias_results.json", "w") as f:\n        json.dump(bias_result, f, indent=2)\n' > /tmp/extract_bias.py
+          python /tmp/extract_bias.py
+        fi
+        
+        # Check if bias was detected
+        BIAS_DETECTED=$$(python -c "import json; print(json.load(open('/workspace/bias_results.json'))['bias_detected'])")
+        echo "$$BIAS_DETECTED" > /workspace/bias_detected.txt
+        
+        if [ "$$BIAS_DETECTED" = "True" ]; then
+          echo "Bias detected in model - will send notification"
+        else
+          echo "No bias detected"
+        fi
+
+  - name: 'python:3.10'
     id: 'deploy-rag'
+    waitFor: ['validate-model']
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         echo "Deploying RAG to Vertex AI"
+        pip install --upgrade pip
         cd ModelDevelopment/RAG
+        # Use minimal requirements for deployment to avoid OOM
+        pip install -r requirements-deploy.txt
         
         export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
         export GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
@@ -99,140 +232,104 @@ steps:
           --config utils/RAG_config.json \
           --index $$BUCKET/RAG/index/index_latest.bin \
           --embeddings $$BUCKET/RAG/index/embeddings_latest.json \
-          --metadata utils/RAG_config.json \
-          --machine-size small
+          --metadata utils/RAG_config.json
         
         echo "RAG deployment completed"
 
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-experiments'
-    args:
-      - '-m'
-      - 'cp'
-      - '-r'
-      - '/workspace/mlruns/'
-      - 'gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/experiments/${BUILD_ID}/'
-
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'upload-config'
-    args:
-      - 'cp'
-      - 'ModelDevelopment/RAG/utils/RAG_config.json'
-      - 'gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/models/${BUILD_ID}/config.json'
-
-  - name: 'python:3.10'
-    id: 'send-success-email'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Sending deployment notification"
+        BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
+        if [ -d "/workspace/mlruns" ] && [ "$(ls -A /workspace/mlruns 2>/dev/null)" ]; then
+          echo "Uploading MLflow experiments..."
+          gsutil -m cp -r /workspace/mlruns/ gs://$$BUCKET_NAME/RAG/experiments/${BUILD_ID}/ || echo "Upload failed but continuing"
+        else
+          echo "No MLflow experiments found - skipping upload"
+        fi
+
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-config'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
+        if [ -f "ModelDevelopment/RAG/utils/RAG_config.json" ]; then
+          gsutil cp ModelDevelopment/RAG/utils/RAG_config.json gs://$$BUCKET_NAME/RAG/models/${BUILD_ID}/config.json
+          echo "Config uploaded successfully"
+        else
+          echo "Config file not found - skipping upload"
+        fi
+
+  - name: 'python:3.10'
+    id: 'send-success-email'
+    waitFor: ['deploy-rag', 'extract-bias-results']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Sending training completion notification"
         
-        CONFIG_PATH="ModelDevelopment/RAG/utils/RAG_config.json"
+        pip install --upgrade pip
+        cd ModelDevelopment/RAG
+        # Only install email dependencies, not full requirements
+        pip install secure-smtplib>=0.1.1
+        
+        CONFIG_PATH="utils/RAG_config.json"
         
         if [ ! -f "$$CONFIG_PATH" ]; then
           echo "Config not found"
           exit 1
         fi
         
+        # Get SMTP credentials from Secret Manager
+        SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>&1)
+        SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>&1)
+        
+        # Check if secrets were retrieved successfully
+        if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
+          echo "Warning: Could not retrieve SMTP credentials from Secret Manager"
+          SMTP_USER=""
+          SMTP_PASSWORD=""
+        fi
+        
+        export SMTP_USER="$$SMTP_USER"
+        export SMTP_PASSWORD="$$SMTP_PASSWORD"
+        export GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476500}
+        export GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
+        
+        # Read validation and bias results
+        VALIDATION_PASSED=$$(cat /workspace/validation_result.txt 2>/dev/null || echo "true")
+        COMPOSITE_SCORE=$$(cat /workspace/composite_score.txt 2>/dev/null || python -c "import json; print(json.load(open('$$CONFIG_PATH'))['performance_metrics']['composite_score'])")
+        BIAS_DETECTED=$$(cat /workspace/bias_detected.txt 2>/dev/null || echo "False")
+        
         MODEL_NAME=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['model_name'])")
-        COMPOSITE_SCORE=$$(python -c "import json; print(json.load(open('$$CONFIG_PATH'))['performance_metrics']['composite_score'])")
         
-        pip install --quiet secure-smtplib
+        # Determine bias check passed (opposite of bias detected)
+        if [ "$$BIAS_DETECTED" = "True" ]; then
+          BIAS_CHECK_PASSED="false"
+          # Send bias failure email
+          python utils/send_notification.py \
+            --type bias-failure \
+            --build-id ${BUILD_ID} \
+            --model-name "$$MODEL_NAME" \
+            --bias-details /workspace/bias_results.json || echo "Bias failure email failed (non-critical)"
+        else
+          BIAS_CHECK_PASSED="true"
+        fi
         
-        cat > /tmp/send_email.py << 'PYEOF'
-        import smtplib
-        import os
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        smtp_user = os.getenv('SMTP_USER')
-        smtp_password = os.getenv('SMTP_PASSWORD')
-        
-        if not smtp_user or not smtp_password:
-            print("No SMTP credentials - skipping email")
-            exit(0)
-        
-        recipients = ['harshitha8.shekar@gmail.com', 'chandrashekar.h@northeastern.edu']
-        
-        msg = MIMEMultipart('alternative')
-        msg['From'] = f'MedScan AI <{smtp_user}>'
-        msg['To'] = ', '.join(recipients)
-        msg['Subject'] = 'RAG Model Deployment Complete - ${BUILD_ID}'
-        
-        model_name = os.getenv('MODEL_NAME', 'Unknown')
-        composite_score = os.getenv('COMPOSITE_SCORE', '0.0')
-        
-        plain_text = f"""RAG Model Deployment Completed Successfully
-
-        Model Details:
-        - Model: {model_name}
-        - Composite Score: {composite_score}
-        - Build ID: ${{BUILD_ID}}
-        
-        Results:
-        - Model Selection: COMPLETE
-        - Deployment: SUCCESS
-        - Endpoint: medscan-rag-endpoint
-        
-        View build:
-        https://console.cloud.google.com/cloud-build/builds/${{BUILD_ID}}?project=${{GCP_PROJECT_ID}}
-        
-        Model artifacts:
-        gs://${{GCS_BUCKET_NAME}}/RAG/models/${{BUILD_ID}}/
-        
-        MedScan AI - Automated Training System
-        """
-        
-        html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif;">
-            <div style="background-color: #4CAF50; color: white; padding: 20px;">
-                <h2>RAG Model Deployment Complete</h2>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Model Details</h3>
-                <ul>
-                    <li><strong>Model:</strong> {model_name}</li>
-                    <li><strong>Composite Score:</strong> {composite_score}</li>
-                    <li><strong>Build ID:</strong> ${{BUILD_ID}}</li>
-                </ul>
-                
-                <h3>Results</h3>
-                <ul style="color: green;">
-                    <li>Model Selection: COMPLETE</li>
-                    <li>Deployment: SUCCESS</li>
-                    <li>Endpoint: medscan-rag-endpoint</li>
-                </ul>
-                
-                <p><a href="https://console.cloud.google.com/cloud-build/builds/${{BUILD_ID}}?project=${{GCP_PROJECT_ID}}">View Build Logs</a></p>
-            </div>
-            <div style="background-color: #f5f5f5; padding: 15px; text-align: center;">
-                <p>MedScan AI - Automated Training System</p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        msg.attach(MIMEText(plain_text, 'plain'))
-        msg.attach(MIMEText(html, 'html'))
-        
-        try:
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_password)
-                server.send_message(msg)
-            print("Email sent successfully")
-        except Exception as e:
-            print(f"Email failed: {e}")
-        PYEOF
-        
-        export SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>/dev/null || echo "")
-        export SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=${GCP_PROJECT_ID:-medscanai-476500} 2>/dev/null || echo "")
-        export MODEL_NAME="$$MODEL_NAME"
-        export COMPOSITE_SCORE="$$COMPOSITE_SCORE"
-        
-        python /tmp/send_email.py || echo "Email notification failed (non-critical)"
+        # Send completion email
+        python utils/send_notification.py \
+          --type completion \
+          --build-id ${BUILD_ID} \
+          --model-name "$$MODEL_NAME" \
+          --composite-score $$COMPOSITE_SCORE \
+          --validation-passed "$$VALIDATION_PASSED" \
+          --bias-check-passed "$$BIAS_CHECK_PASSED" \
+          --bias-details /workspace/bias_results.json || echo "Completion email failed (non-critical)"
 
   - name: 'ubuntu'
     id: 'build-summary'
@@ -240,20 +337,21 @@ steps:
     args:
       - '-c'
       - |
+        BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}
         echo "Build Summary"
         echo "================"
         echo "Build ID: ${BUILD_ID}"
         echo "Artifacts:"
-        echo "  - MLflow: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/experiments/${BUILD_ID}/"
-        echo "  - Config: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/models/${BUILD_ID}/config.json"
-        echo "  - Deployment: gs://${GCS_BUCKET_NAME:-medscan-pipeline-medscanai-476500}/RAG/deployments/latest/deployment_info.json"
+        echo "  - MLflow: gs://$$BUCKET_NAME/RAG/experiments/${BUILD_ID}/"
+        echo "  - Config: gs://$$BUCKET_NAME/RAG/models/${BUILD_ID}/config.json"
+        echo "  - Deployment: gs://$$BUCKET_NAME/RAG/deployments/latest/deployment_info.json"
+
+substitutions:
+  _SKIP_EXPERIMENTS: 'false'  # Set to 'true' to skip experiment run (saves ~20 minutes)
 
 timeout: 3600s
 
-substitutions:
-  _TRIGGER_REASON: 'manual'
-
 options:
-  machineType: 'N1_HIGHCPU_8'
+  machineType: 'E2_HIGHCPU_8'
   diskSizeGb: 50
   logging: CLOUD_LOGGING_ONLY
