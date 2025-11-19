@@ -386,12 +386,15 @@ steps:
         # Use lower threshold for quick tests (2 epochs), higher for production (50 epochs)
         # Check epochs from substitution - if 2 or less, use 0.2; otherwise 0.5
         EPOCHS=${_EPOCHS:-50}
-        if [ "$$EPOCHS" -le 2 ]; then
+        echo "EPOCHS value: $$EPOCHS"
+        # Convert to integer for comparison (handle string "2" vs integer 2)
+        EPOCHS_INT=$$(echo "$$EPOCHS" | awk '{print int($$1)}')
+        if [ $$EPOCHS_INT -le 2 ]; then
           VALIDATION_THRESHOLD=0.2  # Lower threshold for quick tests
           echo "Using lower validation threshold (0.2) for quick test with $$EPOCHS epochs"
         else
           VALIDATION_THRESHOLD=0.5  # Standard threshold for production
-          echo "Using standard validation threshold (0.5) for production training"
+          echo "Using standard validation threshold (0.5) for production training with $$EPOCHS epochs"
         fi
         
         echo "Test Accuracy: $$TEST_ACCURACY"
