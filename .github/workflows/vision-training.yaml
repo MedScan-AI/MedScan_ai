@@ -105,7 +105,7 @@ jobs:
                   BUILD_ID="${{ steps.build.outputs.build_id }}"
 
                   echo "Build artifacts:"
-                  gsutil ls gs://medscan-data/vision/trained_models/$BUILD_ID/ || echo "No artifacts found"
+                  gsutil ls gs://medscan-pipeline-medscanai-476500/vision/trained_models/$BUILD_ID/ || echo "No artifacts found"
 
             - name: Send email notification
               if: always()
