@@ -1,6 +1,6 @@
 """
-Training script for ResNet50 model.
-Trains ResNet50 for Tuberculosis (TB) and Lung Cancer detection.
+Training script for ResNet18 model.
+Trains ResNet18 for Tuberculosis (TB) and Lung Cancer detection.
 Uses TensorFlow for model training.
 """
 
@@ -11,7 +11,7 @@ import logging
 import warnings
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import argparse
 
 import numpy as np
@@ -20,22 +20,56 @@ import yaml
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, models, optimizers, callbacks
-from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import random
+import shutil
+import tempfile
 import mlflow
 import mlflow.tensorflow
 import keras_tuner as kt
+
+# Suppress TensorFlow retracing warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING
+warnings.filterwarnings('ignore', message='.*retracing.*')
+warnings.filterwarnings('ignore', message='.*tf.function.*')
+warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
 
 # Suppress Keras PyDataset warning
 warnings.filterwarnings('ignore', message='.*PyDataset.*super.*__init__.*')
 warnings.filterwarnings('ignore', category=UserWarning, module='keras.*py_dataset_adapter')
 
 # Configure logging
+# Set TensorFlow logger to ERROR level to suppress retracing warnings
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Import metrics tracking and visualization (after logger is configured)
+try:
+    from metrics_tracker import MetricsTracker, compute_comprehensive_metrics
+    from visualization import generate_training_report, generate_model_comparison_report, export_epoch_metrics_to_csv
+    METRICS_TRACKING_AVAILABLE = True
+except ImportError as e:
+    METRICS_TRACKING_AVAILABLE = False
+
+# Import lightweight metrics tracker for hyperparameter tuning
+try:
+    from lightweight_metrics_tracker import LightweightMetricsTracker
+    LIGHTWEIGHT_TRACKING_AVAILABLE = True
+except ImportError as e:
+    LIGHTWEIGHT_TRACKING_AVAILABLE = False
+    logger.warning(f"Metrics tracking module not available: {e}")
+
+# Import bias detection module (after logger is configured)
+try:
+    from bias_detection import BiasDetector
+    BIAS_DETECTION_AVAILABLE = True
+except ImportError:
+    BIAS_DETECTION_AVAILABLE = False
+    logger.warning("Bias detection module not available. Skipping bias analysis.")
 
 # Set random seeds for reproducibility
 tf.random.set_seed(42)
@@ -202,6 +236,78 @@ class DataLoader:
         logger.info(f"Found classes: {classes}")
         return classes
     
+    def _sample_files_from_directory(
+        self,
+        directory: Path,
+        percent_use: float,
+        seed: int
+    ) -> Path:
+        """
+        Sample a subset of files from a directory structure (with class subdirectories).
+        Creates a temporary directory with sampled files maintaining the same structure.
+        
+        Args:
+            directory: Source directory with class subdirectories
+            percent_use: Percentage of files to use (0.0 to 1.0)
+            seed: Random seed for reproducibility
+            
+        Returns:
+            Path to temporary directory with sampled files, or original directory if percent_use == 1.0
+        """
+        if percent_use >= 1.0:
+            return directory
+        
+        # Set random seed
+        random.seed(seed)
+        np.random.seed(seed)
+        
+        # Create temporary directory
+        temp_dir = Path(tempfile.mkdtemp(prefix="data_subset_"))
+        logger.info(f"Creating data subset ({percent_use*100:.1f}%) in temporary directory: {temp_dir}")
+        
+        # Get all class directories
+        class_dirs = [d for d in directory.iterdir() if d.is_dir()]
+        
+        total_files = 0
+        sampled_files = 0
+        
+        for class_dir in class_dirs:
+            # Get all image files in this class directory
+            image_files = list(class_dir.glob("*.jpg")) + list(class_dir.glob("*.png")) + \
+                         list(class_dir.glob("*.jpeg")) + list(class_dir.glob("*.JPG")) + \
+                         list(class_dir.glob("*.PNG"))
+            
+            if len(image_files) == 0:
+                continue
+            
+            total_files += len(image_files)
+            
+            # Sample files
+            num_samples = max(1, int(len(image_files) * percent_use))
+            sampled = random.sample(image_files, num_samples)
+            sampled_files += len(sampled)
+            
+            # Create class directory in temp location
+            temp_class_dir = temp_dir / class_dir.name
+            temp_class_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy sampled files (using symlinks for efficiency, fallback to copy)
+            for src_file in sampled:
+                dst_file = temp_class_dir / src_file.name
+                try:
+                    dst_file.symlink_to(src_file)
+                except (OSError, NotImplementedError):
+                    # Fallback to copy if symlinks not supported (Windows)
+                    shutil.copy2(src_file, dst_file)
+        
+        logger.info(f"Sampled {sampled_files}/{total_files} files ({sampled_files/total_files*100:.1f}%)")
+        
+        # Store temp directory for cleanup later
+        self._temp_dirs = getattr(self, '_temp_dirs', [])
+        self._temp_dirs.append(temp_dir)
+        
+        return temp_dir
+    
     def create_data_generators(
         self,
         batch_size: int = 32,
@@ -249,11 +355,30 @@ class DataLoader:
             validation_split=validation_split
         )
         
-        train_path = self.data_path / "train"
+        # Get data subset configuration
+        data_percent_use = 1.0
+        data_seed = 42
+        if self.config:
+            data_percent_use = self.config.get('training.data_percent_use', 1.0)
+            data_seed = self.config.get('training.data_seed', 42)
+        
+        # Sample data if needed
+        original_train_path = self.data_path / "train"
+        train_path = original_train_path
         test_path = self.data_path / "test"
         val_path = self.data_path / "valid" if (self.data_path / "valid").exists() else None
         
-        classes = self.get_classes()
+        if data_percent_use < 1.0:
+            logger.info(f"Using {data_percent_use*100:.1f}% of data (seed={data_seed})")
+            train_path = self._sample_files_from_directory(train_path, data_percent_use, data_seed)
+            test_path = self._sample_files_from_directory(test_path, data_percent_use, data_seed)
+            if val_path:
+                val_path = self._sample_files_from_directory(val_path, data_percent_use, data_seed)
+        
+        # Get classes from the (possibly sampled) train path
+        classes = [d.name for d in train_path.iterdir() if d.is_dir()]
+        classes.sort()
+        logger.info(f"Found classes: {classes}")
         num_classes = len(classes)
         
         # Training generator
@@ -322,23 +447,53 @@ class DataLoader:
         logger.info(f"Validation samples: {val_gen.samples}")
         logger.info(f"Test samples: {test_gen.samples}")
         
+        # Store sampled paths for bias detection
+        train_gen._sampled_path = train_path if data_percent_use < 1.0 else None
+        val_gen._sampled_path = val_path if (data_percent_use < 1.0 and val_path) else None
+        test_gen._sampled_path = test_path if data_percent_use < 1.0 else None
+        
         return train_gen, val_gen, test_gen
 
 
 class ModelBuilder:
-    """Build ResNet50 model architecture."""
+    """Build ResNet18 model architecture."""
     
     def __init__(self, config: ConfigLoader):
         """Initialize ModelBuilder with configuration."""
         self.config = config
     
-    def build_cnn_resnet50(
+    def _residual_block(self, x, filters, stride=1, downsample=False):
+        """Residual block for ResNet18."""
+        identity = x
+        
+        # First conv layer
+        x = layers.Conv2D(filters, kernel_size=3, strides=stride, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        
+        # Second conv layer
+        x = layers.Conv2D(filters, kernel_size=3, strides=1, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        
+        # Downsample identity if needed
+        if downsample:
+            identity = layers.Conv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias=False)(identity)
+            identity = layers.BatchNormalization()(identity)
+        
+        # Add skip connection
+        x = layers.Add()([x, identity])
+        x = layers.ReLU()(x)
+        
+        return x
+    
+    def build_cnn_resnet18(
         self,
         input_shape: Tuple[int, int, int],
         num_classes: int
     ) -> models.Model:
         """
-        Build CNN model based on ResNet50 with full training (no transfer learning).
+        Build CNN model based on ResNet18 with full training (no transfer learning).
+        ResNet18 has ~11.69M parameters.
         
         Args:
             input_shape: Input image shape (height, width, channels)
@@ -347,25 +502,41 @@ class ModelBuilder:
         Returns:
             Compiled Keras model
         """
-        resnet_config = self.config.get('models.resnet50', {})
-        weights = resnet_config.get('weights')
-        # If weights is None or empty string, don't use pre-trained weights
-        weights_param = weights if weights else None
+        resnet_config = self.config.get('models.resnet18', {})
         
-        base_model = ResNet50(
-            weights=weights_param,
-            include_top=resnet_config.get('include_top', False),
-            input_shape=input_shape
-        )
+        # Input layer
+        inputs = keras.Input(shape=input_shape)
         
-        # Set trainable based on config (default to True for full training)
-        base_model.trainable = resnet_config.get('trainable', True)
+        # Initial conv layer: 7x7, 64 filters, stride 2
+        x = layers.Conv2D(64, kernel_size=7, strides=2, padding='same', use_bias=False)(inputs)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        
+        # Max pooling: 3x3, stride 2
+        x = layers.MaxPooling2D(pool_size=3, strides=2, padding='same')(x)
+        
+        # Residual blocks
+        # Block 1: 2 layers, 64 filters
+        x = self._residual_block(x, filters=64, stride=1, downsample=False)
+        x = self._residual_block(x, filters=64, stride=1, downsample=False)
+        
+        # Block 2: 2 layers, 128 filters
+        x = self._residual_block(x, filters=128, stride=2, downsample=True)
+        x = self._residual_block(x, filters=128, stride=1, downsample=False)
+        
+        # Block 3: 2 layers, 256 filters
+        x = self._residual_block(x, filters=256, stride=2, downsample=True)
+        x = self._residual_block(x, filters=256, stride=1, downsample=False)
+        
+        # Block 4: 2 layers, 512 filters
+        x = self._residual_block(x, filters=512, stride=2, downsample=True)
+        x = self._residual_block(x, filters=512, stride=1, downsample=False)
+        
+        # Global average pooling
+        x = layers.GlobalAveragePooling2D()(x)
         
         # Add custom classification head
         head_config = resnet_config.get('head', {})
-        inputs = keras.Input(shape=input_shape)
-        x = base_model(inputs, training=True)  # Model is fully trainable
-        x = layers.GlobalAveragePooling2D()(x)
         x = layers.Dropout(head_config.get('dropout_1', 0.5))(x)
         x = layers.Dense(head_config.get('dense_1', 512), activation=head_config.get('activation', 'relu'))(x)
         x = layers.Dropout(head_config.get('dropout_2', 0.3))(x)
@@ -457,6 +628,7 @@ class ModelTrainer:
         early_stopping = callbacks.EarlyStopping(
             monitor=early_stop_config.get('monitor', 'val_accuracy'),
             patience=early_stopping_patience,
+            min_delta=early_stop_config.get('min_delta', 0.0),
             restore_best_weights=early_stop_config.get('restore_best_weights', True),
             verbose=early_stop_config.get('verbose', 1)
         )
@@ -489,10 +661,15 @@ class ModelTrainer:
         elif hasattr(val_gen, 'samples') and val_gen.samples > 0:
             validation_steps = (val_gen.samples + val_gen.batch_size - 1) // val_gen.batch_size
         
+        # Prepare callbacks
+        callback_list = [model_checkpoint, early_stopping, reduce_lr, csv_logger]
+        if additional_callbacks:
+            callback_list.extend(additional_callbacks)
+        
         fit_kwargs = {
             'epochs': epochs,
             'validation_data': val_gen,
-            'callbacks': [model_checkpoint, early_stopping, reduce_lr, csv_logger],
+            'callbacks': callback_list,
             'verbose': 1
         }
         
@@ -554,22 +731,48 @@ class ModelTrainer:
 class HyperparameterTuner:
     """Hyperparameter tuning using KerasTuner."""
     
-    def __init__(self, config: ConfigLoader, model_builder: 'ModelBuilder'):
+    def __init__(self, config: ConfigLoader, model_builder: 'ModelBuilder', dataset_name: str = None):
         """
         Initialize HyperparameterTuner.
         
         Args:
             config: ConfigLoader instance
             model_builder: ModelBuilder instance
+            dataset_name: Name of the dataset (for project name isolation)
         """
         self.config = config
         self.model_builder = model_builder
         self.tuning_config = config.get('hyperparameter_tuning', {})
+        self.dataset_name = dataset_name or 'default'
     
-    def _build_tunable_resnet50(self, hp, input_shape: Tuple[int, int, int], num_classes: int) -> models.Model:
-        """Build tunable ResNet50 model."""
+    def _residual_block_tunable(self, x, filters, stride=1, downsample=False):
+        """Residual block for ResNet18 (for tunable model)."""
+        identity = x
+        
+        # First conv layer
+        x = layers.Conv2D(filters, kernel_size=3, strides=stride, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        
+        # Second conv layer
+        x = layers.Conv2D(filters, kernel_size=3, strides=1, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        
+        # Downsample identity if needed
+        if downsample:
+            identity = layers.Conv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias=False)(identity)
+            identity = layers.BatchNormalization()(identity)
+        
+        # Add skip connection
+        x = layers.Add()([x, identity])
+        x = layers.ReLU()(x)
+        
+        return x
+    
+    def _build_tunable_resnet18(self, hp, input_shape: Tuple[int, int, int], num_classes: int) -> models.Model:
+        """Build tunable ResNet18 model."""
         search_space = self.tuning_config.get('search_space', {})
-        resnet_space = search_space.get('resnet50', {})
+        resnet_space = search_space.get('resnet18', {})
         common_space = search_space
         
         # Get hyperparameters
@@ -599,18 +802,31 @@ class HyperparameterTuner:
             step=resnet_space.get('dropout_2', {}).get('step', 0.1)
         )
         
-        # Build model
-        resnet_config = self.config.get('models.resnet50', {})
-        base_model = ResNet50(
-            weights=None,
-            include_top=resnet_config.get('include_top', False),
-            input_shape=input_shape
-        )
-        base_model.trainable = True
-        
+        # Build ResNet18 architecture
         inputs = keras.Input(shape=input_shape)
-        x = base_model(inputs, training=True)
+        
+        # Initial conv layer: 7x7, 64 filters, stride 2
+        x = layers.Conv2D(64, kernel_size=7, strides=2, padding='same', use_bias=False)(inputs)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        
+        # Max pooling: 3x3, stride 2
+        x = layers.MaxPooling2D(pool_size=3, strides=2, padding='same')(x)
+        
+        # Residual blocks
+        x = self._residual_block_tunable(x, filters=64, stride=1, downsample=False)
+        x = self._residual_block_tunable(x, filters=64, stride=1, downsample=False)
+        x = self._residual_block_tunable(x, filters=128, stride=2, downsample=True)
+        x = self._residual_block_tunable(x, filters=128, stride=1, downsample=False)
+        x = self._residual_block_tunable(x, filters=256, stride=2, downsample=True)
+        x = self._residual_block_tunable(x, filters=256, stride=1, downsample=False)
+        x = self._residual_block_tunable(x, filters=512, stride=2, downsample=True)
+        x = self._residual_block_tunable(x, filters=512, stride=1, downsample=False)
+        
+        # Global average pooling
         x = layers.GlobalAveragePooling2D()(x)
+        
+        # Classification head with tunable hyperparameters
         x = layers.Dropout(dropout_1)(x)
         x = layers.Dense(dense_units, activation='relu')(x)
         x = layers.Dropout(dropout_2)(x)
@@ -633,10 +849,11 @@ class HyperparameterTuner:
         train_gen: ImageDataGenerator,
         val_gen: ImageDataGenerator,
         epochs: int,
-        output_dir: Path
+        output_dir: Path,
+        metrics_tracker: Optional[Any] = None
     ) -> models.Model:
         """
-        Tune hyperparameters for ResNet50 model.
+        Tune hyperparameters for ResNet18 model.
         
         Args:
             model_name: Name of the model to tune
@@ -656,10 +873,12 @@ class HyperparameterTuner:
         objective = self.tuning_config.get('objective', 'val_accuracy')
         direction = self.tuning_config.get('direction', 'max')
         directory = Path(self.tuning_config.get('directory', '../data/hyperparameter_tuning'))
-        project_name = f"{self.tuning_config.get('project_name', 'vision_model_tuning')}_{model_name}"
+        # Include dataset name in project name to avoid conflicts between datasets
+        dataset_name = getattr(self, 'dataset_name', 'default')
+        project_name = f"{self.tuning_config.get('project_name', 'vision_model_tuning')}_{model_name}_{dataset_name}"
         
         # Create tuner
-        model_builder_fn = lambda hp: self._build_tunable_resnet50(hp, input_shape, num_classes)
+        model_builder_fn = lambda hp: self._build_tunable_resnet18(hp, input_shape, num_classes)
         
         if tuner_type == 'random':
             tuner = kt.RandomSearch(
@@ -690,14 +909,43 @@ class HyperparameterTuner:
         else:
             raise ValueError(f"Unknown tuner type: {tuner_type}")
         
+        # Create callbacks for hyperparameter tuning (early stopping to save time)
+        early_stop_config = self.config.get('callbacks.early_stopping', {})
+        reduce_lr_config = self.config.get('callbacks.reduce_lr', {})
+        
+        tuning_callbacks = [
+            callbacks.EarlyStopping(
+                monitor=early_stop_config.get('monitor', 'val_accuracy'),
+                patience=early_stop_config.get('patience', 10),
+                min_delta=early_stop_config.get('min_delta', 0.0),
+                restore_best_weights=early_stop_config.get('restore_best_weights', True),
+                verbose=early_stop_config.get('verbose', 1)
+            ),
+            callbacks.ReduceLROnPlateau(
+                monitor=reduce_lr_config.get('monitor', 'val_loss'),
+                factor=reduce_lr_config.get('factor', 0.5),
+                patience=reduce_lr_config.get('patience', 5),
+                min_lr=reduce_lr_config.get('min_lr', 1e-7),
+                verbose=reduce_lr_config.get('verbose', 1)
+            )
+        ]
+        
+        # Add lightweight metrics tracker to callbacks if provided
+        # (LightweightMetricsTracker is deep-copyable, unlike MetricsTracker)
+        if metrics_tracker:
+            tuning_callbacks.append(metrics_tracker)
+            logger.info("Lightweight metrics tracker added to hyperparameter tuning callbacks")
+        
         # Run hyperparameter search
         logger.info(f"Starting hyperparameter tuning for {model_name}...")
         logger.info(f"Tuner type: {tuner_type}, Max trials: {max_trials}")
+        logger.info(f"Early stopping enabled during tuning (patience: {early_stop_config.get('patience', 10)})")
         
         tuner.search(
             train_gen,
             epochs=epochs,
             validation_data=val_gen,
+            callbacks=tuning_callbacks,
             verbose=1
         )
         
@@ -708,6 +956,18 @@ class HyperparameterTuner:
         logger.info(f"Best hyperparameters for {model_name}:")
         for param, value in best_hps.values.items():
             logger.info(f"  {param}: {value}")
+        
+        # Print model parameters after tuning
+        total_params = best_model.count_params()
+        trainable_params = sum([tf.keras.backend.count_params(w) for w in best_model.trainable_weights])
+        non_trainable_params = total_params - trainable_params
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Model Parameters Summary for {model_name} (After Tuning)")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total parameters: {total_params:,}")
+        logger.info(f"Trainable parameters: {trainable_params:,}")
+        logger.info(f"Non-trainable parameters: {non_trainable_params:,}")
+        logger.info(f"{'='*60}\n")
         
         # Save best hyperparameters
         best_hps_file = output_dir / f"{model_name}_best_hyperparameters.json"
@@ -728,7 +988,7 @@ def train_dataset(
     dry_run: bool = False
 ):
     """
-    Train ResNet50 model for a specific dataset.
+    Train ResNet18 model for a specific dataset.
     
     Args:
         dataset_name: Name of dataset ('tb' or 'lung_cancer_ct_scan')
@@ -745,7 +1005,7 @@ def train_dataset(
         logger.info("DRY RUN MODE: Using only 64 images for quick testing")
         logger.info("="*60)
     
-    logger.info(f"Starting ResNet50 training for {dataset_name} dataset")
+    logger.info(f"Starting ResNet18 training for {dataset_name} dataset")
     
     # Get training config
     training_config = config.get('training', {})
@@ -782,6 +1042,8 @@ def train_dataset(
     
     # Load data
     data_loader = DataLoader(base_data_path, dataset_name, config)
+    # data_loader.data_path is already the latest day directory
+    latest_day = data_loader.data_path
     max_samples = 64 if dry_run else None
     train_gen, val_gen, test_gen = data_loader.create_data_generators(
         batch_size=batch_size,
@@ -789,24 +1051,74 @@ def train_dataset(
         max_samples=max_samples
     )
     
-    # Get number of classes
-    num_classes = len(data_loader.get_classes())
+    # Get number of classes and class names
+    class_names = data_loader.get_classes()
+    num_classes = len(class_names)
     input_shape = (*image_size, 3)
     
     # Initialize MLflow
-    mlflow.set_experiment(f"{dataset_name}_resnet50_training")
+    mlflow.set_experiment(f"{dataset_name}_resnet18_training")
     
     # Check if hyperparameter tuning is enabled
     tuning_enabled = config.get('hyperparameter_tuning.enabled', False)
     
     # Build model
     model_builder = ModelBuilder(config)
-    hyperparameter_tuner = HyperparameterTuner(config, model_builder) if tuning_enabled else None
+    hyperparameter_tuner = HyperparameterTuner(config, model_builder, dataset_name) if tuning_enabled else None
     
-    model_name = 'CNN_ResNet50'
+    model_name = 'CNN_ResNet18'
     
     if tuning_enabled:
-        logger.info("Hyperparameter tuning is enabled. Tuning ResNet50...")
+        logger.info("Hyperparameter tuning is enabled. Tuning ResNet18...")
+        
+        # Use lightweight metrics tracker for hyperparameter tuning
+        # (doesn't store non-picklable objects, making it compatible with KerasTuner)
+        lightweight_tracker = None
+        if LIGHTWEIGHT_TRACKING_AVAILABLE:
+            # Determine validation data path and whether it's a subset of training
+            val_data_path = None
+            use_validation_subset = False
+            validation_split = config.get('training.validation_split', 0.2) if config else 0.2
+            
+            # Check if validation generator uses subset (no separate val folder)
+            if hasattr(val_gen, 'subset') and val_gen.subset == 'validation':
+                # Validation is a subset of training data
+                use_validation_subset = True
+                # Use train path (which might be sampled)
+                if hasattr(train_gen, '_sampled_path') and train_gen._sampled_path:
+                    val_data_path = Path(train_gen._sampled_path)
+                elif hasattr(train_gen, 'directory'):
+                    val_data_path = Path(train_gen.directory)
+                else:
+                    val_data_path = data_loader.data_path / "train"
+            else:
+                # Validation is in a separate directory
+                # First, check if using sampled data (temporary directory)
+                if hasattr(val_gen, '_sampled_path') and val_gen._sampled_path:
+                    val_data_path = Path(val_gen._sampled_path)
+                elif hasattr(val_gen, 'directory'):
+                    val_data_path = Path(val_gen.directory)
+                else:
+                    # Try original data paths
+                    val_data_path = data_loader.data_path / "valid"
+                    if not val_data_path.exists():
+                        val_data_path = data_loader.data_path / "val"
+            
+            if val_data_path and val_data_path.exists():
+                lightweight_tracker = LightweightMetricsTracker(
+                    val_data_path=str(val_data_path),
+                    class_names=class_names,
+                    output_file=metadata_dir / f"{model_name}_epoch_metrics.json",
+                    num_classes=num_classes,
+                    use_validation_subset=use_validation_subset,
+                    validation_split=validation_split
+                )
+                logger.info(f"Using LightweightMetricsTracker for hyperparameter tuning (validation path: {val_data_path}, subset: {use_validation_subset})")
+            else:
+                logger.warning(f"Validation data path not found: {val_data_path}. Skipping lightweight metrics tracking.")
+        else:
+            logger.info("LightweightMetricsTracker not available. Epoch metrics will not be collected during tuning.")
+        
         model = hyperparameter_tuner.tune_model(
             model_name=model_name,
             input_shape=input_shape,
@@ -814,17 +1126,65 @@ def train_dataset(
             train_gen=train_gen,
             val_gen=val_gen,
             epochs=epochs,
-            output_dir=metadata_dir
+            output_dir=metadata_dir,
+            metrics_tracker=lightweight_tracker  # Use lightweight tracker
         )
         tuned = True
+        
+        # Always load epoch metrics from file (which accumulates all trials)
+        # The lightweight tracker saves metrics incrementally, so the file has all trials
+        epoch_metrics_file = metadata_dir / f"{model_name}_epoch_metrics.json"
+        epoch_metrics = []
+        if epoch_metrics_file.exists():
+            try:
+                with open(epoch_metrics_file, 'r') as f:
+                    metrics_data = json.load(f)
+                    epoch_metrics = metrics_data.get('epoch_metrics', [])
+                    if epoch_metrics:
+                        # Count unique trials
+                        unique_trials = set(m.get('trial', 1) for m in epoch_metrics)
+                        logger.info(f"Loaded {len(epoch_metrics)} epoch metrics from {len(unique_trials)} trials")
+                    else:
+                        logger.warning("Epoch metrics file exists but is empty")
+            except Exception as e:
+                logger.warning(f"Could not load epoch metrics from file: {e}")
+        else:
+            # Fallback: try to get from tracker if file doesn't exist yet
+            if lightweight_tracker and lightweight_tracker.epoch_metrics:
+                epoch_metrics = lightweight_tracker.epoch_metrics
+                logger.info(f"Collected {len(epoch_metrics)} epoch metrics from current trial (file not found)")
+        
+        # End any active MLflow run that might have been created during tuning
+        try:
+            mlflow.end_run()
+        except:
+            pass
     else:
-        model = model_builder.build_cnn_resnet50(input_shape, num_classes)
+        model = model_builder.build_cnn_resnet18(input_shape, num_classes)
         tuned = False
+    
+    # Print model parameters before training (for both tuned and non-tuned models)
+    total_params = model.count_params()
+    trainable_params = sum([tf.keras.backend.count_params(w) for w in model.trainable_weights])
+    non_trainable_params = total_params - trainable_params
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Model Parameters Summary for {model_name}")
+    logger.info(f"{'='*60}")
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"Non-trainable parameters: {non_trainable_params:,}")
+    logger.info(f"{'='*60}\n")
     
     # Train and evaluate model
     logger.info(f"\n{'='*60}")
     logger.info(f"Training {model_name}")
     logger.info(f"{'='*60}\n")
+    
+    # Ensure no active run before starting a new one
+    try:
+        mlflow.end_run()
+    except:
+        pass
     
     with mlflow.start_run(run_name=f"{dataset_name}_{model_name}"):
         # Log parameters
@@ -846,6 +1206,19 @@ def train_dataset(
             config=config
         )
         
+        # Initialize metrics tracker if available (only if not already created for tuning)
+        metrics_tracker = None
+        epoch_metrics = []
+        if METRICS_TRACKING_AVAILABLE and not tuned:
+            metrics_tracker = MetricsTracker(
+                val_generator=val_gen,
+                class_names=class_names,
+                output_dir=metadata_dir,
+                model_name=model_name,
+                dataset_name=dataset_name,
+                model=model  # Pass model reference for hyperparameter tracking
+            )
+        
         # Train model (skip if already trained during hyperparameter tuning)
         if tuned:
             logger.info(f"{model_name} was already trained during hyperparameter tuning. Skipping additional training.")
@@ -855,21 +1228,211 @@ def train_dataset(
                 'val_loss': [0.0],
                 'val_accuracy': [0.0]
             }
+            # Try to load epoch metrics if available
+            epoch_metrics_file = metadata_dir / f"{model_name}_epoch_metrics.json"
+            if epoch_metrics_file.exists():
+                try:
+                    with open(epoch_metrics_file, 'r') as f:
+                        metrics_data = json.load(f)
+                        epoch_metrics = metrics_data.get('epoch_metrics', [])
+                except Exception as e:
+                    logger.warning(f"Could not load epoch metrics: {e}")
         else:
             # Train model
             # For dry run, limit epochs to 2 for quick testing
             training_epochs = 2 if dry_run else epochs
             if dry_run:
                 logger.info(f"DRY RUN: Limiting training to {training_epochs} epochs")
-            history = trainer.train(train_gen, val_gen, epochs=training_epochs)
+            
+            # Add metrics tracker to callbacks if available
+            if metrics_tracker:
+                history = trainer.train(
+                    train_gen, val_gen, epochs=training_epochs,
+                    additional_callbacks=[metrics_tracker]
+                )
+            else:
+                history = trainer.train(train_gen, val_gen, epochs=training_epochs)
+            
+            # Load epoch metrics if metrics tracker was used
+            if metrics_tracker:
+                epoch_metrics = metrics_tracker.epoch_metrics
+                # Also try to load from file
+                epoch_metrics_file = metadata_dir / f"{model_name}_epoch_metrics.json"
+                if epoch_metrics_file.exists():
+                    try:
+                        with open(epoch_metrics_file, 'r') as f:
+                            metrics_data = json.load(f)
+                            epoch_metrics = metrics_data.get('epoch_metrics', [])
+                    except Exception as e:
+                        logger.warning(f"Could not load epoch metrics from file: {e}")
         
-        # Evaluate model
-        metrics = trainer.evaluate(test_gen)
+        # Evaluate model with comprehensive metrics
+        if METRICS_TRACKING_AVAILABLE:
+            logger.info("Computing comprehensive test metrics...")
+            comprehensive_metrics = compute_comprehensive_metrics(
+                trainer.model,
+                test_gen,
+                class_names
+            )
+            # Merge with basic metrics
+            basic_metrics = trainer.evaluate(test_gen)
+            metrics = {**basic_metrics, **comprehensive_metrics}
+        else:
+            metrics = trainer.evaluate(test_gen)
         
-        # Log metrics
+        # Log metrics (only scalar values, skip lists and dicts)
         for key, value in metrics.items():
             if value is not None:
-                mlflow.log_metric(key, value)
+                # Skip non-scalar metrics (lists, dicts, etc.) - these are saved in JSON/HTML reports
+                if isinstance(value, (list, dict)):
+                    continue
+                # Only log scalar metrics to MLflow
+                try:
+                    mlflow.log_metric(key, float(value))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not log metric {key}: {e}")
+        
+        # Bias Detection
+        bias_config = config.get('bias_detection', {})
+        if bias_config.get('enabled', False) and BIAS_DETECTION_AVAILABLE:
+            logger.info("\n" + "="*60)
+            logger.info("Running Bias Detection Analysis...")
+            logger.info("="*60)
+            
+            try:
+                # Get data path for bias detection
+                # For sampled data, we need to pass both:
+                # 1. The sampled test directory (for loading images)
+                # 2. The original data path (for loading metadata)
+                if hasattr(test_gen, '_sampled_path') and test_gen._sampled_path:
+                    # The sampled path is the test directory itself
+                    sampled_test_path = test_gen._sampled_path
+                    # Original data path for metadata lookup (latest_day is already the full path)
+                    original_data_path = latest_day
+                    logger.info(f"Using sampled test directory for images: {sampled_test_path}")
+                    logger.info(f"Using original data path for metadata: {original_data_path}")
+                else:
+                    # Use original data path for both images and metadata (latest_day is already the full path)
+                    sampled_test_path = None
+                    original_data_path = latest_day
+                    logger.info(f"Using original data path for bias detection: {original_data_path}")
+                
+                # Create bias detector
+                # Pass sampled test path if available, otherwise use original data path
+                bias_detector = BiasDetector(
+                    model=trainer.model,
+                    data_path=sampled_test_path if sampled_test_path else original_data_path,
+                    dataset_name=dataset_name,
+                    output_dir=metadata_dir / "bias_reports",
+                    config=config.config,
+                    metadata_path=original_data_path  # Always use original path for metadata
+                )
+                
+                # Run bias detection (and mitigation if enabled) on test set
+                max_samples = 64 if dry_run else None
+                mitigation_enabled = bias_config.get('mitigation_enabled', False)
+                
+                logger.info(f"Bias detection enabled: {bias_config.get('enabled', False)}")
+                logger.info(f"Bias mitigation enabled: {mitigation_enabled}")
+                
+                if mitigation_enabled:
+                    logger.info("Running bias detection with mitigation enabled...")
+                    bias_results = bias_detector.detect_and_mitigate_bias(
+                        split='test',
+                        max_samples=max_samples,
+                        apply_mitigation=True
+                    )
+                    # Extract original results for logging (mitigation results are separate)
+                    if 'original_results' in bias_results:
+                        bias_results_for_logging = bias_results.get('original_results', {})
+                        if 'mitigated_results' in bias_results:
+                            logger.info("Bias mitigation completed. Check comparison report for details.")
+                        else:
+                            logger.warning("Bias mitigation was attempted but no mitigated results were generated.")
+                            if 'error' in bias_results:
+                                logger.error(f"Mitigation error: {bias_results.get('error')}")
+                    else:
+                        bias_results_for_logging = bias_results
+                else:
+                    logger.info("Running bias detection only (mitigation disabled)...")
+                    bias_results = bias_detector.detect_bias(
+                        split='test',
+                        max_samples=max_samples
+                    )
+                    bias_results_for_logging = bias_results
+                
+                # Log bias metrics to MLflow
+                if bias_results_for_logging and 'overall_performance' in bias_results_for_logging:
+                    mlflow.log_metric("bias_detected", 1 if bias_results_for_logging.get('bias_detected', False) else 0)
+                    
+                    # Log slice performance differences and fairness metrics (Fairlearn-based)
+                    for feature, feature_data in bias_results_for_logging.get('slices', {}).items():
+                        # Get group metrics (Fairlearn structure)
+                        group_metrics = feature_data.get('group_metrics', {})
+                        fairness_metrics = feature_data.get('fairness_metrics', {})
+                        
+                        if len(group_metrics) >= 2:
+                            # Log performance differences
+                            accuracies = [m['accuracy'] for m in group_metrics.values()]
+                            perf_diff = max(accuracies) - min(accuracies)
+                            mlflow.log_metric(f"bias_performance_diff_{feature}", perf_diff)
+                            
+                            # Log Fairlearn fairness metrics
+                            if 'demographic_parity_difference' in fairness_metrics:
+                                mlflow.log_metric(f"bias_dp_diff_{feature}", 
+                                                 abs(fairness_metrics['demographic_parity_difference']))
+                            if 'demographic_parity_ratio' in fairness_metrics:
+                                mlflow.log_metric(f"bias_dp_ratio_{feature}", 
+                                                 fairness_metrics['demographic_parity_ratio'])
+                            if 'equalized_odds_difference' in fairness_metrics:
+                                mlflow.log_metric(f"bias_eo_diff_{feature}", 
+                                                 abs(fairness_metrics['equalized_odds_difference']))
+                            if 'equalized_odds_ratio' in fairness_metrics:
+                                mlflow.log_metric(f"bias_eo_ratio_{feature}", 
+                                                 fairness_metrics['equalized_odds_ratio'])
+                
+                # If mitigation was applied, also log mitigated results
+                if mitigation_enabled and isinstance(bias_results, dict) and 'mitigated_results' in bias_results:
+                    mlflow.log_metric("bias_mitigation_applied", 1)
+                    mitigated_results = bias_results.get('mitigated_results', {})
+                    if 'overall_performance' in mitigated_results:
+                        mlflow.log_metric("bias_mitigated_accuracy", 
+                                         mitigated_results['overall_performance'].get('accuracy', 0))
+                        mlflow.log_metric("bias_mitigated_bias_detected", 
+                                         1 if mitigated_results.get('bias_detected', False) else 0)
+                
+                # Log bias report as artifact (look in dataset-specific subdirectory)
+                bias_reports_dir = metadata_dir / "bias_reports" / dataset_name
+                if bias_reports_dir.exists():
+                    bias_report_files = list(bias_reports_dir.glob(f"bias_report_{dataset_name}_*.json"))
+                    if bias_report_files:
+                        mlflow.log_artifact(str(bias_report_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    bias_html_files = list(bias_reports_dir.glob(f"bias_report_{dataset_name}_*.html"))
+                    if bias_html_files:
+                        mlflow.log_artifact(str(bias_html_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    # Log mitigation comparison report if available
+                    if mitigation_enabled:
+                        comparison_files = list(bias_reports_dir.glob(f"bias_mitigation_comparison_*.html"))
+                        if comparison_files:
+                            mlflow.log_artifact(str(comparison_files[-1]), f"bias_reports/{dataset_name}")
+                else:
+                    # Fallback to old location (for backwards compatibility)
+                    bias_report_files = list((metadata_dir / "bias_reports").glob(f"bias_report_{dataset_name}_*.json"))
+                    if bias_report_files:
+                        mlflow.log_artifact(str(bias_report_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    bias_html_files = list((metadata_dir / "bias_reports").glob(f"bias_report_{dataset_name}_*.html"))
+                    if bias_html_files:
+                        mlflow.log_artifact(str(bias_html_files[-1]), f"bias_reports/{dataset_name}")
+                
+                logger.info("Bias detection completed successfully.")
+                
+            except Exception as e:
+                logger.error(f"Error during bias detection: {e}", exc_info=True)
+        elif bias_config.get('enabled', False) and not BIAS_DETECTION_AVAILABLE:
+            logger.warning("Bias detection is enabled but module is not available.")
         
         # Log training history
         for epoch, (loss, acc, val_loss, val_acc) in enumerate(
@@ -880,6 +1443,26 @@ def train_dataset(
             mlflow.log_metric("train_accuracy", acc, step=epoch)
             mlflow.log_metric("val_loss", val_loss, step=epoch)
             mlflow.log_metric("val_accuracy", val_acc, step=epoch)
+        
+        # Log epoch-by-epoch comprehensive metrics if available
+        if epoch_metrics:
+            for epoch_metric in epoch_metrics:
+                epoch_num = epoch_metric.get('epoch', 0)
+                if epoch_num > 0:
+                    mlflow.log_metric("val_precision", epoch_metric.get('precision', 0), step=epoch_num)
+                    mlflow.log_metric("val_recall", epoch_metric.get('recall', 0), step=epoch_num)
+                    mlflow.log_metric("val_f1_score", epoch_metric.get('f1_score', 0), step=epoch_num)
+                    mlflow.log_metric("val_auc", epoch_metric.get('auc', 0), step=epoch_num)
+        
+        # Log comprehensive test metrics
+        if 'precision' in metrics:
+            mlflow.log_metric("test_precision", metrics.get('precision', 0))
+        if 'recall' in metrics:
+            mlflow.log_metric("test_recall", metrics.get('recall', 0))
+        if 'f1_score' in metrics:
+            mlflow.log_metric("test_f1_score", metrics.get('f1_score', 0))
+        if 'auc' in metrics:
+            mlflow.log_metric("test_auc", metrics.get('auc', 0))
         
         # Save model
         trainer.save_model()
@@ -894,6 +1477,86 @@ def train_dataset(
             input_example=input_example
         )
     
+    # Get hyperparameters for visualization
+    hyperparameters = {}
+    if tuned and hyperparameter_tuner:
+        # Try to get best hyperparameters from tuner
+        try:
+            best_hps = hyperparameter_tuner.tuner.get_best_hyperparameters()[0]
+            hyperparameters = {k: v for k, v in best_hps.values.items()}
+        except:
+            pass
+    
+    # Generate training report with visualizations
+    if METRICS_TRACKING_AVAILABLE:
+        try:
+            report_path = metadata_dir / f"{model_name}_training_report.html"
+            generate_training_report(
+                model_name=model_name,
+                dataset_name=dataset_name,
+                epoch_metrics=epoch_metrics,
+                test_metrics=metrics,
+                class_names=class_names,
+                hyperparameters=hyperparameters if hyperparameters else None,
+                output_path=report_path
+            )
+            # Log report to MLflow
+            mlflow.log_artifact(str(report_path), "reports")
+            logger.info(f"Training report saved to {report_path}")
+            
+            # Export epoch metrics to CSV (always generate)
+            csv_path = metadata_dir / f"{model_name}_epoch_metrics.csv"
+            try:
+                if epoch_metrics:
+                    export_epoch_metrics_to_csv(
+                        epoch_metrics=epoch_metrics,
+                        class_names=class_names,
+                        output_path=csv_path
+                    )
+                    logger.info(f"Epoch metrics CSV saved to {csv_path} ({len(epoch_metrics)} epochs)")
+                else:
+                    # Generate CSV with test metrics only if no epoch metrics available
+                    logger.warning("No epoch metrics available. Generating CSV with test metrics only.")
+                    # Create a single-row CSV with test metrics
+                    test_metrics_row = {
+                        'trial': 1,  # Default trial for non-tuning runs
+                        'epoch': 'test',
+                        'train_loss': 0.0,
+                        'train_accuracy': 0.0,
+                        'val_loss': 0.0,
+                        'val_accuracy': 0.0,
+                        'precision': metrics.get('precision', 0),
+                        'recall': metrics.get('recall', 0),
+                        'f1_score': metrics.get('f1_score', 0),
+                        'accuracy': metrics.get('accuracy', 0),
+                        'auc': metrics.get('auc', 0)
+                    }
+                    
+                    # Add per-class metrics
+                    per_class_precision = metrics.get('per_class_precision', [])
+                    per_class_recall = metrics.get('per_class_recall', [])
+                    per_class_f1 = metrics.get('per_class_f1', [])
+                    per_class_support = metrics.get('per_class_support', [])
+                    
+                    for i, class_name in enumerate(class_names):
+                        test_metrics_row[f'{class_name}_precision'] = per_class_precision[i] if i < len(per_class_precision) else 0.0
+                        test_metrics_row[f'{class_name}_recall'] = per_class_recall[i] if i < len(per_class_recall) else 0.0
+                        test_metrics_row[f'{class_name}_f1_score'] = per_class_f1[i] if i < len(per_class_f1) else 0.0
+                        test_metrics_row[f'{class_name}_support'] = int(per_class_support[i]) if i < len(per_class_support) else 0
+                    
+                    # Save to CSV
+                    import pandas as pd
+                    df = pd.DataFrame([test_metrics_row])
+                    df.to_csv(csv_path, index=False)
+                    logger.info(f"Test metrics CSV saved to {csv_path}")
+                
+                # Log CSV to MLflow
+                mlflow.log_artifact(str(csv_path), "reports")
+            except Exception as e:
+                logger.error(f"Error generating CSV: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Error generating training report: {e}", exc_info=True)
+    
     # Save metadata
     model_info = {
         'model': model_name,
@@ -907,7 +1570,10 @@ def train_dataset(
         'train_samples': train_gen.samples,
         'val_samples': val_gen.samples,
         'test_samples': test_gen.samples,
-        'hyperparameter_tuning': tuning_enabled
+        'hyperparameter_tuning': tuning_enabled,
+        'hyperparameters': hyperparameters if hyperparameters else None,
+        'class_names': class_names,
+        'epoch_metrics_available': len(epoch_metrics) > 0
     }
     
     # Write metadata
@@ -929,26 +1595,16 @@ def train_dataset(
     logger.info(f"Training summary saved to {summary_file}")
     
     logger.info(f"\n{'='*60}")
-    logger.info(f"ResNet50 training completed for {dataset_name}")
+    logger.info(f"ResNet18 training completed for {dataset_name}")
     logger.info(f"Test Accuracy: {metrics['test_accuracy']:.4f}")
     logger.info(f"Model saved to: {model_path}")
     logger.info(f"Metadata saved to: {metadata_dir}")
     logger.info(f"{'='*60}\n")
 
-    return {
-        'model_path': str(model_path),
-        'model_name': model_name,
-        'dataset_name': dataset_name,
-        'test_accuracy': metrics['test_accuracy'],
-        'test_loss': metrics['test_loss'],
-        'metadata_file': str(summary_file),
-        'metadata': model_info,
-        'dry_run': dry_run
-    }
 
 def main():
     """Main training function."""
-    parser = argparse.ArgumentParser(description='Train ResNet50 model for medical image classification')
+    parser = argparse.ArgumentParser(description='Train ResNet18 model for medical image classification')
     parser.add_argument(
         '--config',
         type=str,
@@ -1013,10 +1669,9 @@ def main():
     datasets = args.datasets or config.get('training.datasets', ['tb', 'lung_cancer_ct_scan'])
     
     # Train models for each dataset
-    results = []
     for dataset_name in datasets:
         try:
-            result = train_dataset(
+            train_dataset(
                 dataset_name=dataset_name,
                 base_data_path=data_path,
                 output_base_path=output_path,
@@ -1026,19 +1681,11 @@ def main():
                 image_size=image_size,
                 dry_run=args.dry_run
             )
-            results.append(result)
         except Exception as e:
             logger.error(f"Error training {dataset_name}: {e}", exc_info=True)
             continue
     
-    logger.info("ResNet50 training completed!")
-    
-    # ADDED: Save deployment-ready info
-    if results and not args.dry_run:
-        deployment_info_path = Path(output_path) / "deployment_info.json"
-        with open(deployment_info_path, 'w') as f:
-            json.dump(results, f, indent=2)
-        logger.info(f"Deployment info saved to {deployment_info_path}")
+    logger.info("ResNet18 training completed!")
 
 
 if __name__ == "__main__":

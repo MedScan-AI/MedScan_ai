@@ -1,22 +1,23 @@
 # TensorFlow packages
-tensorflow>=2.13.0
-keras-tuner>=1.4.0
+tensorflow
+keras-tuner  # For hyperparameter tuning
 
-# Core dependencies
-numpy>=1.24.0
-pandas>=2.0.0
-Pillow>=10.0.0
-pyyaml>=6.0
+# Core dependencies (order matters - numpy must be first)
+numpy
+pandas
+Pillow
+pyyaml  # For config file loading
 
 # MLflow for experiment tracking
-mlflow>=2.10.0
-
-# Google Cloud (ADDED)
-google-cloud-aiplatform>=1.38.0
-google-cloud-storage>=2.10.0
-google-cloud-monitoring>=2.15.0
+mlflow
+mlflow[tensorflow]
 
 # Additional utilities
-scikit-learn>=1.3.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
+scikit-learn
+matplotlib>=3.5.0
+seaborn>=0.12.0  # Pin to newer version that has pre-built wheels
+
+# Bias detection and fairness
+# Fairlearn for fairness assessment and bias detection
+fairlearn
+

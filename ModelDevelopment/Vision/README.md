@@ -8,13 +8,13 @@ This directory contains the training pipeline for medical image classification m
 
 ## Model Architectures
 
-The training script implements and compares three different model architectures with similar parameter counts (~22-25M parameters):
+The training script implements and compares three different model architectures with similar parameter counts (~11.69M parameters):
 
-1. **CNN_ResNet50**: ResNet50 architecture trained from scratch (no pre-trained weights, ~25M parameters) with custom classification head
-2. **CNN_Custom**: Custom convolutional neural network with 4 convolutional blocks
-3. **ViT**: Vision Transformer using ViT-Small/16 configuration (~22M parameters) - standard architecture matching ResNet50's size
+1. **CNN_ResNet18**: ResNet18 architecture trained from scratch (no pre-trained weights, ~11.69M parameters) with custom classification head
+2. **CNN_Custom**: Custom convolutional neural network with 4 convolutional blocks (~11.69M parameters)
+3. **ViT**: Vision Transformer configuration (~11.69M parameters) - adjusted to match ResNet18's size
 
-All models use standard, well-known architectures (no custom builds) and have similar parameter counts for fair comparison. The best model is automatically selected based on test accuracy.
+All models use standard, well-known architectures and have similar parameter counts (~11.69M) for fair comparison. The best model is automatically selected based on test accuracy.
 
 ## Features
 
@@ -48,7 +48,7 @@ All training parameters are configured via `ModelDevelopment/config/vision_train
 - **Paths**: Data and output paths
 - **Training Parameters**: Epochs, batch size, image size, validation split
 - **Data Augmentation**: Rotation, shifts, flips, zoom settings
-- **Model Architectures**: Configuration for ResNet50, CNN Custom, and ViT models
+- **Model Architectures**: Configuration for ResNet18, CNN Custom, and ViT models
 - **Callbacks**: Early stopping, learning rate reduction, model checkpoint settings
 - **Model Selection**: Metric used for selecting the best model
 - **MLflow**: Tracking configuration
@@ -59,7 +59,7 @@ You can override any config value using command-line arguments (see Usage sectio
 
 The training pipeline has been separated into three individual scripts, one for each model architecture:
 
-1. **`train_resnet.py`** - Trains ResNet50 model
+1. **`train_resnet.py`** - Trains ResNet18 model
 2. **`train_vit.py`** - Trains Vision Transformer (ViT) model
 3. **`train_custom_cnn.py`** - Trains Custom CNN model
 
@@ -75,7 +75,7 @@ Each script can be run independently and supports the same command-line argument
 #### Windows (PowerShell)
 
 ```powershell
-# Train ResNet50 with default config
+# Train ResNet18 with default config
 python train_resnet.py
 
 # Train ViT with default config
@@ -110,7 +110,7 @@ python train_resnet.py `
 #### Windows (CMD)
 
 ```cmd
-REM Train ResNet50 with default config
+REM Train ResNet18 with default config
 python train_resnet.py
 
 REM Train ViT with default config
@@ -145,7 +145,7 @@ python train_resnet.py ^
 #### Linux/Mac
 
 ```bash
-# Train ResNet50 with default config
+# Train ResNet18 with default config
 python train_resnet.py
 
 # Train ViT with default config
@@ -214,35 +214,39 @@ docker run --rm --cpus="0.5" ...
 cd ..\..
 $PROJECT_ROOT = $PWD.Path
 
-# Train ResNet50 - Mount the preprocessed data directory, output directory, and config directory
+# Train ResNet18 - Mount the preprocessed data directory, synthetic metadata, output directory, and config directory
 # Override data_path and output_path to use Docker container paths
 # Add --cpus="0.5" to limit CPU usage to 50% of one CPU core
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="4" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_resnet.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data
 
 # Train ViT
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="8" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_vit.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data
 
 # Train Custom CNN
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="8" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_custom_cnn.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data
 
 # With custom parameters (always override data_path and output_path for Docker)
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="1" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
@@ -251,29 +255,32 @@ docker run --rm --cpus="0.5" `
 # Dry run mode (quick test with only 64 images)
 docker run --rm --cpus="0.5" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_resnet.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data --dry_run
 
 # Dry run with ViT
-docker run --rm --cpus="8.0" `
+docker run --rm --cpus="1" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_vit.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data --dry_run
 
 # Dry run with Custom CNN
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="1" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
+    -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
     medscan-vision-training:latest `
     python train_custom_cnn.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data --dry_run
 
 # Piping output to a file manually
-docker run --rm --cpus="0.5" `
+docker run --rm --cpus="1" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
     -v "${PROJECT_ROOT}\ModelDevelopment\config:/app/config" `
@@ -288,11 +295,12 @@ REM Get project root directory (navigate to project root first)
 cd ..\..
 set PROJECT_ROOT=%CD%
 
-REM Train ResNet50 - Mount the preprocessed data directory, output directory, and config directory
+REM Train ResNet50 - Mount the preprocessed data directory, synthetic metadata, output directory, and config directory
 REM Override data_path and output_path to use Docker container paths
 REM Add --cpus="0.5" to limit CPU usage to 50% of one CPU core
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -301,6 +309,7 @@ docker run --rm --cpus="0.5" ^
 REM Train ViT
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -309,6 +318,7 @@ docker run --rm --cpus="0.5" ^
 REM Train Custom CNN
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -317,6 +327,7 @@ docker run --rm --cpus="0.5" ^
 REM With custom parameters (always override data_path and output_path for Docker)
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -325,6 +336,7 @@ docker run --rm --cpus="0.5" ^
 REM Dry run mode (quick test with only 64 images)
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -333,6 +345,7 @@ docker run --rm --cpus="0.5" ^
 REM Dry run with ViT
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -341,6 +354,7 @@ docker run --rm --cpus="0.5" ^
 REM Dry run with Custom CNN
 docker run --rm --cpus="0.5" ^
     -v "%PROJECT_ROOT%\DataPipeline\data\preprocessed:/app/data/preprocessed" ^
+    -v "%PROJECT_ROOT%\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\data:/app/data" ^
     -v "%PROJECT_ROOT%\ModelDevelopment\config:/app/config" ^
     medscan-vision-training:latest ^
@@ -353,7 +367,7 @@ docker run --rm --cpus="0.5" ^
 cd ../..
 PROJECT_ROOT=$(pwd)
 
-# Train ResNet50 - Mount the preprocessed data directory, output directory, and config directory
+# Train ResNet18 - Mount the preprocessed data directory, output directory, and config directory
 # Override data_path and output_path to use Docker container paths
 # Add --cpus="0.5" to limit CPU usage to 50% of one CPU core
 docker run --rm --cpus="0.5" \
@@ -366,6 +380,7 @@ docker run --rm --cpus="0.5" \
 # Train ViT
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -374,6 +389,7 @@ docker run --rm --cpus="0.5" \
 # Train Custom CNN
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -382,6 +398,7 @@ docker run --rm --cpus="0.5" \
 # With custom parameters (always override data_path and output_path for Docker)
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -390,6 +407,7 @@ docker run --rm --cpus="0.5" \
 # Dry run mode (quick test with only 64 images)
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -398,6 +416,7 @@ docker run --rm --cpus="0.5" \
 # Dry run with ViT
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -406,6 +425,7 @@ docker run --rm --cpus="0.5" \
 # Dry run with Custom CNN
 docker run --rm --cpus="0.5" \
     -v "${PROJECT_ROOT}/DataPipeline/data/preprocessed:/app/data/preprocessed" \
+    -v "${PROJECT_ROOT}/DataPipeline/data/synthetic_metadata:/app/data/synthetic_metadata" \
     -v "${PROJECT_ROOT}/ModelDevelopment/data:/app/data" \
     -v "${PROJECT_ROOT}/ModelDevelopment/config:/app/config" \
     medscan-vision-training:latest \
@@ -460,8 +480,8 @@ ModelDevelopment/data/
 ├── models/
 │   ├── tb/
 │   │   └── YYYYMMDD_HHMMSS/
-│   │       ├── CNN_ResNet50_best.keras
-│   │       ├── CNN_ResNet50_final.keras
+│   │       ├── CNN_ResNet18_best.keras
+│   │       ├── CNN_ResNet18_final.keras
 │   │       ├── CNN_Custom_best.keras
 │   │       ├── CNN_Custom_final.keras
 │   │       ├── ViT_best.keras
@@ -472,7 +492,7 @@ ModelDevelopment/data/
 ├── logs/
 │   ├── tb/
 │   │   └── YYYYMMDD_HHMMSS/
-│   │       ├── CNN_ResNet50_training.log
+│   │       ├── CNN_ResNet18_training.log
 │   │       ├── CNN_Custom_training.log
 │   │       └── ViT_training.log
 │   └── lung_cancer_ct_scan/
@@ -494,14 +514,14 @@ ModelDevelopment/data/
 **training_metadata.json**: Contains comprehensive training information:
 ```json
 {
-  "best_model": "CNN_ResNet50",
+  "best_model": "CNN_ResNet18",
   "metrics": {
     "test_loss": 0.2345,
     "test_accuracy": 0.9234,
     "test_top_k_accuracy": 0.9876
   },
   "all_model_results": {
-    "CNN_ResNet50": {...},
+    "CNN_ResNet18": {...},
     "CNN_Custom": {...},
     "ViT": {...}
   },
@@ -615,7 +635,7 @@ The configuration file (`ModelDevelopment/config/vision_training.yml`) allows yo
 - **Training parameters**: epochs, batch_size, image_size, validation_split
 - **Data augmentation**: rotation_range, width_shift_range, height_shift_range, horizontal_flip, zoom_range
 - **Model architectures**: 
-  - ResNet50: weights, head configuration, learning_rate
+  - ResNet18: head configuration, learning_rate
   - CNN Custom: conv_blocks, dense_layers, learning_rate
   - ViT: patch_size, projection_dim, num_heads, transformer_layers, mlp_head_units, learning_rate
 - **Callbacks**: early_stopping patience, reduce_lr settings, model_checkpoint monitor
@@ -651,7 +671,7 @@ hyperparameter_tuning:
 
 Each model architecture has specific hyperparameters that can be tuned:
 
-**ResNet50:**
+**ResNet18:**
 - Learning rate
 - Dense layer units (256, 512, 1024)
 - Dropout rates (0.3-0.6)
@@ -664,9 +684,9 @@ Each model architecture has specific hyperparameters that can be tuned:
 
 **ViT:**
 - Learning rate
-- Projection dimension (256, 384, 512)
-- Number of attention heads (4, 6, 8)
-- Transformer layers (8, 12, 16)
+- Projection dimension (192, 256, 320)
+- Number of attention heads (3, 4, 6)
+- Transformer layers (6, 8, 10)
 - MLP head units
 
 When tuning is enabled, the script will:
