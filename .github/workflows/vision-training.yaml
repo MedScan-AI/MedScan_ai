@@ -61,7 +61,7 @@ jobs:
                   echo "Dataset: $DATASET"
                   echo "Epochs: $EPOCHS"
 
-                  BUILD_ID=$(gcloud builds submit \
+                  BUILD_ID=$(gcloud builds submit . \
                     --config=cloudbuild/vision-training.yaml \
                     --project=medscanai-476500 \
                     --region=us-central1 \

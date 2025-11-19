@@ -62,7 +62,7 @@ jobs:
               run: |
                   echo "🚀 Triggering RAG model selection..."
 
-                  BUILD_ID=$(gcloud builds submit \
+                  BUILD_ID=$(gcloud builds submit . \
                     --config=cloudbuild/rag-training.yaml \
                     --project=medscanai-476500 \
                     --region=us-central1 \
