@@ -1,317 +1,170 @@
 """
-deploy.py - Deploy Vision models to Vertex AI
+deploy.py - Deploy Vision model to Vertex AI Model Registry
 """
 import os
+import sys
+import json
 import logging
+import argparse
 from pathlib import Path
-from typing import Optional
+from datetime import datetime
+
 from google.cloud import aiplatform
 from google.cloud import storage
-import json
-import tempfile
-import shutil
-from tensorflow import keras
+import tensorflow as tf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class VisionModelDeployer:
-    """Deploy Vision models to Vertex AI"""
+def deploy_vision_model(
+    model_path: str,
+    metadata_path: str,
+    dataset: str,
+    model_name: str,
+    project_id: str = None,
+    region: str = "us-central1",
+    bucket_name: str = None
+):
+    """
+    Deploy Vision model to Vertex AI Model Registry.
     
-    def __init__(
-        self,
-        project_id: str = None,
-        region: str = "us-central1",
-        bucket_name: str = None
-    ):
-        if project_id is None:
-            project_id = os.getenv("GCP_PROJECT_ID")
-            if not project_id:
-                raise ValueError(
-                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
-                    "or pass it to VisionModelDeployer(project_id='...')"
-                )
-        if bucket_name is None:
-            bucket_name = os.getenv("GCS_BUCKET_NAME")
-            if not bucket_name:
-                raise ValueError(
-                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
-                    "or pass it to VisionModelDeployer(bucket_name='...')"
-                )
-        self.project_id = project_id
-        self.region = region
-        self.bucket_name = bucket_name
-        
-        # Initialize Vertex AI
-        aiplatform.init(project=project_id, location=region)
-        
-        # Initialize GCS client
-        self.storage_client = storage.Client(project=project_id)
-        self.bucket = self.storage_client.bucket(bucket_name)
+    Args:
+        model_path: Path to .keras model file
+        metadata_path: Path to training_metadata.json
+        dataset: Dataset name (tb or lung_cancer_ct_scan)
+        model_name: Model name (e.g., CNN_ResNet18)
+        project_id: GCP project ID
+        region: GCP region
+        bucket_name: GCS bucket name
+    """
+    # Get environment variables if not provided
+    if project_id is None:
+        project_id = os.getenv("GCP_PROJECT_ID")
+        if not project_id:
+            raise ValueError("GCP_PROJECT_ID not set")
     
-    def _upload_directory(self, local_dir: Path, gcs_prefix: str) -> str:
-        """
-        Upload a local directory (recursively) to GCS under gcs_prefix.
-        
-        Args:
-            local_dir: Path to local directory
-            gcs_prefix: GCS prefix (e.g., 'vision/models/tb/CNN_ResNet50/saved_model')
-        
-        Returns:
-            GCS URI of the uploaded directory
-        """
-        local_dir = Path(local_dir)
-        if not local_dir.exists() or not local_dir.is_dir():
-            raise ValueError(f"Local directory does not exist: {local_dir}")
-        
-        for path in local_dir.rglob("*"):
-            if path.is_file():
-                rel_path = path.relative_to(local_dir)
-                blob_path = f"{gcs_prefix}/{rel_path.as_posix()}"
-                blob = self.bucket.blob(blob_path)
-                blob.upload_from_filename(str(path))
-        return f"gs://{self.bucket_name}/{gcs_prefix}"
+    if bucket_name is None:
+        bucket_name = os.getenv("GCS_BUCKET_NAME")
+        if not bucket_name:
+            raise ValueError("GCS_BUCKET_NAME not set")
     
-    def upload_model_to_gcs(
-        self,
-        local_model_path: str,
-        model_name: str,
-        dataset_name: str
-    ) -> str:
-        """
-        Upload trained model to GCS.
-        
-        Args:
-            local_model_path: Path to local .keras model file
-            model_name: Name of model (e.g., 'CNN_ResNet50')
-            dataset_name: Dataset name (e.g., 'tb')
-            
-        Returns:
-            GCS URI of uploaded model
-        """
-        # Create GCS path: vision/models/{dataset}/{model_name}/model.keras
-        gcs_path = f"vision/models/{dataset_name}/{model_name}/model.keras"
-        
-        logger.info(f"Uploading model to gs://{self.bucket_name}/{gcs_path}")
-        
-        blob = self.bucket.blob(gcs_path)
-        blob.upload_from_filename(local_model_path)
-        
-        gcs_uri = f"gs://{self.bucket_name}/{gcs_path}"
-        logger.info(f"Model uploaded to {gcs_uri}")
-        
-        return gcs_uri
+    # Initialize clients
+    aiplatform.init(project=project_id, location=region)
+    storage_client = storage.Client(project=project_id)
+    bucket = storage_client.bucket(bucket_name)
     
-    def register_model(
-        self,
-        display_name: str,
-        model_gcs_uri: str,
-        description: str,
-        labels: Optional[dict] = None
-    ) -> aiplatform.Model:
-        """
-        Register model in Vertex AI Model Registry.
-        
-        Args:
-            display_name: Display name for model
-            model_gcs_uri: GCS URI of model artifact
-            description: Model description
-            labels: Optional labels dict
-            
-        Returns:
-            Vertex AI Model object
-        """
-        logger.info(f"Registering model: {display_name}")
-        
-        # Create model
-        model = aiplatform.Model.upload(
-            display_name=display_name,
-            artifact_uri=model_gcs_uri,
-            serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-13:latest",
-            description=description,
-            labels=labels or {}
-        )
-        
-        logger.info(f"Model registered: {model.resource_name}")
-        return model
+    # Load metadata
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
     
-    def deploy_model(
-        self,
-        model: aiplatform.Model,
-        endpoint_display_name: str,
-        machine_type: str = "n1-standard-4",
-        min_replica_count: int = 1,
-        max_replica_count: int = 3
-    ) -> aiplatform.Endpoint:
-        """
-        Deploy model to Vertex AI endpoint.
-        
-        Args:
-            model: Vertex AI Model object
-            endpoint_display_name: Name for endpoint
-            machine_type: Machine type for deployment
-            min_replica_count: Minimum replicas
-            max_replica_count: Maximum replicas
-            
-        Returns:
-            Vertex AI Endpoint object
-        """
-        logger.info(f"Deploying model to endpoint: {endpoint_display_name}")
-        
-        # Check if endpoint exists
-        endpoints = aiplatform.Endpoint.list(
-            filter=f'display_name="{endpoint_display_name}"'
-        )
-        
-        if endpoints:
-            endpoint = endpoints[0]
-            logger.info(f"Using existing endpoint: {endpoint.resource_name}")
-        else:
-            endpoint = aiplatform.Endpoint.create(
-                display_name=endpoint_display_name
-            )
-            logger.info(f"Created new endpoint: {endpoint.resource_name}")
-        
-        # Deploy model
-        model.deploy(
-            endpoint=endpoint,
-            deployed_model_display_name=model.display_name,
-            machine_type=machine_type,
-            min_replica_count=min_replica_count,
-            max_replica_count=max_replica_count,
-            traffic_percentage=100,
-            sync=True
-        )
-        
-        logger.info(f"Model deployed successfully")
-        return endpoint
+    metrics = metadata.get('metrics', {})
+    test_accuracy = metrics.get('test_accuracy', 0.0)
     
-    def deploy_vision_model(
-        self,
-        model_path: str,
-        dataset_name: str,
-        model_name: str,
-        test_accuracy: float,
-        metadata: dict
-    ):
-        """
-        Complete deployment workflow for vision model.
+    logger.info(f"Deploying model: {model_name}")
+    logger.info(f"Dataset: {dataset}")
+    logger.info(f"Test Accuracy: {test_accuracy}")
+    
+    # Convert .keras to SavedModel format
+    logger.info("Loading Keras model...")
+    model = tf.keras.models.load_model(model_path)
+    
+    # Create temporary directory for SavedModel
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        saved_model_path = Path(temp_dir) / "saved_model"
+        logger.info(f"Converting to SavedModel format...")
+        # Keras 3: Use tf.saved_model.save() directly instead of model.save() with save_format
+        tf.saved_model.save(model, str(saved_model_path))
         
-        Args:
-            model_path: Path to trained model
-            dataset_name: Dataset name (tb/lung_cancer)
-            model_name: Model architecture name
-            test_accuracy: Model test accuracy
-            metadata: Model metadata dict
-        """
-        logger.info("="*80)
-        logger.info("Starting Vision Model Deployment")
-        logger.info("="*80)
+        # Upload SavedModel to GCS
+        build_id = os.getenv("BUILD_ID", datetime.now().strftime("%Y%m%d%H%M%S"))
+        gcs_model_dir = f"vision/models/{build_id}/saved_model"
         
-        # 1. Upload Keras model file to GCS for archival
-        gcs_keras_uri = self.upload_model_to_gcs(model_path, model_name, dataset_name)
+        logger.info(f"Uploading SavedModel to gs://{bucket_name}/{gcs_model_dir}/")
+        for root, dirs, files in os.walk(saved_model_path):
+            for file in files:
+                local_file = Path(root) / file
+                relative_path = local_file.relative_to(saved_model_path)
+                gcs_path = f"{gcs_model_dir}/{relative_path}"
+                
+                blob = bucket.blob(gcs_path)
+                blob.upload_from_filename(str(local_file))
         
-        # 2. Export TensorFlow SavedModel and upload directory to GCS for Vertex AI
-        tmp_dir = Path(tempfile.mkdtemp(prefix="export_saved_model_"))
-        try:
-            logger.info("Exporting Keras model to TensorFlow SavedModel format...")
-            model = keras.models.load_model(model_path)
-            export_dir = tmp_dir / "saved_model"
-            model.export(str(export_dir))
-            
-            # Upload exported directory to GCS under saved_model/
-            saved_model_prefix = f"vision/models/{dataset_name}/{model_name}/saved_model"
-            logger.info(f"Uploading SavedModel directory to gs://{self.bucket_name}/{saved_model_prefix}")
-            gcs_saved_model_uri = self._upload_directory(export_dir, saved_model_prefix)
-        finally:
-            # Clean up temp directory
-            try:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            except Exception:
-                pass
-        
-        # 3. Register in Model Registry (use SavedModel directory as artifact_uri)
-        display_name = f"{dataset_name}_{model_name}".replace("_", "-")
-        description = (
-            f"Vision model for {dataset_name} classification. "
-            f"Architecture: {model_name}. "
-            f"Test Accuracy: {test_accuracy:.4f}"
-        )
-        
-        labels = {
-            "dataset": dataset_name.replace("_", "-"),
-            "architecture": model_name.lower().replace("_", "-"),
-            "framework": "tensorflow",
-            "accuracy": str(int(test_accuracy * 100))
-        }
-        
-        model = self.register_model(
-            display_name=display_name,
-            model_gcs_uri=gcs_saved_model_uri,
-            description=description,
-            labels=labels
-        )
-        
-        # 4. Deploy to endpoint
-        endpoint_name = f"{dataset_name}-vision-endpoint".replace("_", "-")
-        endpoint = self.deploy_model(
-            model=model,
-            endpoint_display_name=endpoint_name
-        )
-        
-        # 5. Save deployment info
-        deployment_info = {
-            "model_resource_name": model.resource_name,
-            "endpoint_resource_name": endpoint.resource_name,
-            "gcs_saved_model_uri": gcs_saved_model_uri,
-            "gcs_keras_uri": gcs_keras_uri,
-            "test_accuracy": test_accuracy,
-            "metadata": metadata
-        }
-        
-        # Upload deployment info to GCS
-        info_path = f"vision/deployments/{dataset_name}/{model_name}/deployment_info.json"
-        blob = self.bucket.blob(info_path)
-        blob.upload_from_string(json.dumps(deployment_info, indent=2))
-        
-        logger.info("="*80)
-        logger.info("Deployment Complete!")
-        logger.info(f"Model: {model.resource_name}")
-        logger.info(f"Endpoint: {endpoint.resource_name}")
-        logger.info("="*80)
-        
-        return model, endpoint
+        artifact_uri = f"gs://{bucket_name}/{gcs_model_dir}/"
+        logger.info(f"Model uploaded to: {artifact_uri}")
+    
+    # Register model in Vertex AI
+    display_name = f"medscan-vision-{dataset}-{model_name.lower()}"
+    description = (
+        f"Vision model for {dataset} detection. "
+        f"Model: {model_name}. "
+        f"Test Accuracy: {test_accuracy:.4f}"
+    )
+    
+    labels = {
+        "model-type": "vision",
+        "dataset": dataset,
+        "model-name": model_name.lower(),
+        "framework": "tensorflow"
+    }
+    
+    logger.info(f"Registering model in Vertex AI: {display_name}")
+    model = aiplatform.Model.upload(
+        display_name=display_name,
+        artifact_uri=artifact_uri,
+        serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-13:latest",
+        description=description,
+        labels=labels
+    )
+    
+    logger.info(f"Model registered: {model.resource_name}")
+    logger.info(f"Model ID: {model.resource_name.split('/')[-1]}")
+    
+    # Save deployment info
+    deployment_info = {
+        "model_resource_name": model.resource_name,
+        "artifact_uri": artifact_uri,
+        "metadata": metadata,
+        "deployment_timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    
+    deployment_info_path = f"vision/deployments/{build_id}/deployment_info.json"
+    blob = bucket.blob(deployment_info_path)
+    blob.upload_from_string(json.dumps(deployment_info, indent=2))
+    logger.info(f"Deployment info saved to: gs://{bucket_name}/{deployment_info_path}")
+    
+    return model
 
 
 def main():
-    """Main deployment function"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Deploy Vision model to Vertex AI')
-    parser.add_argument('--model_path', required=True, help='Path to .keras model')
-    parser.add_argument('--dataset', required=True, choices=['tb', 'lung_cancer_ct_scan'])
-    parser.add_argument('--model_name', required=True, help='Model architecture name')
-    parser.add_argument('--test_accuracy', type=float, required=True)
-    parser.add_argument('--metadata_file', help='Path to metadata JSON file')
+    parser = argparse.ArgumentParser(description="Deploy Vision model to Vertex AI")
+    parser.add_argument("--model_path", required=True, help="Path to .keras model file")
+    parser.add_argument("--metadata_file", required=True, help="Path to training_metadata.json")
+    parser.add_argument("--dataset", required=True, help="Dataset name (tb or lung_cancer_ct_scan)")
+    parser.add_argument("--model_name", required=True, help="Model name (e.g., CNN_ResNet18)")
+    parser.add_argument("--project_id", help="GCP project ID (or set GCP_PROJECT_ID env var)")
+    parser.add_argument("--region", default="us-central1", help="GCP region")
+    parser.add_argument("--bucket_name", help="GCS bucket name (or set GCS_BUCKET_NAME env var)")
     
     args = parser.parse_args()
     
-    # Load metadata
-    metadata = {}
-    if args.metadata_file:
-        with open(args.metadata_file, 'r') as f:
-            metadata = json.load(f)
-    
-    # Deploy
-    deployer = VisionModelDeployer()
-    deployer.deploy_vision_model(
-        model_path=args.model_path,
-        dataset_name=args.dataset,
-        model_name=args.model_name,
-        test_accuracy=args.test_accuracy,
-        metadata=metadata
-    )
+    try:
+        deploy_vision_model(
+            model_path=args.model_path,
+            metadata_path=args.metadata_file,
+            dataset=args.dataset,
+            model_name=args.model_name,
+            project_id=args.project_id,
+            region=args.region,
+            bucket_name=args.bucket_name
+        )
+        logger.info("Deployment completed successfully")
+    except Exception as e:
+        logger.error(f"Deployment failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        sys.exit(1)
 
 
 if __name__ == "__main__":
