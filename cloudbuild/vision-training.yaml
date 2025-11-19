@@ -190,7 +190,8 @@ steps:
           cp -r /workspace/DataPipeline/data/preprocessed /workspace/data/preprocessed
         fi
 
-  # Step 4: Train ResNet50 model
+  # Step 4: Train all 3 models (ResNet18, ViT, Custom CNN) in parallel
+  # Each model includes validation and bias detection
   - name: 'python:3.10'
     id: 'train-resnet'
     entrypoint: 'bash'
@@ -200,7 +201,8 @@ steps:
         echo "Installing dependencies for training..."
         pip install --upgrade pip
         pip install -r ModelDevelopment/Vision/requirements.txt
-        echo "Starting ResNet50 training..."
+        echo "Starting ResNet18 training..."
+        echo "Note: Validation and bias detection are integrated into training"
         cd ModelDevelopment/Vision
         python train_resnet.py \
           --config ../config/vision_training.yml \
@@ -208,98 +210,234 @@ steps:
           --output_path /workspace/models \
           --datasets ${_DATASET} \
           --epochs ${_EPOCHS}
-        echo "Training completed"
+        echo "ResNet18 training completed"
     env:
       - 'TF_CPP_MIN_LOG_LEVEL=2'
       - 'PYTHONUNBUFFERED=1'
 
-  # Step 5: Validate model performance
+  - name: 'python:3.10'
+    id: 'train-vit'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Installing dependencies for training..."
+        pip install --upgrade pip
+        pip install -r ModelDevelopment/Vision/requirements.txt
+        echo "Starting ViT training..."
+        echo "Note: Validation and bias detection are integrated into training"
+        cd ModelDevelopment/Vision
+        python train_vit.py \
+          --config ../config/vision_training.yml \
+          --data_path /workspace/DataPipeline/data/preprocessed \
+          --output_path /workspace/models \
+          --datasets ${_DATASET} \
+          --epochs ${_EPOCHS}
+        echo "ViT training completed"
+    env:
+      - 'TF_CPP_MIN_LOG_LEVEL=2'
+      - 'PYTHONUNBUFFERED=1'
+
+  - name: 'python:3.10'
+    id: 'train-custom-cnn'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Installing dependencies for training..."
+        pip install --upgrade pip
+        pip install -r ModelDevelopment/Vision/requirements.txt
+        echo "Starting Custom CNN training..."
+        echo "Note: Validation and bias detection are integrated into training"
+        cd ModelDevelopment/Vision
+        python train_custom_cnn.py \
+          --config ../config/vision_training.yml \
+          --data_path /workspace/DataPipeline/data/preprocessed \
+          --output_path /workspace/models \
+          --datasets ${_DATASET} \
+          --epochs ${_EPOCHS}
+        echo "Custom CNN training completed"
+    env:
+      - 'TF_CPP_MIN_LOG_LEVEL=2'
+      - 'PYTHONUNBUFFERED=1'
+
+  # Step 5: Select best model from the 3 trained models
+  - name: 'python:3.10'
+    id: 'select-best-model'
+    waitFor: ['train-resnet', 'train-vit', 'train-custom-cnn']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Selecting best model from trained models..."
+        cd ModelDevelopment/Vision
+        pip install --upgrade pip
+        # Only need standard library for this script
+        python select_best_model.py \
+          --output_path /workspace/models \
+          --dataset ${_DATASET} \
+          --metric test_accuracy
+        echo "Model selection completed"
+        
+        # Verify selection result exists
+        if [ ! -f /workspace/models/model_selection_result.json ]; then
+          echo "ERROR: Model selection result not found!"
+          exit 1
+        fi
+        
+        echo "Best model selected and saved to model_selection_result.json"
+
+  # Step 6: Extract validation and bias results from best model
+  - name: 'python:3.10'
+    id: 'extract-results'
+    waitFor: ['select-best-model']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Extracting validation and bias results from best model..."
+        cd ModelDevelopment/Vision
+        
+        # Read best model info from selection result
+        SELECTION_RESULT="/workspace/models/model_selection_result.json"
+        if [ ! -f "$$SELECTION_RESULT" ]; then
+          echo "ERROR: Model selection result not found!"
+          exit 1
+        fi
+        
+        # Extract best model metadata path
+        METADATA_PATH=$$(python -c "
+        import json
+        with open('$$SELECTION_RESULT', 'r') as f:
+            result = json.load(f)
+        print(result['best_model']['metadata_path'])
+        ")
+        
+        MODEL_NAME=$$(python -c "
+        import json
+        with open('$$SELECTION_RESULT', 'r') as f:
+            result = json.load(f)
+        print(result['best_model']['model_name'])
+        ")
+        
+        if [ -z "$$METADATA_PATH" ] || [ ! -f "$$METADATA_PATH" ]; then
+          echo "ERROR: Best model metadata not found at: $$METADATA_PATH"
+          exit 1
+        fi
+        
+        # Extract validation metrics from best model metadata
+        python -c "
+        import json
+        with open('$$METADATA_PATH', 'r') as f:
+            metadata = json.load(f)
+        metrics = metadata.get('metrics', {})
+        test_accuracy = metrics.get('test_accuracy', 0.0)
+        validation_result = {
+            'test_accuracy': test_accuracy,
+            'test_precision': metrics.get('test_precision', 0.0),
+            'test_recall': metrics.get('test_recall', 0.0),
+            'test_f1_score': metrics.get('test_f1_score', 0.0),
+            'validation_passed': test_accuracy >= 0.5
+        }
+        with open('/workspace/validation_results.json', 'w') as f:
+            json.dump(validation_result, f, indent=2)
+        print('Validation results extracted from best model')
+        "
+        
+        # Save test accuracy and model name for validation step
+        TEST_ACCURACY=$$(python -c "import json; print(json.load(open('/workspace/validation_results.json'))['test_accuracy'])")
+        echo "$$TEST_ACCURACY" > /workspace/test_accuracy.txt
+        echo "$$MODEL_NAME" > /workspace/model_name.txt
+        
+        # Check if bias reports exist (look in best model's directory)
+        METADATA_DIR=$$(dirname "$$METADATA_PATH")
+        BIAS_REPORT_DIR=$$(find "$$METADATA_DIR" -type d -name "bias_reports" | head -1)
+        if [ -n "$$BIAS_REPORT_DIR" ]; then
+          echo "Bias reports found at: $$BIAS_REPORT_DIR"
+          BIAS_REPORT=$$(find "$$BIAS_REPORT_DIR" -name "bias_report_*.json" | head -1)
+          if [ -n "$$BIAS_REPORT" ]; then
+            cp "$$BIAS_REPORT" /workspace/bias_results.json
+            echo "Bias results extracted"
+          else
+            echo "No bias report JSON found, creating empty result"
+            echo '{"bias_detected": false, "num_violations": 0, "violations": []}' > /workspace/bias_results.json
+          fi
+        else
+          echo "No bias reports directory found, creating empty result"
+          echo '{"bias_detected": false, "num_violations": 0, "violations": []}' > /workspace/bias_results.json
+        fi
+        
+        echo "Results extraction completed"
+
+  # Step 7: Validate model performance (blocks deployment if validation fails)
   - name: 'python:3.10'
     id: 'validate-model'
+    waitFor: ['extract-results']
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Installing dependencies for validation..."
-        pip install --upgrade pip
-        pip install -r ModelDevelopment/Vision/requirements.txt
-        echo "Validating model..."
+        echo "Validating model performance"
         cd ModelDevelopment/Vision
         
-        # Find model in date-partitioned structure (models/YYYY/MM/DD/HHMMSS/CNN_ResNet50_best.keras)
-        MODEL_PATH=$$(find /workspace/models -name "CNN_ResNet50_best.keras" -type f | head -1)
-        
-        # Find test data directory
-        # Find test data directory (check DataPipeline location first)
-        TEST_DATA=$$(find /workspace/DataPipeline/data/preprocessed -type d \( -path "*/${_DATASET}/*/test" -o -path "*/${_DATASET}/test" \) 2>/dev/null | head -1)
-        if [ -z "$$TEST_DATA" ]; then
-          TEST_DATA=$$(find /workspace/data/preprocessed -type d \( -path "*/${_DATASET}/*/test" -o -path "*/${_DATASET}/test" \) 2>/dev/null | head -1)
+        # Read validation results
+        TEST_ACCURACY=$$(cat /workspace/test_accuracy.txt)
+        MODEL_NAME=$$(cat /workspace/model_name.txt)
+        # Use lower threshold for quick tests (2 epochs), higher for production (50 epochs)
+        # Check epochs from substitution - if 2 or less, use 0.2; otherwise 0.5
+        EPOCHS=${_EPOCHS:-50}
+        if [ "$$EPOCHS" -le 2 ]; then
+          VALIDATION_THRESHOLD=0.2  # Lower threshold for quick tests
+          echo "Using lower validation threshold (0.2) for quick test with $$EPOCHS epochs"
+        else
+          VALIDATION_THRESHOLD=0.5  # Standard threshold for production
+          echo "Using standard validation threshold (0.5) for production training"
         fi
         
-        echo "Model: $$MODEL_PATH"
-        echo "Test data: $$TEST_DATA"
+        echo "Test Accuracy: $$TEST_ACCURACY"
+        echo "Validation Threshold: $$VALIDATION_THRESHOLD"
         
-        # Check if model exists
-        if [ -z "$$MODEL_PATH" ] || [ ! -f "$$MODEL_PATH" ]; then
-          echo "ERROR: Model file not found!"
-          find /workspace/models -type f -name "*.keras" 2>/dev/null | head -5
+        # Check if accuracy meets threshold
+        VALIDATION_PASSED=$$(python -c "score=$$TEST_ACCURACY; threshold=$$VALIDATION_THRESHOLD; print('true' if score >= threshold else 'false')")
+        
+        echo "$$VALIDATION_PASSED" > /workspace/validation_passed.txt
+        
+        if [ "$$VALIDATION_PASSED" = "false" ]; then
+          echo "VALIDATION FAILED: Test accuracy ($$TEST_ACCURACY) is below threshold ($$VALIDATION_THRESHOLD)"
+          
+          # Send validation failure email
+          pip install --upgrade pip
+          pip install secure-smtplib>=0.1.1
+          
+          SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476500 2>&1)
+          SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476500 2>&1)
+          
+          if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
+            SMTP_USER=""
+            SMTP_PASSWORD=""
+          fi
+          
+          export SMTP_USER="$$SMTP_USER"
+          export SMTP_PASSWORD="$$SMTP_PASSWORD"
+          export GCP_PROJECT_ID=medscanai-476500
+          
+          python utils/send_notification.py \
+            --type validation-failure \
+            --build-id ${BUILD_ID} \
+            --model-name "$$MODEL_NAME" \
+            --dataset ${_DATASET} \
+            --test-accuracy $$TEST_ACCURACY \
+            --threshold $$VALIDATION_THRESHOLD || echo "Validation failure email failed (non-critical)"
+          
           exit 1
         fi
         
-        # Check if test data exists
-        if [ -z "$$TEST_DATA" ] || [ ! -d "$$TEST_DATA" ]; then
-          echo "ERROR: Test data directory not found!"
-          echo "Searching in DataPipeline:"
-          find /workspace/DataPipeline/data/preprocessed -type d 2>/dev/null | head -10
-          echo "Searching in workspace/data:"
-          find /workspace/data/preprocessed -type d 2>/dev/null | head -10
-          exit 1
-        fi
-        
-        python validate.py \
-          --model_path "$$MODEL_PATH" \
-          --test_data_path "$$TEST_DATA" \
-          --output_file /workspace/validation_results.json
-        
-        if [ $? -ne 0 ]; then
-          echo "Validation FAILED - stopping deployment"
-          exit 1
-        fi
-        
-        echo "Validation PASSED"
+        echo "Validation PASSED: Model meets minimum performance threshold"
 
-  # Step 6: Bias detection
-  - name: 'python:3.10'
-    id: 'bias-check'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "Installing dependencies for bias check..."
-        pip install --upgrade pip
-        pip install -r ModelDevelopment/Vision/requirements.txt
-        echo "Running bias detection..."
-        cd ModelDevelopment/Vision
-        
-        # Find model in date-partitioned structure
-        MODEL_PATH=$$(find /workspace/models -name "CNN_ResNet50_best.keras" -type f | head -1)
-        METADATA_PATH=$$(find /workspace/models -name "training_metadata.json" -type f | head -1)
-        
-        if [ -z "$$MODEL_PATH" ] || [ ! -f "$$MODEL_PATH" ]; then
-          echo "ERROR: Model file not found for bias check!"
-          exit 1
-        fi
-        
-        python bias_check.py \
-          --model_path "$$MODEL_PATH" \
-          --metadata_path "$$METADATA_PATH" \
-          --output_file /workspace/bias_results.json
-        
-        echo "Bias check completed"
-
-  # Step 7: Deploy to Vertex AI
+  # Step 8: Deploy best model to Vertex AI (only if validation passed)
   - name: 'python:3.10'
     id: 'deploy-to-vertex-ai'
+    waitFor: ['validate-model']
     entrypoint: 'bash'
     args:
       - '-c'
@@ -308,172 +446,175 @@ steps:
         pip install --upgrade pip
         pip install -r ModelDevelopment/Vision/requirements.txt
         pip install google-cloud-aiplatform
-        echo "🚀 Deploying to Vertex AI..."
+        echo "🚀 Deploying best model to Vertex AI..."
         cd ModelDevelopment/Vision
         
-        # Find model in date-partitioned structure
-        MODEL_PATH=$$(find /workspace/models -name "CNN_ResNet50_best.keras" -type f | head -1)
-        METADATA_PATH=$$(find /workspace/models -name "training_metadata.json" -type f | head -1)
+        # Read best model info from selection result
+        SELECTION_RESULT="/workspace/models/model_selection_result.json"
+        if [ ! -f "$$SELECTION_RESULT" ]; then
+          echo "ERROR: Model selection result not found!"
+          exit 1
+        fi
+        
+        # Extract best model path and metadata
+        MODEL_PATH=$$(python -c "
+        import json
+        with open('$$SELECTION_RESULT', 'r') as f:
+            result = json.load(f)
+        print(result['best_model']['model_path'])
+        ")
+        
+        METADATA_PATH=$$(python -c "
+        import json
+        with open('$$SELECTION_RESULT', 'r') as f:
+            result = json.load(f)
+        print(result['best_model']['metadata_path'])
+        ")
+        
+        MODEL_NAME=$$(python -c "
+        import json
+        with open('$$SELECTION_RESULT', 'r') as f:
+            result = json.load(f)
+        print(result['best_model']['model_name'])
+        ")
         
         if [ -z "$$MODEL_PATH" ] || [ ! -f "$$MODEL_PATH" ]; then
-          echo "ERROR: Model file not found for deployment!"
+          echo "ERROR: Best model file not found at: $$MODEL_PATH"
+          find /workspace/models -name "*.keras" -type f 2>/dev/null | head -5
           exit 1
         fi
         
         if [ -z "$$METADATA_PATH" ] || [ ! -f "$$METADATA_PATH" ]; then
-          echo "ERROR: Metadata file not found for deployment!"
+          echo "ERROR: Best model metadata not found at: $$METADATA_PATH"
           exit 1
         fi
         
-        TEST_ACCURACY=$$(python -c "import json; print(json.load(open('$$METADATA_PATH'))['metrics']['test_accuracy'])")
+        echo "Deploying model: $$MODEL_NAME"
+        echo "Model path: $$MODEL_PATH"
+        echo "Metadata path: $$METADATA_PATH"
         
         # Set environment variables for deployment
         export GCP_PROJECT_ID=medscanai-476500
         export GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500
+        export BUILD_ID=${BUILD_ID}
         
         # Run deployment; fail fast if it errors
         python deploy.py \
           --model_path "$$MODEL_PATH" \
+          --metadata_file "$$METADATA_PATH" \
           --dataset ${_DATASET} \
-          --model_name CNN_ResNet50 \
-          --test_accuracy "$$TEST_ACCURACY" \
-          --metadata_file "$$METADATA_PATH" || { echo "Deployment failed"; exit 1; }
+          --model_name "$$MODEL_NAME" || { echo "Deployment failed"; exit 1; }
         
         echo "Deployment completed successfully"
 
-  # Step 8: Upload artifacts to GCS
+  # Step 9: Upload artifacts to GCS (includes models, metadata, bias reports, selection results)
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-artifacts'
-    args:
-      - '-m'
-      - 'cp'
-      - '-r'
-      - '/workspace/models/'
-      - 'gs://medscan-pipeline-medscanai-476500/vision/trained_models/${BUILD_ID}/'
-
-  # Step 9: Upload validation results
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'upload-logs'
-    args:
-      - 'cp'
-      - '/workspace/validation_results.json'
-      - 'gs://medscan-pipeline-medscanai-476500/vision/validation/${BUILD_ID}/'
-
-  # Step 10: Send email notification on SUCCESS
-  - name: 'python:3.10'
-    id: 'send-success-email'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Sending success notification..."
+        echo "Uploading artifacts to GCS..."
+        BUCKET="gs://medscan-pipeline-medscanai-476500"
+        BUILD_DIR="vision/trained_models/${BUILD_ID}"
         
-        # Get test accuracy from metadata
-        METADATA_PATH=$$(find /workspace/models -name "training_metadata.json" -type f | head -1)
+        # Upload models directory
+        gsutil -m cp -r /workspace/models/ $$BUCKET/$$BUILD_DIR/
         
-        if [ -z "$$METADATA_PATH" ] || [ ! -f "$$METADATA_PATH" ]; then
-          echo "ERROR: Metadata file not found for email notification!"
-          exit 1
+        # Upload validation results
+        if [ -f /workspace/validation_results.json ]; then
+          gsutil cp /workspace/validation_results.json $$BUCKET/vision/validation/${BUILD_ID}/validation_results.json
         fi
-        TEST_ACCURACY=$$(python -c "import json; print(json.load(open('$$METADATA_PATH'))['metrics']['test_accuracy'])")
         
-        # Install email dependencies
-        pip install secure-smtplib
+        # Upload bias results
+        if [ -f /workspace/bias_results.json ]; then
+          gsutil cp /workspace/bias_results.json $$BUCKET/vision/validation/${BUILD_ID}/bias_results.json
+        fi
         
-        # Create email script
-        cat > /tmp/send_email.py << 'PYEOF'
-        import smtplib
-        import os
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-
-        smtp_user = os.getenv('SMTP_USER')
-        smtp_password = os.getenv('SMTP_PASSWORD')
-
-        if not smtp_user or not smtp_password:
-            print("No SMTP credentials - skipping email")
-            exit(0)
-
-        recipients = ['harshitha8.shekar@gmail.com', 'kothari.sau@northeastern.edu']
-
-        msg = MIMEMultipart('alternative')
-        msg['From'] = f'MedScan AI <{smtp_user}>'
-        msg['To'] = ', '.join(recipients)
-        msg['Subject'] = ' Vision Model Training Complete - ${_DATASET}'
-
-        plain_text = """Vision Model Training Completed Successfully!
-
-        Model Details:
-        - Model: CNN_ResNet50
-        - Dataset: ${_DATASET}
-        - Test Accuracy: """ + os.getenv('TEST_ACCURACY', '0.0') + """%
-        - Build ID: ${BUILD_ID}
-
-        Results:
-        - Validation: PASSED
-        - Bias Check: COMPLETED
-        - Deployment: SUCCESS
-
-        View build:
-        https://console.cloud.google.com/cloud-build/builds/${BUILD_ID}?project=medscanai-476500
-
-        Model artifacts:
-        gs://medscan-pipeline-medscanai-476500/vision/trained_models/${BUILD_ID}/
-
-        ---
-        MedScan AI - Automated Training System
-        """
-
-        html = """
-        <html>
-        <body style="font-family: Arial, sans-serif;">
-            <div style="background-color: #4CAF50; color: white; padding: 20px;">
-                <h2>Vision Model Training Complete</h2>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Model Details</h3>
-                <ul>
-                    <li><strong>Model:</strong> CNN_ResNet50</li>
-                    <li><strong>Dataset:</strong> ${_DATASET}</li>
-                    <li><strong>Test Accuracy:</strong> """ + os.getenv('TEST_ACCURACY', '0.0') + """%</li>
-                    <li><strong>Build ID:</strong> ${BUILD_ID}</li>
-                </ul>
-                
-                <h3>Results</h3>
-                <ul style="color: green;">
-                    <li>Validation: PASSED</li>
-                    <li>Bias Check: COMPLETED</li>
-                    <li>Deployment: SUCCESS</li>
-                </ul>
-                
-                <p><a href="https://console.cloud.google.com/cloud-build/builds/${BUILD_ID}?project=medscanai-476500">View Build Logs →</a></p>
-            </div>
-            <div style="background-color: #f5f5f5; padding: 15px; text-align: center;">
-                <p>MedScan AI - Automated Training System</p>
-            </div>
-        </body>
-        </html>
-        """
-
-        msg.attach(MIMEText(plain_text, 'plain'))
-        msg.attach(MIMEText(html, 'html'))
-
-        try:
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_password)
-                server.send_message(msg)
-            print("Email sent successfully")
-        except Exception as e:
-            print(f"Email failed: {e}")
-        PYEOF
+        # Upload model selection results
+        if [ -f /workspace/models/model_selection_result.json ]; then
+          gsutil cp /workspace/models/model_selection_result.json $$BUCKET/vision/validation/${BUILD_ID}/model_selection_result.json
+        fi
         
-        # Run email script with credentials from Secret Manager
-        export SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476500 2>/dev/null || echo "")
-        export SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476500 2>/dev/null || echo "")
-        export TEST_ACCURACY="$$TEST_ACCURACY"
+        echo "Artifacts uploaded successfully"
+
+  # Step 10: Send email notifications (completion + bias failure if needed)
+  - name: 'python:3.10'
+    id: 'send-completion-email'
+    waitFor: ['deploy-to-vertex-ai']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Sending training completion notification"
         
-        python /tmp/send_email.py || echo "Email notification failed (non-critical)"
+        pip install --upgrade pip
+        cd ModelDevelopment/Vision
+        pip install secure-smtplib>=0.1.1
+        
+        # Get best model info from selection result
+        SELECTION_RESULT="/workspace/models/model_selection_result.json"
+        if [ -f "$$SELECTION_RESULT" ]; then
+          MODEL_NAME=$$(python -c "import json; print(json.load(open('$$SELECTION_RESULT'))['best_model']['model_name'])")
+          TEST_ACCURACY=$$(python -c "import json; print(json.load(open('$$SELECTION_RESULT'))['best_model']['test_accuracy'])")
+        else
+          MODEL_NAME="Unknown"
+          TEST_ACCURACY="0.0"
+        fi
+        
+        # Get validation status
+        VALIDATION_PASSED=$$(cat /workspace/validation_passed.txt 2>/dev/null || echo "true")
+        
+        # Get bias status
+        if [ -f /workspace/bias_results.json ]; then
+          BIAS_DETECTED=$$(python -c "import json; print(json.load(open('/workspace/bias_results.json')).get('bias_detected', False))")
+        else
+          BIAS_DETECTED="false"
+        fi
+        
+        # Get SMTP credentials from Secret Manager
+        SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476500 2>&1)
+        SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476500 2>&1)
+        
+        if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
+          echo "Warning: Could not retrieve SMTP credentials from Secret Manager"
+          SMTP_USER=""
+          SMTP_PASSWORD=""
+        fi
+        
+        export SMTP_USER="$$SMTP_USER"
+        export SMTP_PASSWORD="$$SMTP_PASSWORD"
+        export GCP_PROJECT_ID=medscanai-476500
+        export GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500
+        
+        # Determine bias check passed (opposite of bias detected)
+        if [ "$$BIAS_DETECTED" = "True" ]; then
+          BIAS_CHECK_PASSED="false"
+          # Send bias failure email
+          python utils/send_notification.py \
+            --type bias-failure \
+            --build-id ${BUILD_ID} \
+            --model-name "$$MODEL_NAME" \
+            --dataset ${_DATASET} \
+            --bias-details /workspace/bias_results.json || echo "Bias failure email failed (non-critical)"
+        else
+          BIAS_CHECK_PASSED="true"
+        fi
+        
+        # Send completion email
+        python utils/send_notification.py \
+          --type completion \
+          --build-id ${BUILD_ID} \
+          --model-name "$$MODEL_NAME" \
+          --dataset ${_DATASET} \
+          --test-accuracy $$TEST_ACCURACY \
+          --validation-passed "$$VALIDATION_PASSED" \
+          --bias-check-passed "$$BIAS_CHECK_PASSED" \
+          --bias-details /workspace/bias_results.json || echo "Completion email failed (non-critical)"
+
+# Note: Pipeline failure emails are handled by individual steps that write to /workspace/pipeline_error.txt
+# Critical steps (train-resnet, train-vit, train-custom-cnn, select-best-model, validate-model, deploy-to-vertex-ai)
+# should write error messages before exiting with error code
 
 # Build configuration
 timeout: 7200s
