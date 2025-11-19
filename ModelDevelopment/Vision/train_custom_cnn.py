@@ -22,20 +22,39 @@ from tensorflow import keras
 from tensorflow.keras import layers, models, optimizers, callbacks
 # Custom CNN doesn't use pre-trained models from applications
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import random
+import shutil
+import tempfile
 import mlflow
 import mlflow.tensorflow
 import keras_tuner as kt
+
+# Suppress TensorFlow retracing warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING
+warnings.filterwarnings('ignore', message='.*retracing.*')
+warnings.filterwarnings('ignore', message='.*tf.function.*')
+warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
 
 # Suppress Keras PyDataset warning
 warnings.filterwarnings('ignore', message='.*PyDataset.*super.*__init__.*')
 warnings.filterwarnings('ignore', category=UserWarning, module='keras.*py_dataset_adapter')
 
 # Configure logging
+# Set TensorFlow logger to ERROR level to suppress retracing warnings
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Import bias detection module (after logger is configured)
+try:
+    from bias_detection import BiasDetector
+    BIAS_DETECTION_AVAILABLE = True
+except ImportError:
+    BIAS_DETECTION_AVAILABLE = False
+    logger.warning("Bias detection module not available. Skipping bias analysis.")
 
 # Set random seeds for reproducibility
 tf.random.set_seed(42)
@@ -202,6 +221,78 @@ class DataLoader:
         logger.info(f"Found classes: {classes}")
         return classes
     
+    def _sample_files_from_directory(
+        self,
+        directory: Path,
+        percent_use: float,
+        seed: int
+    ) -> Path:
+        """
+        Sample a subset of files from a directory structure (with class subdirectories).
+        Creates a temporary directory with sampled files maintaining the same structure.
+        
+        Args:
+            directory: Source directory with class subdirectories
+            percent_use: Percentage of files to use (0.0 to 1.0)
+            seed: Random seed for reproducibility
+            
+        Returns:
+            Path to temporary directory with sampled files, or original directory if percent_use == 1.0
+        """
+        if percent_use >= 1.0:
+            return directory
+        
+        # Set random seed
+        random.seed(seed)
+        np.random.seed(seed)
+        
+        # Create temporary directory
+        temp_dir = Path(tempfile.mkdtemp(prefix="data_subset_"))
+        logger.info(f"Creating data subset ({percent_use*100:.1f}%) in temporary directory: {temp_dir}")
+        
+        # Get all class directories
+        class_dirs = [d for d in directory.iterdir() if d.is_dir()]
+        
+        total_files = 0
+        sampled_files = 0
+        
+        for class_dir in class_dirs:
+            # Get all image files in this class directory
+            image_files = list(class_dir.glob("*.jpg")) + list(class_dir.glob("*.png")) + \
+                         list(class_dir.glob("*.jpeg")) + list(class_dir.glob("*.JPG")) + \
+                         list(class_dir.glob("*.PNG"))
+            
+            if len(image_files) == 0:
+                continue
+            
+            total_files += len(image_files)
+            
+            # Sample files
+            num_samples = max(1, int(len(image_files) * percent_use))
+            sampled = random.sample(image_files, num_samples)
+            sampled_files += len(sampled)
+            
+            # Create class directory in temp location
+            temp_class_dir = temp_dir / class_dir.name
+            temp_class_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy sampled files (using symlinks for efficiency, fallback to copy)
+            for src_file in sampled:
+                dst_file = temp_class_dir / src_file.name
+                try:
+                    dst_file.symlink_to(src_file)
+                except (OSError, NotImplementedError):
+                    # Fallback to copy if symlinks not supported (Windows)
+                    shutil.copy2(src_file, dst_file)
+        
+        logger.info(f"Sampled {sampled_files}/{total_files} files ({sampled_files/total_files*100:.1f}%)")
+        
+        # Store temp directory for cleanup later
+        self._temp_dirs = getattr(self, '_temp_dirs', [])
+        self._temp_dirs.append(temp_dir)
+        
+        return temp_dir
+    
     def create_data_generators(
         self,
         batch_size: int = 32,
@@ -249,11 +340,30 @@ class DataLoader:
             validation_split=validation_split
         )
         
-        train_path = self.data_path / "train"
+        # Get data subset configuration
+        data_percent_use = 1.0
+        data_seed = 42
+        if self.config:
+            data_percent_use = self.config.get('training.data_percent_use', 1.0)
+            data_seed = self.config.get('training.data_seed', 42)
+        
+        # Sample data if needed
+        original_train_path = self.data_path / "train"
+        train_path = original_train_path
         test_path = self.data_path / "test"
         val_path = self.data_path / "valid" if (self.data_path / "valid").exists() else None
         
-        classes = self.get_classes()
+        if data_percent_use < 1.0:
+            logger.info(f"Using {data_percent_use*100:.1f}% of data (seed={data_seed})")
+            train_path = self._sample_files_from_directory(train_path, data_percent_use, data_seed)
+            test_path = self._sample_files_from_directory(test_path, data_percent_use, data_seed)
+            if val_path:
+                val_path = self._sample_files_from_directory(val_path, data_percent_use, data_seed)
+        
+        # Get classes from the (possibly sampled) train path
+        classes = [d.name for d in train_path.iterdir() if d.is_dir()]
+        classes.sort()
+        logger.info(f"Found classes: {classes}")
         num_classes = len(classes)
         
         # Training generator
@@ -468,6 +578,7 @@ class ModelTrainer:
         early_stopping = callbacks.EarlyStopping(
             monitor=early_stop_config.get('monitor', 'val_accuracy'),
             patience=early_stopping_patience,
+            min_delta=early_stop_config.get('min_delta', 0.0),
             restore_best_weights=early_stop_config.get('restore_best_weights', True),
             verbose=early_stop_config.get('verbose', 1)
         )
@@ -710,14 +821,37 @@ class HyperparameterTuner:
         else:
             raise ValueError(f"Unknown tuner type: {tuner_type}")
         
+        # Create callbacks for hyperparameter tuning (early stopping to save time)
+        early_stop_config = self.config.get('callbacks.early_stopping', {})
+        reduce_lr_config = self.config.get('callbacks.reduce_lr', {})
+        
+        tuning_callbacks = [
+            callbacks.EarlyStopping(
+                monitor=early_stop_config.get('monitor', 'val_accuracy'),
+                patience=early_stop_config.get('patience', 10),
+                min_delta=early_stop_config.get('min_delta', 0.0),
+                restore_best_weights=early_stop_config.get('restore_best_weights', True),
+                verbose=early_stop_config.get('verbose', 1)
+            ),
+            callbacks.ReduceLROnPlateau(
+                monitor=reduce_lr_config.get('monitor', 'val_loss'),
+                factor=reduce_lr_config.get('factor', 0.5),
+                patience=reduce_lr_config.get('patience', 5),
+                min_lr=reduce_lr_config.get('min_lr', 1e-7),
+                verbose=reduce_lr_config.get('verbose', 1)
+            )
+        ]
+        
         # Run hyperparameter search
         logger.info(f"Starting hyperparameter tuning for {model_name}...")
         logger.info(f"Tuner type: {tuner_type}, Max trials: {max_trials}")
+        logger.info(f"Early stopping enabled during tuning (patience: {early_stop_config.get('patience', 10)})")
         
         tuner.search(
             train_gen,
             epochs=epochs,
             validation_data=val_gen,
+            callbacks=tuning_callbacks,
             verbose=1
         )
         
@@ -728,6 +862,18 @@ class HyperparameterTuner:
         logger.info(f"Best hyperparameters for {model_name}:")
         for param, value in best_hps.values.items():
             logger.info(f"  {param}: {value}")
+        
+        # Print model parameters after tuning
+        total_params = best_model.count_params()
+        trainable_params = sum([tf.keras.backend.count_params(w) for w in best_model.trainable_weights])
+        non_trainable_params = total_params - trainable_params
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Model Parameters Summary for {model_name} (After Tuning)")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total parameters: {total_params:,}")
+        logger.info(f"Trainable parameters: {trainable_params:,}")
+        logger.info(f"Non-trainable parameters: {non_trainable_params:,}")
+        logger.info(f"{'='*60}\n")
         
         # Save best hyperparameters
         best_hps_file = output_dir / f"{model_name}_best_hyperparameters.json"
@@ -841,6 +987,18 @@ def train_dataset(
         model = model_builder.build_cnn_custom(input_shape, num_classes)
         tuned = False
     
+    # Print model parameters before training (for both tuned and non-tuned models)
+    total_params = model.count_params()
+    trainable_params = sum([tf.keras.backend.count_params(w) for w in model.trainable_weights])
+    non_trainable_params = total_params - trainable_params
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Model Parameters Summary for {model_name}")
+    logger.info(f"{'='*60}")
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"Non-trainable parameters: {non_trainable_params:,}")
+    logger.info(f"{'='*60}\n")
+    
     # Train and evaluate model
     logger.info(f"\n{'='*60}")
     logger.info(f"Training {model_name}")
@@ -890,6 +1048,90 @@ def train_dataset(
         for key, value in metrics.items():
             if value is not None:
                 mlflow.log_metric(key, value)
+        
+        # Bias Detection
+        bias_config = config.get('bias_detection', {})
+        if bias_config.get('enabled', False) and BIAS_DETECTION_AVAILABLE:
+            logger.info("\n" + "="*60)
+            logger.info("Running Bias Detection Analysis...")
+            logger.info("="*60)
+            
+            try:
+                # Get data path for bias detection
+                dataset_data_path = Path(base_data_path) / dataset_name
+                
+                # Create bias detector
+                bias_detector = BiasDetector(
+                    model=trainer.model,
+                    data_path=dataset_data_path,
+                    dataset_name=dataset_name,
+                    output_dir=metadata_dir / "bias_reports",
+                    config=config.config
+                )
+                
+                # Run bias detection on test set
+                max_samples = 64 if dry_run else None
+                bias_results = bias_detector.detect_bias(
+                    split='test',
+                    max_samples=max_samples
+                )
+                
+                # Log bias metrics to MLflow
+                if bias_results and 'overall_performance' in bias_results:
+                    mlflow.log_metric("bias_detected", 1 if bias_results.get('bias_detected', False) else 0)
+                    
+                    # Log slice performance differences and fairness metrics (Fairlearn-based)
+                    for feature, feature_data in bias_results.get('slices', {}).items():
+                        # Get group metrics (Fairlearn structure)
+                        group_metrics = feature_data.get('group_metrics', {})
+                        fairness_metrics = feature_data.get('fairness_metrics', {})
+                        
+                        if len(group_metrics) >= 2:
+                            # Log performance differences
+                            accuracies = [m['accuracy'] for m in group_metrics.values()]
+                            perf_diff = max(accuracies) - min(accuracies)
+                            mlflow.log_metric(f"bias_performance_diff_{feature}", perf_diff)
+                            
+                            # Log Fairlearn fairness metrics
+                            if 'demographic_parity_difference' in fairness_metrics:
+                                mlflow.log_metric(f"bias_dp_diff_{feature}", 
+                                                 abs(fairness_metrics['demographic_parity_difference']))
+                            if 'demographic_parity_ratio' in fairness_metrics:
+                                mlflow.log_metric(f"bias_dp_ratio_{feature}", 
+                                                 fairness_metrics['demographic_parity_ratio'])
+                            if 'equalized_odds_difference' in fairness_metrics:
+                                mlflow.log_metric(f"bias_eo_diff_{feature}", 
+                                                 abs(fairness_metrics['equalized_odds_difference']))
+                            if 'equalized_odds_ratio' in fairness_metrics:
+                                mlflow.log_metric(f"bias_eo_ratio_{feature}", 
+                                                 fairness_metrics['equalized_odds_ratio'])
+                
+                # Log bias report as artifact (look in dataset-specific subdirectory)
+                bias_reports_dir = metadata_dir / "bias_reports" / dataset_name
+                if bias_reports_dir.exists():
+                    bias_report_files = list(bias_reports_dir.glob(f"bias_report_{dataset_name}_*.json"))
+                    if bias_report_files:
+                        mlflow.log_artifact(str(bias_report_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    bias_html_files = list(bias_reports_dir.glob(f"bias_report_{dataset_name}_*.html"))
+                    if bias_html_files:
+                        mlflow.log_artifact(str(bias_html_files[-1]), f"bias_reports/{dataset_name}")
+                else:
+                    # Fallback to old location (for backwards compatibility)
+                    bias_report_files = list((metadata_dir / "bias_reports").glob(f"bias_report_{dataset_name}_*.json"))
+                    if bias_report_files:
+                        mlflow.log_artifact(str(bias_report_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    bias_html_files = list((metadata_dir / "bias_reports").glob(f"bias_report_{dataset_name}_*.html"))
+                    if bias_html_files:
+                        mlflow.log_artifact(str(bias_html_files[-1]), f"bias_reports/{dataset_name}")
+                
+                logger.info("Bias detection completed successfully.")
+                
+            except Exception as e:
+                logger.error(f"Error during bias detection: {e}", exc_info=True)
+        elif bias_config.get('enabled', False) and not BIAS_DETECTION_AVAILABLE:
+            logger.warning("Bias detection is enabled but module is not available.")
         
         # Log training history
         for epoch, (loss, acc, val_loss, val_acc) in enumerate(
@@ -954,17 +1196,6 @@ def train_dataset(
     logger.info(f"Model saved to: {model_path}")
     logger.info(f"Metadata saved to: {metadata_dir}")
     logger.info(f"{'='*60}\n")
-
-    return {
-        'model_path': str(model_path),
-        'model_name': model_name,
-        'dataset_name': dataset_name,
-        'test_accuracy': metrics['test_accuracy'],
-        'test_loss': metrics['test_loss'],
-        'metadata_file': str(summary_file),
-        'metadata': model_info,
-        'dry_run': dry_run
-    }
 
 
 def main():
@@ -1034,10 +1265,9 @@ def main():
     datasets = args.datasets or config.get('training.datasets', ['tb', 'lung_cancer_ct_scan'])
     
     # Train models for each dataset
-    results = []
     for dataset_name in datasets:
         try:
-            result = train_dataset(
+            train_dataset(
                 dataset_name=dataset_name,
                 base_data_path=data_path,
                 output_base_path=output_path,
@@ -1047,18 +1277,11 @@ def main():
                 image_size=image_size,
                 dry_run=args.dry_run
             )
-            results.append(result)
         except Exception as e:
             logger.error(f"Error training {dataset_name}: {e}", exc_info=True)
             continue
     
     logger.info("Custom CNN training completed!")
-
-    if results and not args.dry_run:
-        deployment_info_path = Path(output_path) / "deployment_info.json"
-        with open(deployment_info_path, 'w') as f:
-            json.dump(results, f, indent=2)
-        logger.info(f"Deployment info saved to {deployment_info_path}")
 
 
 if __name__ == "__main__":

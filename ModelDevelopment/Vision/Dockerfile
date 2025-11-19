@@ -6,35 +6,48 @@ FROM python:3.9
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Set environment variables early (for better caching)
+ENV PYTHONUNBUFFERED=1 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    MLFLOW_TRACKING_URI=file:///app/mlruns \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies in one layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libglib2.0-0 \
     libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy requirements file
+# Upgrade pip first (cached layer)
+RUN pip install --upgrade "pip<24.1"
+
+# Copy requirements file (this layer is cached if requirements.txt doesn't change)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies in optimized batches for better layer caching
+# Batch 1: Core dependencies (rarely change, cached well)
+RUN pip install --no-cache-dir numpy pandas Pillow pyyaml
 
-# Copy training scripts
-COPY train_resnet.py train_vit.py train_custom_cnn.py ./
+# Batch 2: TensorFlow (heavy, stable, good for caching)
+RUN pip install --no-cache-dir tensorflow
 
-# Create config directory (config file will be mounted as volume or can be copied separately)
-RUN mkdir -p ./config
+# Batch 3: ML libraries (moderate size)
+RUN pip install --no-cache-dir scikit-learn matplotlib "seaborn>=0.12.0"
 
-# Create directories for data and models
-RUN mkdir -p /app/data/preprocessed && \
-    mkdir -p /app/models && \
-    mkdir -p /app/logs
+# Batch 4: MLflow and tuning (moderate size)
+RUN pip install --no-cache-dir mlflow "mlflow[tensorflow]" keras-tuner
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV TF_CPP_MIN_LOG_LEVEL=2
-ENV MLFLOW_TRACKING_URI=file:///app/mlruns
+# Batch 5: Fairness and bias detection
+RUN pip install --no-cache-dir fairlearn
+
+# Copy training scripts and modules (this layer changes frequently)
+COPY train_resnet.py train_vit.py train_custom_cnn.py bias_detection.py bias_mitigation.py metrics_tracker.py visualization.py lightweight_metrics_tracker.py ./
+
+# Create directories in one layer
+RUN mkdir -p ./config /app/data/preprocessed /app/models /app/logs
 
 # CPU limit configuration
 # Note: CPU limits are set at runtime using --cpus flag

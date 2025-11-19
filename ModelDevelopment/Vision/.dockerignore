@@ -20,4 +20,16 @@ mlruns/
 .pytest_cache
 .coverage
 htmlcov/
+# Exclude data directories (mounted as volumes)
+data/
+*.csv
+*.json
+*.html
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
