@@ -565,6 +565,11 @@ pytest --cov=src tests/
 - Stratified split recommendations
 - Fairlearn post-processing techniques
 
+**For more information on bias detection and feature sensitivity analysis, refer to the respective READMEs:**
+
+- **RAG Model Bias Detection**: See [ModelDevelopment/RAG/README.md](ModelDevelopment/RAG/README.md) for bias detection in RAG model selection, including Fairlearn-powered fairness analysis and bias mitigation.
+- **Vision Model Training**: See [ModelDevelopment/Vision/README.md](ModelDevelopment/Vision/README.md) for Vision model training details and validation.
+
 ### Data Versioning with DVC
 
 #### Check DVC Status
