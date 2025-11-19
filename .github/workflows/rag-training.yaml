@@ -41,16 +41,16 @@ jobs:
               run: |
                   echo "Checking for RAG data in GCS..."
 
-                  # Check if index exists
-                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index.bin > /dev/null 2>&1; then
+                  # Check if index exists (using _latest suffix as per pipeline)
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index_latest.bin > /dev/null 2>&1; then
                     echo "FAISS index found"
                   else
                     echo "FAISS index not found - run DataPipeline first"
                     exit 1
                   fi
 
-                  # Check embeddings
-                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/embeddings.json > /dev/null 2>&1; then
+                  # Check embeddings (using _latest suffix as per pipeline)
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/embeddings_latest.json > /dev/null 2>&1; then
                     echo "Embeddings found"
                   else
                     echo "Embeddings not found"
