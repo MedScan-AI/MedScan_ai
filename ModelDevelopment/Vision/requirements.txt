@@ -21,3 +21,8 @@ seaborn>=0.12.0  # Pin to newer version that has pre-built wheels
 # Fairlearn for fairness assessment and bias detection
 fairlearn
 
+# Model interpretability
+shap
+lime
+scikit-image  # Required for LIME image segmentation
+

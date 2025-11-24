@@ -226,7 +226,7 @@ docker run --rm --cpus="4" `
     python train_resnet.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data
 
 # Train ViT
-docker run --rm --cpus="8" `
+docker run --rm --cpus="4" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
     -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
@@ -235,7 +235,7 @@ docker run --rm --cpus="8" `
     python train_vit.py --config /app/config/vision_training.yml --data_path /app/data/preprocessed --output_path /app/data
 
 # Train Custom CNN
-docker run --rm --cpus="8" `
+docker run --rm --cpus="4" `
     -v "${PROJECT_ROOT}\DataPipeline\data\preprocessed:/app/data/preprocessed" `
     -v "${PROJECT_ROOT}\DataPipeline\data\synthetic_metadata:/app/data/synthetic_metadata" `
     -v "${PROJECT_ROOT}\ModelDevelopment\data:/app/data" `
