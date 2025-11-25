@@ -444,6 +444,8 @@ class DataLoader:
         return train_gen, val_gen, test_gen
 
 
+# Note: keras.saving.register_keras_serializable() is not available in TensorFlow 2.20.0/Keras 3.12.0
+# Custom layers will be provided via custom_objects when loading models
 class ClassTokenLayer(Layer):
     """Custom layer to create class token index."""
     def call(self, inputs):

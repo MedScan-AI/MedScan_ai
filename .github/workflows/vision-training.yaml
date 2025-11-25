@@ -55,17 +55,26 @@ jobs:
               id: build
               run: |
                   DATASET="${{ github.event.inputs.dataset || 'tb' }}"
-                  EPOCHS="${{ github.event.inputs.epochs || '50' }}"
+                  DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+                  
+                  # If dry_run is true, use 2 epochs; otherwise use provided epochs or default 50
+                  if [ "$DRY_RUN" = "true" ]; then
+                    EPOCHS="2"
+                    echo "Dry run mode: Using 2 epochs and 64 images"
+                  else
+                    EPOCHS="${{ github.event.inputs.epochs || '50' }}"
+                  fi
 
                   echo "Triggering Cloud Build for Vision model training"
                   echo "Dataset: $DATASET"
                   echo "Epochs: $EPOCHS"
+                  echo "Dry Run: $DRY_RUN"
 
                   BUILD_ID=$(gcloud builds submit . \
                     --config=cloudbuild/vision-training.yaml \
                     --project=medscanai-476500 \
                     --region=us-central1 \
-                    --substitutions=_DATASET=$DATASET,_EPOCHS=$EPOCHS \
+                    --substitutions=_DATASET=$DATASET,_EPOCHS=$EPOCHS,_DRY_RUN=$DRY_RUN \
                     --format="value(id)")
 
                   echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT

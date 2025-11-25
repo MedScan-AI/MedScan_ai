@@ -13,6 +13,22 @@ from google.cloud import aiplatform
 from google.cloud import storage
 import tensorflow as tf
 
+# Import custom layers for ViT model deserialization
+# This ensures Keras can load models with custom layers
+try:
+    # Add the Vision directory to path to import custom layers
+    vision_dir = Path(__file__).parent
+    if str(vision_dir) not in sys.path:
+        sys.path.insert(0, str(vision_dir))
+    
+    # Import custom layers from train_vit.py to register them
+    # This must happen before loading any model that uses these layers
+    from train_vit import ClassTokenLayer, TileClassTokenLayer, ExtractClassTokenLayer
+    # The decorators in train_vit.py will register these layers with Keras
+except ImportError as e:
+    # If import fails, we'll try to load anyway (might work for ResNet/Custom CNN)
+    logging.warning(f"Could not import custom layers (this is OK for ResNet/Custom CNN): {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -67,7 +83,21 @@ def deploy_vision_model(
     
     # Convert .keras to SavedModel format
     logger.info("Loading Keras model...")
-    model = tf.keras.models.load_model(model_path)
+    # For ViT models, we need custom layers to be available
+    # They should already be imported at module level, but provide as custom_objects as fallback
+    custom_objects = {}
+    try:
+        from train_vit import ClassTokenLayer, TileClassTokenLayer, ExtractClassTokenLayer
+        custom_objects = {
+            'ClassTokenLayer': ClassTokenLayer,
+            'TileClassTokenLayer': TileClassTokenLayer,
+            'ExtractClassTokenLayer': ExtractClassTokenLayer
+        }
+    except ImportError:
+        # Not a ViT model or layers not needed
+        pass
+    
+    model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
     
     # Create temporary directory for SavedModel
     import tempfile

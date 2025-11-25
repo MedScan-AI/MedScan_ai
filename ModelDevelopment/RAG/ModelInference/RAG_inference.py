@@ -112,9 +112,9 @@ class RAGDataLoader:
         # Try each base path with each filename variant
         for base in possible_bases:
             for filename in filenames:
-                full_path = base / filename
-                if full_path.exists():
-                    return full_path
+            full_path = base / filename
+            if full_path.exists():
+                return full_path
         
         # Return first option as default (will fail later if doesn't exist)
         return possible_bases[0] / filenames[0]

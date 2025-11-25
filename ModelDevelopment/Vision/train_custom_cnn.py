@@ -973,8 +973,9 @@ def train_dataset(
         max_samples=max_samples
     )
     
-    # Get number of classes
-    num_classes = len(data_loader.get_classes())
+    # Get number of classes and class names
+    class_names = data_loader.get_classes()
+    num_classes = len(class_names)
     input_shape = (*image_size, 3)
     
     # Initialize MLflow
