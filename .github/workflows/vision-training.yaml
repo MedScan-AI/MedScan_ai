@@ -89,7 +89,8 @@ jobs:
 
                   gcloud builds log $BUILD_ID \
                     --stream \
-                    --project=medscanai-476500
+                    --project=medscanai-476500 \
+                    --region=us-central1
 
             - name: Check build status
               run: |
