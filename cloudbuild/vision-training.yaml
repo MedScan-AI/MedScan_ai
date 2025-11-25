@@ -12,7 +12,7 @@ steps:
         pip install -r ModelDevelopment/Vision/requirements.txt
         echo "Dependencies installed"
 
-  # Step 2: Install DVC and pull preprocessed data (combined - DVC must be in same step)
+  # Step 2: Install DVC and pull preprocessed data 
   - name: 'python:3.10'
     id: 'pull-dvc-data'
     entrypoint: 'bash'
@@ -428,6 +428,7 @@ steps:
     id: 'validate-model'
     waitFor: ['extract-results']
     entrypoint: 'bash'
+    secretEnv: ['SMTP_USER', 'SMTP_PASSWORD']
     args:
       - '-c'
       - |
@@ -466,16 +467,6 @@ steps:
           pip install --upgrade pip
           pip install secure-smtplib>=0.1.1
           
-          SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476500 2>&1)
-          SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476500 2>&1)
-          
-          if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
-            SMTP_USER=""
-            SMTP_PASSWORD=""
-          fi
-          
-          export SMTP_USER="$$SMTP_USER"
-          export SMTP_PASSWORD="$$SMTP_PASSWORD"
           export GCP_PROJECT_ID=medscanai-476500
           
           python utils/send_notification.py \
@@ -600,6 +591,7 @@ steps:
     id: 'send-completion-email'
     waitFor: ['deploy-to-vertex-ai']
     entrypoint: 'bash'
+    secretEnv: ['SMTP_USER', 'SMTP_PASSWORD']
     args:
       - '-c'
       - |
@@ -629,18 +621,6 @@ steps:
           BIAS_DETECTED="false"
         fi
         
-        # Get SMTP credentials from Secret Manager
-        SMTP_USER=$$(gcloud secrets versions access latest --secret="smtp-username" --project=medscanai-476500 2>&1)
-        SMTP_PASSWORD=$$(gcloud secrets versions access latest --secret="smtp-password" --project=medscanai-476500 2>&1)
-        
-        if echo "$$SMTP_USER" | grep -q "ERROR\|Permission denied\|not found"; then
-          echo "Warning: Could not retrieve SMTP credentials from Secret Manager"
-          SMTP_USER=""
-          SMTP_PASSWORD=""
-        fi
-        
-        export SMTP_USER="$$SMTP_USER"
-        export SMTP_PASSWORD="$$SMTP_PASSWORD"
         export GCP_PROJECT_ID=medscanai-476500
         export GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500
         
@@ -688,3 +668,10 @@ options:
   machineType: 'E2_HIGHCPU_8'
   diskSizeGb: 100
   logging: CLOUD_LOGGING_ONLY
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/medscanai-476500/secrets/smtp-username/versions/latest
+      env: SMTP_USER
+    - versionName: projects/medscanai-476500/secrets/smtp-password/versions/latest
+      env: SMTP_PASSWORD
