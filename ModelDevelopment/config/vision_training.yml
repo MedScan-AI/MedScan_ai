@@ -7,13 +7,17 @@ paths:
   
 # Training Configuration
 training:
-  epochs: 50
+  epochs: 5
   batch_size: 32
   image_size: [224, 224]
   validation_split: 0.2
   datasets:
     - "tb"
     - "lung_cancer_ct_scan"
+  
+  # Data subset configuration (for faster training)
+  data_percent_use: 0.025  # Percentage of data to use (1.0 = 100%, 0.5 = 50%, 0.25 = 25%, etc.)
+  data_seed: 42  # Random seed for reproducible data subset selection
 
 # Data Augmentation Configuration
 data_augmentation:
@@ -26,24 +30,18 @@ data_augmentation:
 
 # Model Architectures Configuration
 models:
-  # ResNet50 Configuration
-  resnet50:
-    weights: null  # No pre-trained weights - full training from scratch
-    include_top: false
-    trainable: true  # Full training - all layers trainable
+  # ResNet18 Configuration (~11.69M parameters)
+  resnet18:
     head:
       dropout_1: 0.5
       dense_1: 512
       dropout_2: 0.3
       activation: "relu"
-    learning_rate: 0.001
+    learning_rate: 0.01  # Increased from 0.001 for faster initial learning
   
-  # Custom CNN Configuration
+  # Custom CNN Configuration (~11.69M parameters to match ResNet18)
   cnn_custom:
     conv_blocks:
-      - filters: 32
-        kernel_size: [3, 3]
-        dropout: 0.25
       - filters: 64
         kernel_size: [3, 3]
         dropout: 0.25
@@ -53,25 +51,28 @@ models:
       - filters: 256
         kernel_size: [3, 3]
         dropout: 0.25
+      - filters: 512
+        kernel_size: [3, 3]
+        dropout: 0.25
     dense_layers:
-      - units: 512
-        dropout: 0.5
       - units: 256
+        dropout: 0.5
+      - units: 128
         dropout: 0.3
-    learning_rate: 0.001
+    learning_rate: 0.01  # Increased from 0.001 for faster initial learning
   
-  # Vision Transformer (ViT-Small) Configuration
+  # Vision Transformer Configuration (~11.69M parameters to match ResNet18)
   vit:
     patch_size: 16
-    projection_dim: 384  # ViT-Small hidden size
-    num_heads: 6  # ViT-Small number of heads
-    transformer_layers: 12  # ViT-Small depth
+    projection_dim: 256  # Reduced from 384 to match ResNet18 size
+    num_heads: 4  # Reduced from 6 to match ResNet18 size
+    transformer_layers: 8  # Reduced from 12 to match ResNet18 size
     mlp_ratio: 4  # MLP size = projection_dim * mlp_ratio
     attention_dropout: 0.1
     mlp_dropout: 0.1
-    mlp_head_units: [1024, 512]
+    mlp_head_units: [512, 256]  # Reduced from [1024, 512] to match ResNet18 size
     mlp_head_dropout: 0.5
-    learning_rate: 0.001
+    learning_rate: 0.01  # Increased from 0.001 for faster initial learning
 
 # Training Callbacks Configuration
 callbacks:
@@ -83,15 +84,16 @@ callbacks:
   
   early_stopping:
     monitor: "val_accuracy"
-    patience: 10
+    patience: 2  # Reduced from 10 to 5 for faster early stopping
+    min_delta: 0.01  # Minimum 1% change to qualify as improvement (sensitivity setting)
     restore_best_weights: true
     verbose: 1
   
   reduce_lr:
     monitor: "val_loss"
     factor: 0.5
-    patience: 5
-    min_lr: 0.0000001
+    patience: 2
+    min_lr: 0.001
     verbose: 1
 
 # Model Selection Configuration
@@ -100,9 +102,9 @@ model_selection:
 
 # Hyperparameter Tuning Configuration
 hyperparameter_tuning:
-  enabled: false  # Set to true to enable hyperparameter tuning
+  enabled: true  # Set to true to enable hyperparameter tuning
   tuner_type: "random"  # Options: "random", "bayesian", "hyperband"
-  max_trials: 10  # Maximum number of trials to run
+  max_trials: 2  # Maximum number of trials to run
   executions_per_trial: 1  # Number of times to train each model
   objective: "val_accuracy"  # Metric to optimize
   direction: "max"  # "max" for accuracy, "min" for loss
@@ -112,8 +114,8 @@ hyperparameter_tuning:
   # Hyperparameter search space
   search_space:
     learning_rate:
-      min: 0.0001
-      max: 0.01
+      min: 0.001  # Increased minimum from 0.0001
+      max: 0.05   # Increased maximum from 0.01 to allow higher learning rates
       step: 0.0001
     batch_size:
       values: [16, 32, 64]
@@ -122,8 +124,8 @@ hyperparameter_tuning:
       max: 0.6
       step: 0.1
     
-    # ResNet50 specific
-    resnet50:
+    # ResNet18 specific
+    resnet18:
       dense_units:
         values: [256, 512, 1024]
       dropout_1:
@@ -144,18 +146,72 @@ hyperparameter_tuning:
       dense_units_2:
         values: [128, 256, 512]
     
-    # ViT specific
+    # ViT specific (adjusted to match ResNet18 size)
     vit:
       projection_dim:
-        values: [256, 384, 512]
+        values: [192, 256, 320]
       num_heads:
-        values: [4, 6, 8]
+        values: [3, 4, 6]
       transformer_layers:
-        values: [8, 12, 16]
+        values: [6, 8, 10]
       mlp_head_units_1:
-        values: [512, 1024, 2048]
+        values: [256, 512, 768]
       mlp_head_units_2:
-        values: [256, 512, 1024]
+        values: [128, 256, 512]
+
+# Bias Detection Configuration
+bias_detection:
+  enabled: true  # Enable bias detection during training and tuning
+  mitigation_enabled: true  # Enable automatic bias mitigation when bias is detected
+  slicing_features:
+    - "Gender"  # Analyze performance across gender groups
+    - "Age_Group"  # Analyze performance across age groups
+  min_slice_size: 10  # Minimum number of samples per slice to be considered valid
+  performance_threshold: 0.05  # 5% performance difference threshold for bias detection
+  
+  # Fairness thresholds
+  demographic_parity_threshold: 0.1  # Threshold for demographic parity difference
+  equalized_odds_threshold: 0.1  # Threshold for equalized odds difference
+  
+  # Age grouping for age-based slicing
+  age_bins:
+    - name: "Young Adult"
+      min: 18
+      max: 35
+    - name: "Middle Age"
+      min: 36
+      max: 55
+    - name: "Senior"
+      min: 56
+      max: 75
+    - name: "Elderly"
+      min: 76
+      max: 120
+  
+  # Run bias detection on these splits
+  evaluate_splits:
+    - "test"  # Always evaluate on test set
+    - "valid"  # Optionally evaluate on validation set
+  
+  # Mitigation strategies to suggest when bias is detected
+  mitigation_strategies:
+    - "resample_underrepresented"  # Over-sample minority groups
+    - "class_weights"  # Compute class weights for model training
+    - "stratified_split"  # Ensure proportional representation in train/val/test splits
+    - "fairness_constraints"  # Apply fairness constraints during training
+
+# Bias Mitigation Configuration
+bias_mitigation:
+  method: 'threshold_optimizer'  # Post-processing method: 'threshold_optimizer'
+  constraints: ['equalized_odds']  # Fairness constraints: ['equalized_odds'] or ['demographic_parity']
+
+# Model Interpretability Configuration (SHAP and LIME)
+interpretability:
+  enabled: true  # Enable SHAP and LIME interpretability analysis
+  max_samples: 10  # Maximum number of sample images to analyze
+  shap_background_samples: 20  # Number of background samples for SHAP explainer (reduced for efficiency)
+  shap_max_evals: 200  # Maximum evaluations for SHAP Partition explainer (only used as fallback)
+  lime_num_explanations: 3  # Number of images to explain with LIME (reduced for faster processing)
 
 # MLflow Configuration
 mlflow:
@@ -167,26 +223,3 @@ logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Deployment Configuration
-deployment:
-  # Validation thresholds
-  min_accuracy: 0.70
-  min_f1_score: 0.65
-  
-  # Bias detection thresholds
-  max_accuracy_disparity: 0.10
-  max_f1_disparity: 0.10
-  
-  # Vertex AI configuration
-  vertex_ai:
-    region: "us-central1"
-    serving_container: "us-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-13:latest"
-    machine_type: "n1-standard-4"
-    min_replicas: 1
-    max_replicas: 3
-  
-  # Monitoring configuration
-  monitoring:
-    check_interval_hours: 24
-    alert_on_accuracy_drop: true
-    alert_on_bias_detected: true

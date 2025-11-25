@@ -56,6 +56,14 @@ except ImportError:
     BIAS_DETECTION_AVAILABLE = False
     logger.warning("Bias detection module not available. Skipping bias analysis.")
 
+# Import interpretability module (after logger is configured)
+try:
+    from interpretability import ModelInterpreter
+    INTERPRETABILITY_AVAILABLE = True
+except ImportError:
+    INTERPRETABILITY_AVAILABLE = False
+    logger.warning("Interpretability module not available. Skipping SHAP/LIME analysis.")
+
 # Set random seeds for reproducibility
 tf.random.set_seed(42)
 np.random.seed(42)
@@ -461,7 +469,9 @@ class ModelBuilder:
         conv_blocks = cnn_config.get('conv_blocks', [])
         dense_layers = cnn_config.get('dense_layers', [])
         
-        model_layers = []
+        # Use Input layer as first layer (recommended approach to avoid warning)
+        inputs = keras.Input(shape=input_shape)
+        x = inputs
         
         # Add convolutional blocks
         for i, block in enumerate(conv_blocks):
@@ -469,30 +479,27 @@ class ModelBuilder:
             kernel_size = tuple(block.get('kernel_size', [3, 3]))
             dropout = block.get('dropout', 0.25)
             
-            if i == 0:
-                model_layers.append(layers.Conv2D(filters, kernel_size, activation='relu', input_shape=input_shape))
-            else:
-                model_layers.append(layers.Conv2D(filters, kernel_size, activation='relu'))
-            
-            model_layers.append(layers.BatchNormalization())
-            model_layers.append(layers.MaxPooling2D((2, 2)))
-            model_layers.append(layers.Dropout(dropout))
+            x = layers.Conv2D(filters, kernel_size, activation='relu')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.MaxPooling2D((2, 2))(x)
+            x = layers.Dropout(dropout)(x)
         
         # Flatten
-        model_layers.append(layers.Flatten())
+        x = layers.Flatten()(x)
         
         # Add dense layers
         for layer in dense_layers:
             units = layer.get('units', 512)
             dropout = layer.get('dropout', 0.5)
-            model_layers.append(layers.Dense(units, activation='relu'))
-            model_layers.append(layers.BatchNormalization())
-            model_layers.append(layers.Dropout(dropout))
+            x = layers.Dense(units, activation='relu')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.Dropout(dropout)(x)
         
         # Output layer
-        model_layers.append(layers.Dense(num_classes, activation='softmax'))
+        outputs = layers.Dense(num_classes, activation='softmax')(x)
         
-        model = models.Sequential(model_layers)
+        # Create model using functional API
+        model = models.Model(inputs=inputs, outputs=outputs, name='custom_cnn')
         
         learning_rate = cnn_config.get('learning_rate', 0.001)
         model.compile(
@@ -678,17 +685,19 @@ class ModelTrainer:
 class HyperparameterTuner:
     """Hyperparameter tuning using KerasTuner."""
     
-    def __init__(self, config: ConfigLoader, model_builder: 'ModelBuilder'):
+    def __init__(self, config: ConfigLoader, model_builder: 'ModelBuilder', dataset_name: str = None):
         """
         Initialize HyperparameterTuner.
         
         Args:
             config: ConfigLoader instance
             model_builder: ModelBuilder instance
+            dataset_name: Name of the dataset (for project name isolation)
         """
         self.config = config
         self.model_builder = model_builder
         self.tuning_config = config.get('hyperparameter_tuning', {})
+        self.dataset_name = dataset_name or 'default'
     
     def _build_tunable_cnn_custom(self, hp, input_shape: Tuple[int, int, int], num_classes: int) -> models.Model:
         """Build tunable Custom CNN model."""
@@ -725,29 +734,30 @@ class HyperparameterTuner:
             step=common_space.get('dropout_rate', {}).get('step', 0.1)
         )
         
-        # Build model with tunable parameters
-        model_layers = []
+        # Build model with tunable parameters using functional API
+        # Use Input layer as first layer (recommended approach to avoid warning)
+        inputs = keras.Input(shape=input_shape)
+        x = inputs
+        
         base_filters = [32, 64, 128, 256]
         
         for i, base_filter in enumerate(base_filters):
             filters = int(base_filter * multiplier)
-            if i == 0:
-                model_layers.append(layers.Conv2D(filters, (3, 3), activation='relu', input_shape=input_shape))
-            else:
-                model_layers.append(layers.Conv2D(filters, (3, 3), activation='relu'))
-            model_layers.append(layers.BatchNormalization())
-            model_layers.append(layers.MaxPooling2D((2, 2)))
-            model_layers.append(layers.Dropout(dropout))
+            x = layers.Conv2D(filters, (3, 3), activation='relu')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.MaxPooling2D((2, 2))(x)
+            x = layers.Dropout(dropout)(x)
         
-        model_layers.append(layers.Flatten())
-        model_layers.append(layers.Dense(dense_units_1, activation='relu'))
-        model_layers.append(layers.BatchNormalization())
-        model_layers.append(layers.Dropout(dropout))
-        model_layers.append(layers.Dense(dense_units_2, activation='relu'))
-        model_layers.append(layers.Dropout(dropout * 0.6))
-        model_layers.append(layers.Dense(num_classes, activation='softmax'))
+        x = layers.Flatten()(x)
+        x = layers.Dense(dense_units_1, activation='relu')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(dropout)(x)
+        x = layers.Dense(dense_units_2, activation='relu')(x)
+        x = layers.Dropout(dropout * 0.6)(x)
+        outputs = layers.Dense(num_classes, activation='softmax')(x)
         
-        model = models.Sequential(model_layers)
+        # Create model using functional API
+        model = models.Model(inputs=inputs, outputs=outputs, name='tunable_custom_cnn')
         model.compile(
             optimizer=optimizers.Adam(learning_rate=learning_rate),
             loss='categorical_crossentropy',
@@ -787,7 +797,9 @@ class HyperparameterTuner:
         objective = self.tuning_config.get('objective', 'val_accuracy')
         direction = self.tuning_config.get('direction', 'max')
         directory = Path(self.tuning_config.get('directory', '../data/hyperparameter_tuning'))
-        project_name = f"{self.tuning_config.get('project_name', 'vision_model_tuning')}_{model_name}"
+        # Include dataset name in project name to avoid conflicts between datasets
+        dataset_name = getattr(self, 'dataset_name', 'default')
+        project_name = f"{self.tuning_config.get('project_name', 'vision_model_tuning')}_{model_name}_{dataset_name}"
         
         # Create tuner
         model_builder_fn = lambda hp: self._build_tunable_cnn_custom(hp, input_shape, num_classes)
@@ -929,8 +941,12 @@ def train_dataset(
     day = now.strftime("%d")
     timestamp = now.strftime("%H%M%S")
     
+    # Set model name early for directory structure
+    model_name = 'CNN_Custom'
+    
     data_dir = Path(output_base_path)
-    models_dir = data_dir / "models" / year / month / day / timestamp
+    # Add dataset and model name as additional partition
+    models_dir = data_dir / "models" / year / month / day / timestamp / f"{dataset_name}_{model_name}"
     logs_dir = data_dir / "logs" / year / month / day / timestamp
     metadata_dir = data_dir / year / month / day / timestamp
     mlflow_dir = data_dir / "mlruns"
@@ -948,6 +964,8 @@ def train_dataset(
     
     # Load data
     data_loader = DataLoader(base_data_path, dataset_name, config)
+    # data_loader.data_path is already the latest day directory
+    latest_day = data_loader.data_path
     max_samples = 64 if dry_run else None
     train_gen, val_gen, test_gen = data_loader.create_data_generators(
         batch_size=batch_size,
@@ -967,9 +985,7 @@ def train_dataset(
     
     # Build model
     model_builder = ModelBuilder(config)
-    hyperparameter_tuner = HyperparameterTuner(config, model_builder) if tuning_enabled else None
-    
-    model_name = 'CNN_Custom'
+    hyperparameter_tuner = HyperparameterTuner(config, model_builder, dataset_name) if tuning_enabled else None
     
     if tuning_enabled:
         logger.info("Hyperparameter tuning is enabled. Tuning Custom CNN...")
@@ -1058,30 +1074,72 @@ def train_dataset(
             
             try:
                 # Get data path for bias detection
-                dataset_data_path = Path(base_data_path) / dataset_name
+                # For sampled data, we need to pass both:
+                # 1. The sampled test directory (for loading images)
+                # 2. The original data path (for loading metadata)
+                if hasattr(test_gen, '_sampled_path') and test_gen._sampled_path:
+                    # The sampled path is the test directory itself
+                    sampled_test_path = test_gen._sampled_path
+                    # Original data path for metadata lookup (latest_day is already the full path)
+                    original_data_path = latest_day
+                    logger.info(f"Using sampled test directory for images: {sampled_test_path}")
+                    logger.info(f"Using original data path for metadata: {original_data_path}")
+                else:
+                    # Use original data path for both images and metadata (latest_day is already the full path)
+                    sampled_test_path = None
+                    original_data_path = latest_day
+                    logger.info(f"Using original data path for bias detection: {original_data_path}")
                 
                 # Create bias detector
+                # Pass sampled test path if available, otherwise use original data path
                 bias_detector = BiasDetector(
                     model=trainer.model,
-                    data_path=dataset_data_path,
+                    data_path=sampled_test_path if sampled_test_path else original_data_path,
                     dataset_name=dataset_name,
                     output_dir=metadata_dir / "bias_reports",
-                    config=config.config
+                    config=config.config,
+                    metadata_path=original_data_path  # Always use original path for metadata
                 )
                 
-                # Run bias detection on test set
+                # Run bias detection (and mitigation if enabled) on test set
                 max_samples = 64 if dry_run else None
-                bias_results = bias_detector.detect_bias(
-                    split='test',
-                    max_samples=max_samples
-                )
+                mitigation_enabled = bias_config.get('mitigation_enabled', False)
+                
+                logger.info(f"Bias detection enabled: {bias_config.get('enabled', False)}")
+                logger.info(f"Bias mitigation enabled: {mitigation_enabled}")
+                
+                if mitigation_enabled:
+                    logger.info("Running bias detection with mitigation enabled...")
+                    bias_results = bias_detector.detect_and_mitigate_bias(
+                        split='test',
+                        max_samples=max_samples,
+                        apply_mitigation=True
+                    )
+                    # Extract original results for logging (mitigation results are separate)
+                    if 'original_results' in bias_results:
+                        bias_results_for_logging = bias_results.get('original_results', {})
+                        if 'mitigated_results' in bias_results:
+                            logger.info("Bias mitigation completed. Check comparison report for details.")
+                        else:
+                            logger.warning("Bias mitigation was attempted but no mitigated results were generated.")
+                            if 'error' in bias_results:
+                                logger.error(f"Mitigation error: {bias_results.get('error')}")
+                    else:
+                        bias_results_for_logging = bias_results
+                else:
+                    logger.info("Running bias detection only (mitigation disabled)...")
+                    bias_results = bias_detector.detect_bias(
+                        split='test',
+                        max_samples=max_samples
+                    )
+                    bias_results_for_logging = bias_results
                 
                 # Log bias metrics to MLflow
-                if bias_results and 'overall_performance' in bias_results:
-                    mlflow.log_metric("bias_detected", 1 if bias_results.get('bias_detected', False) else 0)
+                if bias_results_for_logging and 'overall_performance' in bias_results_for_logging:
+                    mlflow.log_metric("bias_detected", 1 if bias_results_for_logging.get('bias_detected', False) else 0)
                     
                     # Log slice performance differences and fairness metrics (Fairlearn-based)
-                    for feature, feature_data in bias_results.get('slices', {}).items():
+                    for feature, feature_data in bias_results_for_logging.get('slices', {}).items():
                         # Get group metrics (Fairlearn structure)
                         group_metrics = feature_data.get('group_metrics', {})
                         fairness_metrics = feature_data.get('fairness_metrics', {})
@@ -1106,6 +1164,16 @@ def train_dataset(
                                 mlflow.log_metric(f"bias_eo_ratio_{feature}", 
                                                  fairness_metrics['equalized_odds_ratio'])
                 
+                # If mitigation was applied, also log mitigated results
+                if mitigation_enabled and isinstance(bias_results, dict) and 'mitigated_results' in bias_results:
+                    mlflow.log_metric("bias_mitigation_applied", 1)
+                    mitigated_results = bias_results.get('mitigated_results', {})
+                    if 'overall_performance' in mitigated_results:
+                        mlflow.log_metric("bias_mitigated_accuracy", 
+                                         mitigated_results['overall_performance'].get('accuracy', 0))
+                        mlflow.log_metric("bias_mitigated_bias_detected", 
+                                         1 if mitigated_results.get('bias_detected', False) else 0)
+                
                 # Log bias report as artifact (look in dataset-specific subdirectory)
                 bias_reports_dir = metadata_dir / "bias_reports" / dataset_name
                 if bias_reports_dir.exists():
@@ -1116,6 +1184,12 @@ def train_dataset(
                     bias_html_files = list(bias_reports_dir.glob(f"bias_report_{dataset_name}_*.html"))
                     if bias_html_files:
                         mlflow.log_artifact(str(bias_html_files[-1]), f"bias_reports/{dataset_name}")
+                    
+                    # Log mitigation comparison report if available
+                    if mitigation_enabled:
+                        comparison_files = list(bias_reports_dir.glob(f"bias_mitigation_comparison_*.html"))
+                        if comparison_files:
+                            mlflow.log_artifact(str(comparison_files[-1]), f"bias_reports/{dataset_name}")
                 else:
                     # Fallback to old location (for backwards compatibility)
                     bias_report_files = list((metadata_dir / "bias_reports").glob(f"bias_report_{dataset_name}_*.json"))
@@ -1132,6 +1206,92 @@ def train_dataset(
                 logger.error(f"Error during bias detection: {e}", exc_info=True)
         elif bias_config.get('enabled', False) and not BIAS_DETECTION_AVAILABLE:
             logger.warning("Bias detection is enabled but module is not available.")
+        
+        # Model Interpretability (SHAP and LIME)
+        interpretability_config = config.get('interpretability', {})
+        if interpretability_config.get('enabled', False) and INTERPRETABILITY_AVAILABLE:
+            logger.info("\n" + "="*60)
+            logger.info("Running Model Interpretability Analysis (SHAP & LIME)...")
+            logger.info("="*60)
+            
+            try:
+                # Get data path for interpretability (same as bias detection)
+                # For sampled data, the sampled path is the test directory itself
+                if hasattr(test_gen, '_sampled_path') and test_gen._sampled_path:
+                    # The sampled path is already the test directory (e.g., /tmp/data_subset_xxx/test)
+                    interpretability_data_path = Path(test_gen._sampled_path)
+                    logger.info(f"Using sampled test directory for interpretability: {interpretability_data_path}")
+                else:
+                    # Use original data path (latest_day is already the full path)
+                    interpretability_data_path = latest_day
+                    logger.info(f"Using original data path for interpretability: {interpretability_data_path}")
+                
+                # Create interpreter
+                interpreter = ModelInterpreter(
+                    model=trainer.model,
+                    class_names=class_names,
+                    output_dir=metadata_dir / "interpretability_reports",
+                    image_size=image_size
+                )
+                
+                # Generate interpretability report
+                max_samples = 64 if dry_run else interpretability_config.get('max_samples', 10)
+                shap_background = interpretability_config.get('shap_background_samples', 50)
+                shap_evals = interpretability_config.get('shap_max_evals', 100)
+                lime_explanations = interpretability_config.get('lime_num_explanations', 5)
+                
+                interpretability_results = interpreter.generate_interpretability_report(
+                    data_path=interpretability_data_path,
+                    split='test',
+                    max_samples=max_samples,
+                    shap_background_samples=shap_background,
+                    shap_max_evals=shap_evals,
+                    lime_num_explanations=lime_explanations
+                )
+                
+                # Log interpretability metrics to MLflow
+                if interpretability_results and 'error' not in interpretability_results:
+                    mlflow.log_metric("interpretability_images_analyzed", 
+                                     interpretability_results.get('num_images_loaded', 0))
+                    
+                    # Log SHAP results
+                    if 'shap' in interpretability_results and interpretability_results['shap'].get('success'):
+                        mlflow.log_metric("shap_explanations_generated", 
+                                         interpretability_results['shap'].get('num_explained', 0))
+                        mlflow.log_metric("shap_background_samples", 
+                                         interpretability_results['shap'].get('background_samples', 0))
+                    
+                    # Log LIME results
+                    if 'lime' in interpretability_results and interpretability_results['lime'].get('success'):
+                        mlflow.log_metric("lime_explanations_generated", 
+                                         interpretability_results['lime'].get('num_explained', 0))
+                
+                # Log interpretability artifacts
+                interpretability_reports_dir = metadata_dir / "interpretability_reports"
+                if interpretability_reports_dir.exists():
+                    # Log JSON report
+                    report_file = interpretability_reports_dir / "interpretability_report.json"
+                    if report_file.exists():
+                        mlflow.log_artifact(str(report_file), "interpretability_reports")
+                    
+                    # Log SHAP plots
+                    if 'shap' in interpretability_results and 'plots' in interpretability_results['shap']:
+                        for plot_path in interpretability_results['shap']['plots']:
+                            if Path(plot_path).exists():
+                                mlflow.log_artifact(plot_path, "interpretability_reports/shap")
+                    
+                    # Log LIME plots
+                    if 'lime' in interpretability_results and 'plots' in interpretability_results['lime']:
+                        for plot_path in interpretability_results['lime']['plots']:
+                            if Path(plot_path).exists():
+                                mlflow.log_artifact(plot_path, "interpretability_reports/lime")
+                
+                logger.info("Model interpretability analysis completed successfully.")
+                
+            except Exception as e:
+                logger.error(f"Error during interpretability analysis: {e}", exc_info=True)
+        elif interpretability_config.get('enabled', False) and not INTERPRETABILITY_AVAILABLE:
+            logger.warning("Interpretability is enabled but module is not available.")
         
         # Log training history
         for epoch, (loss, acc, val_loss, val_acc) in enumerate(
@@ -1181,8 +1341,8 @@ def train_dataset(
     # Save model info with model path
     model_path = models_dir / f"{model_name}_best.keras"
     model_info['model_path'] = str(model_path)
-    # Create relative path with date partition structure (reuse variables from above)
-    model_info['model_relative_path'] = f"models/{year}/{month}/{day}/{timestamp}/{model_name}_best.keras"
+    # Create relative path with date partition structure including dataset and model name
+    model_info['model_relative_path'] = f"models/{year}/{month}/{day}/{timestamp}/{dataset_name}_{model_name}/{model_name}_best.keras"
     model_info['dry_run'] = dry_run
     
     summary_file = metadata_dir / "training_summary.json"

@@ -71,6 +71,14 @@ except ImportError:
     BIAS_DETECTION_AVAILABLE = False
     logger.warning("Bias detection module not available. Skipping bias analysis.")
 
+# Import interpretability module (after logger is configured)
+try:
+    from interpretability import ModelInterpreter
+    INTERPRETABILITY_AVAILABLE = True
+except ImportError:
+    INTERPRETABILITY_AVAILABLE = False
+    logger.warning("Interpretability module not available. Skipping SHAP/LIME analysis.")
+
 # Set random seeds for reproducibility
 tf.random.set_seed(42)
 np.random.seed(42)
@@ -1023,8 +1031,12 @@ def train_dataset(
     day = now.strftime("%d")
     timestamp = now.strftime("%H%M%S")
     
+    # Set model name early for directory structure
+    model_name = 'CNN_ResNet18'
+    
     data_dir = Path(output_base_path)
-    models_dir = data_dir / "models" / year / month / day / timestamp
+    # Add dataset and model name as additional partition
+    models_dir = data_dir / "models" / year / month / day / timestamp / f"{dataset_name}_{model_name}"
     logs_dir = data_dir / "logs" / year / month / day / timestamp
     metadata_dir = data_dir / year / month / day / timestamp
     mlflow_dir = data_dir / "mlruns"
@@ -1065,8 +1077,6 @@ def train_dataset(
     # Build model
     model_builder = ModelBuilder(config)
     hyperparameter_tuner = HyperparameterTuner(config, model_builder, dataset_name) if tuning_enabled else None
-    
-    model_name = 'CNN_ResNet18'
     
     if tuning_enabled:
         logger.info("Hyperparameter tuning is enabled. Tuning ResNet18...")
@@ -1434,6 +1444,92 @@ def train_dataset(
         elif bias_config.get('enabled', False) and not BIAS_DETECTION_AVAILABLE:
             logger.warning("Bias detection is enabled but module is not available.")
         
+        # Model Interpretability (SHAP and LIME)
+        interpretability_config = config.get('interpretability', {})
+        if interpretability_config.get('enabled', False) and INTERPRETABILITY_AVAILABLE:
+            logger.info("\n" + "="*60)
+            logger.info("Running Model Interpretability Analysis (SHAP & LIME)...")
+            logger.info("="*60)
+            
+            try:
+                # Get data path for interpretability (same as bias detection)
+                # For sampled data, the sampled path is the test directory itself
+                if hasattr(test_gen, '_sampled_path') and test_gen._sampled_path:
+                    # The sampled path is already the test directory (e.g., /tmp/data_subset_xxx/test)
+                    interpretability_data_path = Path(test_gen._sampled_path)
+                    logger.info(f"Using sampled test directory for interpretability: {interpretability_data_path}")
+                else:
+                    # Use original data path (latest_day is already the full path)
+                    interpretability_data_path = latest_day
+                    logger.info(f"Using original data path for interpretability: {interpretability_data_path}")
+                
+                # Create interpreter
+                interpreter = ModelInterpreter(
+                    model=trainer.model,
+                    class_names=class_names,
+                    output_dir=metadata_dir / "interpretability_reports",
+                    image_size=image_size
+                )
+                
+                # Generate interpretability report
+                max_samples = 64 if dry_run else interpretability_config.get('max_samples', 10)
+                shap_background = interpretability_config.get('shap_background_samples', 50)
+                shap_evals = interpretability_config.get('shap_max_evals', 100)
+                lime_explanations = interpretability_config.get('lime_num_explanations', 5)
+                
+                interpretability_results = interpreter.generate_interpretability_report(
+                    data_path=interpretability_data_path,
+                    split='test',
+                    max_samples=max_samples,
+                    shap_background_samples=shap_background,
+                    shap_max_evals=shap_evals,
+                    lime_num_explanations=lime_explanations
+                )
+                
+                # Log interpretability metrics to MLflow
+                if interpretability_results and 'error' not in interpretability_results:
+                    mlflow.log_metric("interpretability_images_analyzed", 
+                                     interpretability_results.get('num_images_loaded', 0))
+                    
+                    # Log SHAP results
+                    if 'shap' in interpretability_results and interpretability_results['shap'].get('success'):
+                        mlflow.log_metric("shap_explanations_generated", 
+                                         interpretability_results['shap'].get('num_explained', 0))
+                        mlflow.log_metric("shap_background_samples", 
+                                         interpretability_results['shap'].get('background_samples', 0))
+                    
+                    # Log LIME results
+                    if 'lime' in interpretability_results and interpretability_results['lime'].get('success'):
+                        mlflow.log_metric("lime_explanations_generated", 
+                                         interpretability_results['lime'].get('num_explained', 0))
+                
+                # Log interpretability artifacts
+                interpretability_reports_dir = metadata_dir / "interpretability_reports"
+                if interpretability_reports_dir.exists():
+                    # Log JSON report
+                    report_file = interpretability_reports_dir / "interpretability_report.json"
+                    if report_file.exists():
+                        mlflow.log_artifact(str(report_file), "interpretability_reports")
+                    
+                    # Log SHAP plots
+                    if 'shap' in interpretability_results and 'plots' in interpretability_results['shap']:
+                        for plot_path in interpretability_results['shap']['plots']:
+                            if Path(plot_path).exists():
+                                mlflow.log_artifact(plot_path, "interpretability_reports/shap")
+                    
+                    # Log LIME plots
+                    if 'lime' in interpretability_results and 'plots' in interpretability_results['lime']:
+                        for plot_path in interpretability_results['lime']['plots']:
+                            if Path(plot_path).exists():
+                                mlflow.log_artifact(plot_path, "interpretability_reports/lime")
+                
+                logger.info("Model interpretability analysis completed successfully.")
+                
+            except Exception as e:
+                logger.error(f"Error during interpretability analysis: {e}", exc_info=True)
+        elif interpretability_config.get('enabled', False) and not INTERPRETABILITY_AVAILABLE:
+            logger.warning("Interpretability is enabled but module is not available.")
+        
         # Log training history
         for epoch, (loss, acc, val_loss, val_acc) in enumerate(
             zip(history['loss'], history['accuracy'],
@@ -1585,8 +1681,8 @@ def train_dataset(
     # Save model info with model path
     model_path = models_dir / f"{model_name}_best.keras"
     model_info['model_path'] = str(model_path)
-    # Create relative path with date partition structure (reuse variables from above)
-    model_info['model_relative_path'] = f"models/{year}/{month}/{day}/{timestamp}/{model_name}_best.keras"
+    # Create relative path with date partition structure including dataset and model name
+    model_info['model_relative_path'] = f"models/{year}/{month}/{day}/{timestamp}/{dataset_name}_{model_name}/{model_name}_best.keras"
     model_info['dry_run'] = dry_run
     
     summary_file = metadata_dir / "training_summary.json"

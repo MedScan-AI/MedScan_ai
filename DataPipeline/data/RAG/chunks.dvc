@@ -1,6 +1,6 @@
 outs:
-- md5: cf1139043196f71a67b4e7d8788ad818.dir
-  size: 2243884
+- md5: af6f8a9b5586c2143a5d2cc01beb5998.dir
+  size: 982121
   nfiles: 1
   hash: md5
   path: chunks

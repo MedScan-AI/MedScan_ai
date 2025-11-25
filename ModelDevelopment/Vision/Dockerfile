@@ -43,8 +43,11 @@ RUN pip install --no-cache-dir mlflow "mlflow[tensorflow]" keras-tuner
 # Batch 5: Fairness and bias detection
 RUN pip install --no-cache-dir fairlearn
 
+# Batch 6: Model interpretability (SHAP and LIME)
+RUN pip install --no-cache-dir shap lime scikit-image
+
 # Copy training scripts and modules (this layer changes frequently)
-COPY train_resnet.py train_vit.py train_custom_cnn.py bias_detection.py bias_mitigation.py metrics_tracker.py visualization.py lightweight_metrics_tracker.py ./
+COPY train_resnet.py train_vit.py train_custom_cnn.py bias_detection.py bias_mitigation.py metrics_tracker.py visualization.py lightweight_metrics_tracker.py interpretability.py ./
 
 # Create directories in one layer
 RUN mkdir -p ./config /app/data/preprocessed /app/models /app/logs
