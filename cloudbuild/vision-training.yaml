@@ -128,7 +128,7 @@ steps:
         
         # Try pulling with explicit remote and no git check
         # Some DVC versions require git even with --no-scm, so we handle gracefully
-        if ! dvc pull data/preprocessed.dvc -r vision --jobs $$DVC_JOBS 2>&1; then
+        if ! dvc pull data/preprocessed.dvc data/synthetic_metadata.dvc -r vision --jobs $$DVC_JOBS 2>&1; then
           echo "DVC pull failed, checking error..."
           echo "If error is about git repository, DVC might need git even with --no-scm"
           echo "Attempting workaround: creating minimal git repo..."
@@ -144,7 +144,7 @@ steps:
           
           # Retry pull after git init
           echo "Retrying DVC pull..."
-          dvc pull data/preprocessed.dvc -r vision --jobs $$DVC_JOBS
+          dvc pull data/preprocessed.dvc data/synthetic_metadata.dvc -r vision --jobs $$DVC_JOBS
           
           if [ $$? -ne 0 ]; then
             echo "ERROR: DVC pull failed even after git initialization"
