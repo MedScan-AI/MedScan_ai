@@ -627,16 +627,11 @@ steps:
         # Determine bias check passed (opposite of bias detected)
         if [ "$$BIAS_DETECTED" = "True" ]; then
           BIAS_CHECK_PASSED="false"
-          # Send bias failure email
-          python utils/send_notification.py \
-            --type bias-failure \
-            --build-id ${BUILD_ID} \
-            --model-name "$$MODEL_NAME" \
-            --dataset ${_DATASET} \
-            --bias-details /workspace/bias_results.json || echo "Bias failure email failed (non-critical)"
         else
           BIAS_CHECK_PASSED="true"
         fi
+        
+        echo "$$BIAS_DETECTED" > /workspace/bias_detected.txt
         
         # Send completion email
         python utils/send_notification.py \
@@ -647,7 +642,9 @@ steps:
           --test-accuracy $$TEST_ACCURACY \
           --validation-passed "$$VALIDATION_PASSED" \
           --bias-check-passed "$$BIAS_CHECK_PASSED" \
-          --bias-details /workspace/bias_results.json || echo "Completion email failed (non-critical)"
+          --bias-details /workspace/bias_results.json \
+          --bias-detected "$$BIAS_DETECTED" \
+          --bias-report-path vision/validation/${BUILD_ID}/bias_results.json || echo "Completion email failed (non-critical)"
 
 # Note: Pipeline failure emails are handled by individual steps that write to /workspace/pipeline_error.txt
 # Critical steps (train-resnet, train-vit, train-custom-cnn, select-best-model, validate-model, deploy-to-vertex-ai)
