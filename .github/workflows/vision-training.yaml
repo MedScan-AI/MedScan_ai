@@ -98,6 +98,7 @@ jobs:
 
                   STATUS=$(gcloud builds describe $BUILD_ID \
                     --project=medscanai-476500 \
+                    --region=us-central1 \
                     --format="value(status)")
 
                   echo "Build status: $STATUS"
