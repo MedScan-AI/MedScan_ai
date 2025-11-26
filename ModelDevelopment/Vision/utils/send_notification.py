@@ -173,9 +173,7 @@ Bias report:
                 <li style="color: {bias_color};">Bias Check: {bias_status}</li>
                 <li style="color: {deployment_color};">Deployment: {'SUCCESS' if validation_passed and bias_check_passed else 'SKIPPED/FAILED'}</li>
             </ul>
-            {"<p><a href=\"https://console.cloud.google.com/storage/browser/"
-             + f"{bucket_name}/vision/validation/{build_id}?project={project_id}\">View bias report →</a></p>"
-             if not bias_check_passed else ""}
+            {f'<p><strong>Bias report:</strong> gs://{bucket_name}/vision/validation/{build_id}/bias_results.json<br><a href=\"https://console.cloud.google.com/storage/browser/{bucket_name}/vision/validation/{build_id}?project={project_id}\">View bias artifacts →</a></p>' if not bias_check_passed else ''}
             
             <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project={project_id}">View Build Logs →</a></p>
         </div>
