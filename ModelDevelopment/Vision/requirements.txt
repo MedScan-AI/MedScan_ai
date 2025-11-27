@@ -1,0 +1,28 @@
+# TensorFlow packages
+tensorflow
+keras-tuner  # For hyperparameter tuning
+
+# Core dependencies (order matters - numpy must be first)
+numpy
+pandas
+Pillow
+pyyaml  # For config file loading
+
+# MLflow for experiment tracking
+mlflow
+mlflow[tensorflow]
+
+# Additional utilities
+scikit-learn
+matplotlib>=3.5.0
+seaborn>=0.12.0  # Pin to newer version that has pre-built wheels
+
+# Bias detection and fairness
+# Fairlearn for fairness assessment and bias detection
+fairlearn
+
+# Model interpretability
+shap
+lime
+scikit-image  # Required for LIME image segmentation
+

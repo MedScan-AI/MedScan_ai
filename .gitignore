@@ -89,6 +89,20 @@ wheels/
 # Documentation builds
 docs/_build/
 
+# Personal/Local Documentation (exclude from repo)
+docs/CI_CD_EXPLAINED.md
+docs/MODEL_DEPLOYMENT_REQUIREMENTS.md
+docs/MODEL_DEVELOPMENT_REQUIREMENTS.md
+docs/PIPELINE_OVERVIEW.md
+docs/RAG_BUILD_VERIFICATION.md
+docs/RUN_RAG_PIPELINE.md
+docs/TA_DEMO_CHECKLIST.md
+docs/TEST_PIPELINE.md
+
+# Personal/Local Files
+README 2.md
+report 2.txt
+
 # DataPipeline - ignore actual data but keep .dvc files
 # First un-ignore directories, then ignore contents, then un-ignore .dvc files
 !DataPipeline/

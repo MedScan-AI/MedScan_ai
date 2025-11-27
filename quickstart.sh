@@ -42,9 +42,9 @@ AIRFLOW_FIRSTNAME=Admin
 AIRFLOW_LASTNAME=User
 AIRFLOW_EMAIL=admin@medscan.ai
 
-# GCP Configuration
-GCP_PROJECT_ID=medscanai-476203
-GCS_BUCKET_NAME=medscan-data
+# GCP Configuration (use environment variables if set, otherwise use defaults)
+GCP_PROJECT_ID=${GCP_PROJECT_ID:-medscanai-476203}
+GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-medscan-data}
 
 # Email Alerts
 SMTP_HOST=smtp.gmail.com

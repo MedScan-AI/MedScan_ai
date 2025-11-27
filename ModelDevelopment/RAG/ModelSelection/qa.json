@@ -1,0 +1,62 @@
+[
+    {
+        "Q": "What is tuberculosis?",
+        "A": "Tuberculosis (TB) is an infectious disease caused by bacteria that usually affects the lungs. It spreads through the air when someone with TB coughs, sneezes, or spits. TB is preventable and curable."
+    },
+    {
+        "Q": "What causes tuberculosis?",
+        "A": "TB is caused by Mycobacterium tuberculosis. The bacteria spread through tiny droplets released when infected people cough, sneeze, or spit."
+    },
+    {
+        "Q": "How common is tuberculosis globally?",
+        "A": "About a quarter of the world’s population has been infected with TB bacteria. In 2023, 10.8 million people became ill, and 1.25 million died, making TB a leading infectious cause of death."
+    },
+    {
+        "Q": "What are the main symptoms of tuberculosis?",
+        "A": "Symptoms include prolonged cough (sometimes with blood), chest pain, weakness, fatigue, weight loss, fever, and night sweats. Mild symptoms can last months, allowing TB to spread unknowingly."
+    },
+    {
+        "Q": "How is tuberculosis diagnosed?",
+        "A": "WHO recommends rapid molecular tests like Xpert MTB/RIF Ultra. Other methods include tuberculin skin tests, interferon gamma release assays, chest X-rays, and sputum microscopy."
+    },
+    {
+        "Q": "How is tuberculosis treated?",
+        "A": "TB is treated with daily antibiotics for 4-6 months, including isoniazid, rifampicin, pyrazinamide, and ethambutol. Completing the full course is essential to prevent drug resistance."
+    },
+    {
+        "Q": "Can TB be prevented?",
+        "A": "Yes. Prevention includes early detection and treatment, TB preventive therapy for those infected, BCG vaccination for children in some countries, good ventilation, proper cough hygiene, and treating latent TB."
+    },
+    {
+        "Q": "What is cancer?",
+        "A": "Cancer is a group of diseases where abnormal cells grow uncontrollably and may spread. It can occur in almost any tissue or organ."
+    },
+    {
+        "Q": "What causes cancer?",
+        "A": "Cancer results from DNA changes (mutations) in cells, which can be inherited, caused by environmental factors (like tobacco, radiation, chemicals), infections, or random cell division errors."
+    },
+    {
+        "Q": "What is chemotherapy and how does it work?",
+        "A": "Chemotherapy uses drugs to kill fast-growing cancer cells or stop them from dividing. It can be administered intravenously or orally, often in cycles to allow recovery."
+    },
+    {
+        "Q": "What is radiation therapy?",
+        "A": "Radiation therapy uses high doses of radiation to kill cancer cells and shrink tumors by damaging their DNA, stopping growth and division."
+    },
+    {
+        "Q": "What is lung cancer?",
+        "A": "Lung cancer starts in the lungs, usually in the cells lining the airways. It is among the most common cancers and the leading cause of cancer death worldwide."
+    },
+    {
+        "Q": "What are the main types of lung cancer?",
+        "A": "The two main types are non-small cell lung cancer (NSCLC, 80-85%) and small cell lung cancer (SCLC, 10-15%), with SCLC growing and spreading faster."
+    },
+    {
+        "Q": "What causes lung cancer?",
+        "A": "Smoking is the primary cause (80-90%). Other factors include secondhand smoke, radon, asbestos, air pollution, family history, and previous chest radiation."
+    },
+    {
+        "Q": "What are the symptoms of lung cancer?",
+        "A": "Symptoms include persistent cough, coughing blood, chest pain, hoarseness, shortness of breath, weight loss, bone pain, and headache. Early-stage lung cancer often shows no symptoms."
+    }
+]

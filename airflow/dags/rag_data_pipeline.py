@@ -5,6 +5,7 @@ import sys
 import asyncio
 import json
 import logging
+import shutil
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
@@ -308,6 +309,17 @@ def generate_embeddings(**context):
         embeddings_file.parent.mkdir(parents=True, exist_ok=True)
         embedder.save_embeddings(embedded_chunks, embeddings_file)
         
+        # Also save as latest for easy access
+        embeddings_latest = gcp_config.LOCAL_PATHS['index'] / "embeddings_latest.json"
+        embeddings_latest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(embeddings_file, embeddings_latest)
+        
+        # Upload to GCS
+        gcs = GCSManager.from_config()
+        gcs_embeddings_path = gcp_config.get_gcs_path('rag', 'index') + "embeddings_latest.json"
+        gcs.upload_file(str(embeddings_latest), gcs_embeddings_path)
+        logger.info(f"Uploaded embeddings to GCS: {gcs_embeddings_path}")
+        
         context['ti'].xcom_push(key='embeddings_file', value=str(embeddings_file))
         logger.info("TASK: Generate Embeddings - Completed")
         
@@ -321,7 +333,6 @@ def create_index(**context):
     """Task 5: Create FAISS index."""
     from DataPipeline.scripts.RAG.indexing import FAISSIndex
     from DataPipeline.scripts.RAG.embedding import ChunkEmbedder
-    import shutil
     
     logger.info("TASK: Create Index - Started")
     
@@ -352,8 +363,21 @@ def create_index(**context):
         faiss_index.save_index(index_file, data_file)
         
         # Also save as latest
-        shutil.copy(index_file, index_dir / "index_latest.bin")
-        shutil.copy(data_file, index_dir / "data_latest.pkl")
+        index_latest = index_dir / "index_latest.bin"
+        data_latest = index_dir / "data_latest.pkl"
+        shutil.copy(index_file, index_latest)
+        shutil.copy(data_file, data_latest)
+        
+        # Upload to GCS
+        gcs = GCSManager.from_config()
+        gcs_index_path = gcp_config.get_gcs_path('rag', 'index') + "index_latest.bin"
+        gcs_data_path = gcp_config.get_gcs_path('rag', 'index') + "data_latest.pkl"
+        
+        gcs.upload_file(str(index_latest), gcs_index_path)
+        logger.info(f"Uploaded index to GCS: {gcs_index_path}")
+        
+        gcs.upload_file(str(data_latest), gcs_data_path)
+        logger.info(f"Uploaded data file to GCS: {gcs_data_path}")
         
         logger.info("TASK: Create Index - Completed")
         

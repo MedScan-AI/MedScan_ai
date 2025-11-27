@@ -110,14 +110,22 @@ with open(local_file, 'w') as f:
     for url in urls:
         f.write(url + '\n')
 
-# Upload to GCS using UNIFIED bucket
-client = storage.Client(project="medscanai-476203")
-bucket = client.bucket("medscan-data") 
+# Upload to GCS using environment variables
+project_id = os.getenv("GCP_PROJECT_ID")
+bucket_name = os.getenv("GCS_BUCKET_NAME")
+
+if not project_id:
+    raise ValueError("GCP_PROJECT_ID environment variable is not set")
+if not bucket_name:
+    raise ValueError("GCS_BUCKET_NAME environment variable is not set")
+
+client = storage.Client(project=project_id)
+bucket = client.bucket(bucket_name) 
 blob = bucket.blob("RAG/config/urls.txt")
 blob.upload_from_filename(str(local_file))
 
 print(f"Uploaded {len(urls)} URLs to GCS")
-print(f"   gs://medscan-data/RAG/config/urls.txt")  
+print(f"   gs://{bucket_name}/RAG/config/urls.txt")  
 
 # Cleanup
 local_file.unlink()

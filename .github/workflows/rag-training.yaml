@@ -1,0 +1,138 @@
+name: RAG Model Selection & Deployment
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "ModelDevelopment/RAG/**"
+            - "cloudbuild/rag-training.yaml"
+
+    pull_request:
+        branches: [main]
+        paths:
+            - "ModelDevelopment/RAG/**"
+
+    workflow_dispatch:
+        inputs:
+            n_trials:
+                description: "Number of HPO trials per model"
+                required: false
+                default: "20"
+
+jobs:
+    trigger-cloud-build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: Authenticate to Google Cloud
+              uses: google-github-actions/auth@v1
+              with:
+                  credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+            - name: Set up Cloud SDK
+              uses: google-github-actions/setup-gcloud@v1
+              with:
+                  project_id: medscanai-476500
+
+            - name: Verify RAG data exists in GCS
+              run: |
+                  echo "Checking for RAG data in GCS..."
+
+                  # Check if index exists (using _latest suffix as per pipeline)
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index_latest.bin > /dev/null 2>&1; then
+                    echo "FAISS index found"
+                  else
+                    echo "FAISS index not found - run DataPipeline first"
+                    exit 1
+                  fi
+
+                  # Check embeddings (using _latest suffix as per pipeline)
+                  if gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/embeddings_latest.json > /dev/null 2>&1; then
+                    echo "Embeddings found"
+                  else
+                    echo "Embeddings not found"
+                    exit 1
+                  fi
+
+            - name: Submit Cloud Build
+              id: build
+              run: |
+                  echo "🚀 Triggering RAG model selection..."
+
+                  BUILD_ID=$(gcloud builds submit . \
+                    --config=cloudbuild/rag-training.yaml \
+                    --project=medscanai-476500 \
+                    --region=us-central1 \
+                    --format="value(id)")
+
+                  echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+                  echo "Build triggered: $BUILD_ID"
+
+            - name: Stream build logs
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  echo "Monitoring build $BUILD_ID..."
+
+                  gcloud builds log $BUILD_ID \
+                    --stream \
+                    --project=medscanai-476500 \
+                    --region=us-central1
+
+            - name: Check build status
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  STATUS=$(gcloud builds describe $BUILD_ID \
+                    --project=medscanai-476500 \
+                    --region=us-central1 \
+                    --format="value(status)")
+
+                  if [ "$STATUS" != "SUCCESS" ]; then
+                    echo "Build failed"
+                    exit 1
+                  fi
+
+                  echo "Build succeeded"
+
+            - name: Get best model info
+              if: success()
+              run: |
+                  BUILD_ID="${{ steps.build.outputs.build_id }}"
+
+                  echo "Best model configuration:"
+                  gsutil cat gs://medscan-pipeline-medscanai-476500/RAG/models/$BUILD_ID/config.json | jq '.' || echo "Config file not found"
+
+            - name: Send email notification
+              if: always()
+              uses: dawidd6/action-send-mail@v3
+              with:
+                  server_address: smtp.gmail.com
+                  server_port: 587
+                  username: ${{ secrets.SMTP_USER }}
+                  password: ${{ secrets.SMTP_PASSWORD }}
+                  subject: RAG Model Selection - ${{ job.status }}
+                  to: harshitha8.shekar@gmail.com,kothari.sau@northeastern.edu
+                  from: MedScan AI <${{ secrets.SMTP_USER }}>
+                  body: |
+                      RAG Model Selection Status: ${{ job.status }}
+
+                      Details:
+                      - Build ID: ${{ steps.build.outputs.build_id }}
+                      - Triggered by: ${{ github.actor }}
+                      - Branch: ${{ github.ref }}
+
+                      View build logs:
+                      https://console.cloud.google.com/cloud-build/builds/${{ steps.build.outputs.build_id }}?project=medscanai-476500
+
+                      View experiments:
+                      gs://medscan-pipeline-medscanai-476500/RAG/experiments/${{ steps.build.outputs.build_id }}/
+
+                      Best model config:
+                      gs://medscan-pipeline-medscanai-476500/RAG/models/${{ steps.build.outputs.build_id }}/config.json
+
+                      ---
+                      MedScan AI - Automated Model Training System
