@@ -29,3 +29,5 @@ fairlearn>=0.9.0
 # Utilities
 secure-smtplib>=0.1.1
 tqdm>=4.66.0
+matplotlib
+seaborn
