@@ -25,4 +25,5 @@ fairlearn
 shap
 lime
 scikit-image  # Required for LIME image segmentation
+opencv-python  # Optional: for image smoothing in demo scripts
 
