@@ -55,33 +55,47 @@ class RAGDataLoader:
             bucket_name: GCS bucket name (defaults to GCS_BUCKET_NAME env var)
             project_id: GCP project ID (defaults to GCP_PROJECT_ID env var)
         """
+
+        self.gcs_available = True
+        self.bucket_name = bucket_name
+        self.project_id = project_id
+
         if project_id is None:
             project_id = os.getenv("GCP_PROJECT_ID")
             if not project_id:
-                raise ValueError(
-                    "GCP_PROJECT_ID not set. Please set it as an environment variable "
-                    "or pass it to RAGDataLoader(project_id='...')"
-                )
+                # raise ValueError(
+                #     "GCP_PROJECT_ID not set. Please set it as an environment variable "
+                #     "or pass it to RAGDataLoader(project_id='...')"
+                # )
+                logger.info("GCS_PROJECT_ID not set. Running on Local-Mode.")
+                self.gcs_available = False
+                self.bucket_name = None
+                self.project_id = None
+
         if bucket_name is None:
             bucket_name = os.getenv("GCS_BUCKET_NAME")
             if not bucket_name:
-                raise ValueError(
-                    "GCS_BUCKET_NAME not set. Please set it as an environment variable "
-                    "or pass it to RAGDataLoader(bucket_name='...')"
-                )
-        self.bucket_name = bucket_name
-        self.project_id = project_id
+                # raise ValueError(
+                #     "GCS_BUCKET_NAME not set. Please set it as an environment variable "
+                #     "or pass it to RAGDataLoader(bucket_name='...')"
+                # )
+                logger.info("GCS_BUCKET_NAME not set. Running on Local-Mode.")
+                self.gcs_available = False
+                self.bucket_name = None
+                self.project_id = None
+       
         
         # Try to initialize GCS client
-        try:
-            self.storage_client = storage.Client(project=project_id)
-            self.bucket = self.storage_client.bucket(bucket_name)
-            self.gcs_available = True
-            logger.info(f"GCS client initialized (bucket: {bucket_name})")
-        except Exception as e:
-            logger.warning(f"⚠️  GCS not available: {e}")
-            logger.warning("Will use local paths as fallback")
-            self.gcs_available = False
+        if self.gcs_available:
+            try:
+                self.storage_client = storage.Client(project=project_id)
+                self.bucket = self.storage_client.bucket(bucket_name)
+                self.gcs_available = True
+                logger.info(f"GCS client initialized (bucket: {bucket_name})")
+            except Exception as e:
+                logger.warning(f"⚠️  GCS not available: {e}")
+                logger.warning("Will use local paths as fallback")
+                self.gcs_available = False
     
     def _get_gcs_path(self, data_type: str) -> str:
         """Get GCS path for data type"""
@@ -112,9 +126,9 @@ class RAGDataLoader:
         # Try each base path with each filename variant
         for base in possible_bases:
             for filename in filenames:
-            full_path = base / filename
-            if full_path.exists():
-                return full_path
+                full_path = os.path.join(base, filename)
+                if os.path.exists(full_path):
+                    return full_path
         
         # Return first option as default (will fail later if doesn't exist)
         return possible_bases[0] / filenames[0]
@@ -140,20 +154,21 @@ class RAGDataLoader:
                     return data
                 else:
                     logger.warning(f"Embeddings not found in GCS: {gcs_path}")
-            
+
             # Fallback to local
-            local_path = self._get_local_fallback('embeddings')
-            logger.info(f"Loading embeddings from local: {local_path}")
-            
-            if not local_path.exists():
-                logger.error(f"Embeddings not found: {local_path}")
-                return None
-            
-            with open(local_path, 'r') as f:
-                data = json.load(f)
-            
-            logger.info(f"Loaded {len(data)} embeddings from local")
-            return data
+            else:
+                local_path = self._get_local_fallback('embeddings')
+                logger.info(f"Loading embeddings from local: {local_path}")
+                
+                if not os.path.exists(local_path):
+                    logger.error(f"Embeddings not found: {local_path}")
+                    return None
+                
+                with open(local_path, 'r') as f:
+                    data = json.load(f)
+                
+                logger.info(f"Loaded {len(data)} embeddings from local")
+                return data
             
         except Exception as e:
             logger.error(f"Error loading embeddings: {e}")
@@ -189,7 +204,7 @@ class RAGDataLoader:
             local_path = self._get_local_fallback('index')
             logger.info(f"Loading FAISS index from local: {local_path}")
             
-            if not local_path.exists():
+            if not os.path.exists(local_path):
                 logger.error(f"Index not found: {local_path}")
                 return None
             
@@ -224,18 +239,19 @@ class RAGDataLoader:
                     logger.warning(f"data.pkl not found in GCS: {gcs_path}")
             
             # Fallback to local
-            local_path = self._get_local_fallback('data')
-            logger.info(f"Loading data.pkl from local: {local_path}")
-            
-            if not local_path.exists():
-                logger.error(f"data.pkl not found: {local_path}")
-                return None
-            
-            with open(local_path, 'rb') as f:
-                data = pickle.load(f)
-            
-            logger.info(f"Loaded data.pkl from local")
-            return data
+            else:
+                local_path = self._get_local_fallback('data')
+                logger.info(f"Loading data.pkl from local: {local_path}")
+                
+                if not local_path.exists():
+                    logger.error(f"data.pkl not found: {local_path}")
+                    return None
+                
+                with open(local_path, 'rb') as f:
+                    data = pickle.load(f)
+                
+                logger.info(f"Loaded data.pkl from local")
+                return data
             
         except Exception as e:
             logger.error(f"Error loading data.pkl: {e}")
@@ -296,21 +312,22 @@ def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
             return config
         
         # Local file - try multiple locations
-        logger.info(f"Loading config from local: {config_path}")
-        
-        possible_paths = [
-            Path(config_path),
-            Path(__file__).parent.parent / 'utils' / 'RAG_config.json',
-            Path('/workspace/RAG_config.json'),  # Cloud Build
-            Path(__file__).parent.parent.parent.parent / 'ModelDevelopment' / 'RAG' / 'utils' / 'RAG_config.json',  # Absolute
-        ]
-        
-        for path in possible_paths:
-            if path.exists():
-                with open(path, 'r') as f:
-                    config = json.load(f)
-                logger.info(f"Config loaded from {path}")
-                return config
+        else:
+            logger.info(f"Loading config from local: {config_path}")
+            
+            possible_paths = [
+                Path(config_path),
+                Path(__file__).parent.parent / 'utils' / 'RAG_config.json',
+                Path('/workspace/RAG_config.json'),  # Cloud Build
+                Path(__file__).parent.parent.parent.parent / 'ModelDevelopment' / 'RAG' / 'utils' / 'RAG_config.json',  # Absolute
+            ]
+            
+            for path in possible_paths:
+                if path.exists():
+                    with open(path, 'r') as f:
+                        config = json.load(f)
+                    logger.info(f"Config loaded from {path}")
+                    return config
         
         # If none found, raise error
         raise FileNotFoundError(f"Config not found in any location. Tried: {[str(p) for p in possible_paths]}")
