@@ -1,0 +1,16 @@
+# deployment/requirements-extra.txt
+# Additional dependencies for serving (not in base RAG requirements)
+
+# Web serving framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# Google Cloud services
+google-cloud-storage==2.10.0
+google-cloud-logging==3.5.0
+google-cloud-aiplatform==1.38.0
+
+# Additional utilities
+aiofiles==23.2.1

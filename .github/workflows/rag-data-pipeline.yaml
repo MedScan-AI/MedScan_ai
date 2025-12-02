@@ -1,0 +1,40 @@
+name: RAG Data Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: 'Triggered by'
+        default: 'manual'
+      reason:
+        description: 'Reason'
+        default: 'Manual trigger'
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: medscanai-476500
+      
+      - name: Trigger Airflow DAG or run directly
+        run: |
+          echo " Re-processing RAG data..."
+          echo "Reason: ${{ github.event.inputs.reason }}"
+          pip install -r DataPipeline/requirements.txt
+          cd DataPipeline
+          python scripts/rag/data_processing/main.py
+      
+      - name: Verify outputs
+        run: |
+          gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index_latest.bin
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | \
+            gsutil cp - gs://medscan-pipeline-medscanai-476500/RAG/index/last_updated.txt
