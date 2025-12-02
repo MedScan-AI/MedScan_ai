@@ -4,13 +4,18 @@ on:
   workflow_run:
     workflows: ["RAG Model Selection"]
     types: [completed]
-    branches: [main]
-  workflow_dispatch:
+    branches: [main, rag_deployment_monitoring]  # ⭐ Add your branch
+  workflow_dispatch:  # ⭐ This allows manual testing
+  push:  # ⭐ Add this for testing
+    branches: [rag_deployment_monitoring]
+    paths:
+      - 'deployment/**'
+      - 'cloudbuild/rag-deploy.yaml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     
     steps:
       - uses: actions/checkout@v3
@@ -25,4 +30,6 @@ jobs:
         run: |
           gcloud builds submit . \
             --config=cloudbuild/rag-deploy.yaml \
-            --region=us-central1
+            --region=us-central1 \
+            --project=medscanai-476500 \
+            --gcs-source-staging-dir=gs://medscan-pipeline-medscanai-476500/cloudbuild/source
