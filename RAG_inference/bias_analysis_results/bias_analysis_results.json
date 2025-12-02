@@ -1,0 +1,180 @@
+{
+  "overall_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0
+  },
+  "slice_metrics": [
+    {
+      "slice_name": "query_complexity",
+      "slice_value": "simple",
+      "sample_size": 15,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "medical_specialty",
+      "slice_value": "respiratory",
+      "sample_size": 7,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "medical_specialty",
+      "slice_value": "oncology_general",
+      "sample_size": 4,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "medical_specialty",
+      "slice_value": "oncology_lung",
+      "sample_size": 4,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "source_class",
+      "slice_value": "unknown",
+      "sample_size": 7,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "source_class",
+      "slice_value": "Trusted Health Portal",
+      "sample_size": 4,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "source_class",
+      "slice_value": "NIH/PubMed",
+      "sample_size": 4,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "country_class",
+      "slice_value": "unknown",
+      "sample_size": 7,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "country_class",
+      "slice_value": "Canada",
+      "sample_size": 8,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "publish_year_category",
+      "slice_value": "recent",
+      "sample_size": 12,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    {
+      "slice_name": "publish_year_category",
+      "slice_value": "unknown",
+      "sample_size": 3,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    }
+  ],
+  "disparities": {
+    "medical_specialty": {
+      "accuracy_range": 0.0,
+      "accuracy_std": 0.0,
+      "f1_range": 0.0,
+      "f1_std": 0.0,
+      "fpr_range": 0.0,
+      "fnr_range": 0.0,
+      "worst_performing_slice": "respiratory",
+      "best_performing_slice": "respiratory"
+    },
+    "source_class": {
+      "accuracy_range": 0.0,
+      "accuracy_std": 0.0,
+      "f1_range": 0.0,
+      "f1_std": 0.0,
+      "fpr_range": 0.0,
+      "fnr_range": 0.0,
+      "worst_performing_slice": "unknown",
+      "best_performing_slice": "unknown"
+    },
+    "country_class": {
+      "accuracy_range": 0.0,
+      "accuracy_std": 0.0,
+      "f1_range": 0.0,
+      "f1_std": 0.0,
+      "fpr_range": 0.0,
+      "fnr_range": 0.0,
+      "worst_performing_slice": "unknown",
+      "best_performing_slice": "unknown"
+    },
+    "publish_year_category": {
+      "accuracy_range": 0.0,
+      "accuracy_std": 0.0,
+      "f1_range": 0.0,
+      "f1_std": 0.0,
+      "fpr_range": 0.0,
+      "fnr_range": 0.0,
+      "worst_performing_slice": "recent",
+      "best_performing_slice": "recent"
+    }
+  },
+  "fairness_violations": [],
+  "bias_detected": false,
+  "mitigation_recommendations": [
+    "No significant bias detected. Model performs fairly across all slices."
+  ],
+  "mitigation_applied": false,
+  "mitigated_metrics": null
+}

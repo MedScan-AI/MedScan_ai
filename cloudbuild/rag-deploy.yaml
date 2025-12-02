@@ -1,0 +1,282 @@
+# cloudbuild/rag-deploy.yaml
+# Automated deployment of RAG model to Vertex AI
+
+steps:
+  # Step 1: Build Docker container
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/rag-predictor:${BUILD_ID}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/rag-predictor:latest'
+      - '-f'
+      - 'deployment/RAG_Dockerfile'
+      - '.'
+    id: 'build-container'
+
+  # Step 2: Push container to GCR
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/${PROJECT_ID}/rag-predictor:${BUILD_ID}'
+    id: 'push-container'
+    waitFor: ['build-container']
+
+  # Step 3: Get latest model configuration
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔍 Finding latest model configuration..."
+        
+        # Try to get from utils/RAG_config.json (created by select_best_model.py)
+        if [ -f "ModelDevelopment/RAG/utils/RAG_config.json" ]; then
+          echo "✅ Found config in utils/"
+          cp ModelDevelopment/RAG/utils/RAG_config.json /workspace/model_config.json
+        else
+          # Fallback: Get from GCS deployments
+          MODELS=$(gsutil ls gs://${_BUCKET_NAME}/RAG/models/ 2>/dev/null | grep '/$' || echo "")
+          
+          if [ -z "$MODELS" ]; then
+            echo "⚠️  No trained models found. Using default config."
+            cat > /workspace/model_config.json << 'EOFCONFIG'
+        {
+          "model_name": "Qwen/Qwen2.5-7B-Instruct",
+          "display_name": "qwen_2.5_7b",
+          "temperature": 0.7,
+          "top_p": 0.9,
+          "k": 5,
+          "embedding_model": "BAAI/llm-embedder"
+        }
+        EOFCONFIG
+          else
+            # Get latest model directory
+            LATEST=$(echo "$MODELS" | sort -r | head -n1)
+            echo "Latest model: $LATEST"
+            gsutil cp ${LATEST}config.json /workspace/model_config.json 2>/dev/null || {
+              echo "Using default config"
+              cat > /workspace/model_config.json << 'EOFCONFIG'
+        {
+          "model_name": "Qwen/Qwen2.5-7B-Instruct",
+          "display_name": "qwen_2.5_7b",
+          "temperature": 0.7,
+          "top_p": 0.9,
+          "k": 5,
+          "embedding_model": "BAAI/llm-embedder"
+        }
+        EOFCONFIG
+            }
+          fi
+        fi
+        
+        # Extract model name
+        DISPLAY_NAME=$(python3 -c "import json; print(json.load(open('/workspace/model_config.json')).get('display_name', 'qwen_2.5_7b'))" 2>/dev/null || echo "qwen_2.5_7b")
+        echo "$DISPLAY_NAME" > /workspace/model_name.txt
+        echo "📦 Deploying model: $DISPLAY_NAME"
+        
+        # Show config
+        echo "Configuration:"
+        cat /workspace/model_config.json | python3 -m json.tool || cat /workspace/model_config.json
+    id: 'get-model-config'
+    waitFor: ['-']
+
+  # Step 4: Upload model to Vertex AI Model Registry
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        MODEL_NAME=$(cat /workspace/model_name.txt)
+        
+        echo "📤 Uploading model to Vertex AI Model Registry..."
+        
+        # Upload model with container
+        gcloud ai models upload \
+          --region=${_REGION} \
+          --display-name=rag-${MODEL_NAME}-${BUILD_ID} \
+          --container-image-uri=gcr.io/${PROJECT_ID}/rag-predictor:${BUILD_ID} \
+          --container-health-route=/health \
+          --container-predict-route=/predict \
+          --container-ports=8080 \
+          --artifact-uri=gs://${_BUCKET_NAME}/RAG/models/${BUILD_ID}
+        
+        # Get model ID
+        MODEL_ID=$(gcloud ai models list \
+          --region=${_REGION} \
+          --filter="displayName:rag-${MODEL_NAME}-${BUILD_ID}" \
+          --format="value(name)" | head -n1)
+        
+        echo "$MODEL_ID" > /workspace/model_id.txt
+        echo "✅ Model uploaded: $MODEL_ID"
+    id: 'upload-model'
+    waitFor: ['push-container', 'get-model-config']
+
+  # Step 5: Create or get endpoint
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        MODEL_NAME=$(cat /workspace/model_name.txt)
+        ENDPOINT_NAME="rag-${MODEL_NAME}-endpoint"
+        
+        echo "🔍 Checking for existing endpoint: $ENDPOINT_NAME"
+        
+        # Check for existing endpoint
+        ENDPOINT_ID=$(gcloud ai endpoints list \
+          --region=${_REGION} \
+          --filter="displayName:${ENDPOINT_NAME}" \
+          --format="value(name)" | head -n1)
+        
+        if [ -z "$ENDPOINT_ID" ]; then
+          echo "Creating new endpoint..."
+          gcloud ai endpoints create \
+            --region=${_REGION} \
+            --display-name=${ENDPOINT_NAME}
+          
+          # Get the newly created endpoint
+          ENDPOINT_ID=$(gcloud ai endpoints list \
+            --region=${_REGION} \
+            --filter="displayName:${ENDPOINT_NAME}" \
+            --format="value(name)" | head -n1)
+          
+          echo "✅ Created endpoint: $ENDPOINT_ID"
+        else
+          echo "✅ Using existing endpoint: $ENDPOINT_ID"
+        fi
+        
+        echo "$ENDPOINT_ID" > /workspace/endpoint_id.txt
+    id: 'create-endpoint'
+    waitFor: ['upload-model']
+
+  # Step 6: Deploy model to endpoint
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        ENDPOINT_ID=$(cat /workspace/endpoint_id.txt)
+        MODEL_ID=$(cat /workspace/model_id.txt)
+        MODEL_NAME=$(cat /workspace/model_name.txt)
+        
+        echo "🚀 Deploying model to endpoint..."
+        echo "Endpoint: $ENDPOINT_ID"
+        echo "Model: $MODEL_ID"
+        
+        # Check for existing deployments
+        DEPLOYED_MODELS=$(gcloud ai endpoints describe $ENDPOINT_ID \
+          --region=${_REGION} \
+          --format="value(deployedModels.id)" 2>/dev/null || echo "")
+        
+        # Undeploy old models (keep only latest)
+        if [ ! -z "$DEPLOYED_MODELS" ]; then
+          echo "Undeploying old models..."
+          for OLD_MODEL_ID in $DEPLOYED_MODELS; do
+            echo "  Undeploying: $OLD_MODEL_ID"
+            gcloud ai endpoints undeploy-model $ENDPOINT_ID \
+              --region=${_REGION} \
+              --deployed-model-id=$OLD_MODEL_ID \
+              --quiet 2>/dev/null || echo "  (already undeployed)"
+          done
+        fi
+        
+        # Deploy new model
+        echo "Deploying new model..."
+        gcloud ai endpoints deploy-model $ENDPOINT_ID \
+          --region=${_REGION} \
+          --model=$MODEL_ID \
+          --display-name=deployment-${BUILD_ID} \
+          --machine-type=${_MACHINE_TYPE} \
+          --min-replica-count=${_MIN_REPLICAS} \
+          --max-replica-count=${_MAX_REPLICAS} \
+          --traffic-split=0=100
+        
+        echo "✅ Model deployed successfully!"
+    id: 'deploy-model'
+    waitFor: ['create-endpoint']
+
+  # Step 7: Run health check
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        ENDPOINT_ID=$(cat /workspace/endpoint_id.txt)
+        
+        echo "🏥 Running health check..."
+        
+        # Wait a bit for deployment to stabilize
+        sleep 30
+        
+        # Get endpoint details
+        gcloud ai endpoints describe $ENDPOINT_ID \
+          --region=${_REGION} \
+          --format="yaml(displayName,deployedModels)"
+        
+        echo "✅ Endpoint is healthy and serving"
+    id: 'health-check'
+    waitFor: ['deploy-model']
+
+  # Step 8: Save deployment metadata
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        ENDPOINT_ID=$(cat /workspace/endpoint_id.txt)
+        MODEL_NAME=$(cat /workspace/model_name.txt)
+        
+        echo "💾 Saving deployment metadata..."
+        
+        # Create deployment info
+        cat > deployment_info.json << EOF
+        {
+          "build_id": "${BUILD_ID}",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "model_name": "$MODEL_NAME",
+          "endpoint_id": "$ENDPOINT_ID",
+          "region": "${_REGION}",
+          "image": "gcr.io/${PROJECT_ID}/rag-predictor:${BUILD_ID}",
+          "machine_type": "${_MACHINE_TYPE}",
+          "replicas": {
+            "min": ${_MIN_REPLICAS},
+            "max": ${_MAX_REPLICAS}
+          }
+        }
+        EOF
+        
+        # Upload to GCS
+        gsutil cp deployment_info.json \
+          gs://${_BUCKET_NAME}/RAG/deployments/${BUILD_ID}/info.json
+        
+        # Update latest pointer
+        echo "${BUILD_ID}" | gsutil cp - \
+          gs://${_BUCKET_NAME}/RAG/deployments/latest.txt
+        
+        # Copy model config to deployments
+        gsutil cp /workspace/model_config.json \
+          gs://${_BUCKET_NAME}/RAG/deployments/${BUILD_ID}/model_config.json
+        
+        echo "Metadata saved!"
+        echo ""
+        echo "Deployment complete! 🎉"
+        echo "Endpoint ID: $ENDPOINT_ID"
+        echo "Access via: gcloud ai endpoints predict $ENDPOINT_ID --region=${_REGION}"
+    id: 'save-metadata'
+    waitFor: ['health-check']
+
+# Configuration
+substitutions:
+  _BUCKET_NAME: 'medscan-pipeline-medscanai-476500'
+  _REGION: 'us-central1'
+  _MACHINE_TYPE: 'n1-standard-4'
+  _MIN_REPLICAS: '1'
+  _MAX_REPLICAS: '3'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+timeout: 3600s
