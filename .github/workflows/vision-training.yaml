@@ -15,14 +15,6 @@ on:
 
     workflow_dispatch:
         inputs:
-            dataset:
-                description: "Dataset (tb or lung_cancer_ct_scan)"
-                required: true
-                default: "tb"
-                type: choice
-                options:
-                    - tb
-                    - lung_cancer_ct_scan
             epochs:
                 description: "Number of epochs"
                 required: false
@@ -36,6 +28,9 @@ on:
 jobs:
     trigger-cloud-build:
         runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                dataset: [tb, lung_cancer_ct_scan]
 
         steps:
             - name: Checkout code
@@ -54,7 +49,7 @@ jobs:
             - name: Submit Cloud Build
               id: build
               run: |
-                  DATASET="${{ github.event.inputs.dataset || 'tb' }}"
+                  DATASET="${{ matrix.dataset }}"
                   DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
                   
                   # If dry_run is true, use 2 epochs; otherwise use provided epochs or default 50
@@ -133,7 +128,7 @@ jobs:
                       Vision Model Training Status: ${{ job.status }}
 
                       Details:
-                      - Dataset: ${{ github.event.inputs.dataset || 'tb' }}
+                      - Dataset: ${{ matrix.dataset }}
                       - Build ID: ${{ steps.build.outputs.build_id }}
                       - Triggered by: ${{ github.actor }}
                       - Branch: ${{ github.ref }}

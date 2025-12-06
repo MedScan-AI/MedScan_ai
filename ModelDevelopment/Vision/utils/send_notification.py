@@ -139,6 +139,14 @@ gs://{bucket_name}/vision/trained_models/{build_id}/
 ---
 MedScan AI - Automated Training System
 """
+    if not bias_check_passed:
+        bias_gcs_path = f"vision/validation/{build_id}/bias_results.json"
+        bias_console_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/vision/validation/{build_id}?project={project_id}"
+        plain_text += f"""
+Bias report:
+- gs://{bucket_name}/{bias_gcs_path}
+- Console: {bias_console_url}
+"""
     
     validation_color = "green" if validation_passed else "red"
     bias_color = "green" if bias_check_passed else "red"
@@ -165,6 +173,7 @@ MedScan AI - Automated Training System
                 <li style="color: {bias_color};">Bias Check: {bias_status}</li>
                 <li style="color: {deployment_color};">Deployment: {'SUCCESS' if validation_passed and bias_check_passed else 'SKIPPED/FAILED'}</li>
             </ul>
+            {f'<p><strong>Bias report:</strong> gs://{bucket_name}/vision/validation/{build_id}/bias_results.json<br><a href=\"https://console.cloud.google.com/storage/browser/{bucket_name}/vision/validation/{build_id}?project={project_id}\">View bias artifacts →</a></p>' if not bias_check_passed else ''}
             
             <p><a href="https://console.cloud.google.com/cloud-build/builds/{build_id}?project={project_id}">View Build Logs →</a></p>
         </div>
@@ -397,6 +406,7 @@ def main():
     parser.add_argument('--bias-check-passed', help='Bias check passed (true/false)')
     parser.add_argument('--threshold', type=float, help='Validation threshold')
     parser.add_argument('--bias-details', help='Path to bias details JSON file')
+    parser.add_argument('--bias-report-path', help='GCS path to bias report')
     parser.add_argument('--failed-step', help='Failed step name')
     parser.add_argument('--error-message', help='Error message')
     
@@ -407,6 +417,10 @@ def main():
         if args.bias_details:
             with open(args.bias_details, 'r') as f:
                 bias_details = json.load(f)
+        if args.bias_report_path:
+            if bias_details is None:
+                bias_details = {}
+            bias_details['gcs_path'] = args.bias_report_path
         
         send_training_completion_email(
             build_id=args.build_id,
