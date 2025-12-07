@@ -31,7 +31,8 @@ steps:
         echo "Deploying RAG service to Cloud Run with GPU..."
         
         # Fetch token from Secret Manager
-        TOKEN=$(gcloud secrets versions access latest --secret=huggingface-token --project=${PROJECT_ID})
+        TOKEN=$$(gcloud secrets versions access latest --secret=huggingface-token --project=${PROJECT_ID})
+
         
         (echo "Y" || true ) | gcloud run deploy rag-service \
         --image=gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID} \
@@ -49,7 +50,8 @@ steps:
         --max-instances=3 \
         --min-instances=0 \
         --concurrency=1 \
-        --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$${TOKEN}"
+        --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$$TOKEN"
+
         
         echo "Deployment complete!"
         
@@ -59,10 +61,11 @@ steps:
           --role="roles/run.invoker" \
           --region=us-central1 \
           --project=${PROJECT_ID}
+          
         
         echo "IAM policy set!"
         
-        SERVICE_URL=$(gcloud run services describe rag-service \
+        SERVICE_URL=$$(gcloud run services describe rag-service \
           --region=us-central1 \
           --platform=managed \
           --format="value(status.url)")
@@ -89,7 +92,7 @@ steps:
         echo "curl $$SERVICE_URL/health"
         echo "curl $$SERVICE_URL/config"
     id: 'verify-deployment'
-    waitFor: ['grant-public-access']
+    waitFor: ['deploy-cloud-run']
 
 options:
   machineType: 'E2_HIGHCPU_8'
