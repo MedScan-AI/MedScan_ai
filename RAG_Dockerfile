@@ -1,0 +1,54 @@
+# Use NVIDIA CUDA base image (required for GPU)
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# Install Python and system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    python3.10-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.10 as default
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python3
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip
+
+# Copy and install requirements
+COPY ModelDevelopment/RAG/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install FastAPI and related packages
+RUN pip install --no-cache-dir \
+    fastapi==0.115.0 \
+    pydantic==2.9.0 \
+    uvicorn[standard]==0.32.0 \
+    google-cloud-logging==3.5.0
+
+# Copy application code
+COPY ModelDevelopment/ /app/ModelDevelopment/
+RUN ls -la /app/ModelDevelopment/RAG/models/models.py || \
+    (echo "ERROR: models.py NOT found!" && exit 1)
+COPY deployment/RAG_serve.py /app/RAG_serve.py
+
+# Set environment variables
+ENV PYTHONPATH=/app:/app/ModelDevelopment/RAG
+ENV PORT=8080
+ENV GCS_BUCKET=medscan-pipeline-medscanai-476500
+ENV GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500
+ENV GCP_PROJECT_ID=medscanai-476500
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Run the service
+CMD ["python", "RAG_serve.py"]

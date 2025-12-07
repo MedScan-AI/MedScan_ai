@@ -31,7 +31,7 @@ jobs:
           echo "Reason: ${{ github.event.inputs.reason }}"
           pip install -r DataPipeline/requirements.txt
           cd DataPipeline
-          python scripts/rag/data_processing/main.py
+          python scripts/rag/main.py
       
       - name: Verify outputs
         run: |

@@ -1,417 +1,306 @@
 """
-RAG_serve.py - FastAPI server for serving RAG model on Vertex AI
-Uses your actual code structure from ModelDevelopment/RAG/
+RAG_serve.py - Enhanced version with robust config normalization
+Handles MLflow-generated configs without modification
 """
 import os
 import sys
-import json
 import logging
-import time
-from typing import List, Dict, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI
 import uvicorn
-from google.cloud import storage, logging as cloud_logging
-import numpy as np
+import torch
 
 sys.path.insert(0, '/app')
-sys.path.insert(0, '/app/rag')
-
-from rag.models.models import ModelFactory
-from rag.ModelInference.RAG_inference import (
-    load_embeddings_data,
-    load_faiss_index,
-    get_embedding
-)
+sys.path.insert(0, '/app/ModelDevelopment/RAG')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MedScan RAG Service")
+app = FastAPI(title="MedScan RAG")
 
-# Global state
-MODEL = None
-INDEX = None
-EMBEDDINGS_DATA = None
-CONFIG = None
+STARTUP_ERROR = None
+READY = False
 
-# Cloud Logging setup
-try:
-    logging_client = cloud_logging.Client()
-    cloud_logger = logging_client.logger('rag-predictions')
-    logger.info("Cloud Logging initialized")
-except Exception as e:
-    logger.warning(f"Cloud Logging not available: {e}")
-    cloud_logger = None
-
-
-class PredictionRequest(BaseModel):
-    """Request schema for predictions"""
-    query: str
-    k: int = 5
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_p: Optional[float] = None
-
-
-class RetrievedDoc(BaseModel):
-    """Schema for retrieved document"""
-    text: str
-    source: str
-    score: float
-    rank: int
-
-
-class PredictionResponse(BaseModel):
-    """Response schema for predictions"""
-    answer: str
-    retrieved_docs: List[RetrievedDoc]
-    model_used: str
-    tokens: Dict[str, int]
-    success: bool
-
-
-def download_from_gcs(bucket_name: str, source_path: str, dest_path: str):
-    """Download file from GCS"""
-    try:
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(source_path)
+def normalize_config(config: dict) -> dict:
+    """
+    Normalize MLflow-generated config to match ModelFactory expectations.
+    Handles various config formats without modifying the source file.
+    
+    Args:
+        config: Raw config from MLflow or other source
         
-        # Create parent directory if needed
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        
-        blob.download_to_filename(dest_path)
-        logger.info(f"✅ Downloaded {source_path}")
-    except Exception as e:
-        logger.error(f"❌ Failed to download {source_path}: {e}")
-        raise
+    Returns:
+        Normalized config ready for RAG pipeline
+    """
+    normalized = config.copy()
+    
+    # 1. Fix model_name: Convert HuggingFace format to ModelFactory key
+    model_name = normalized.get('model_name', '')
+    
+    # Map HuggingFace model names to ModelFactory keys
+    model_mapping = {
+        'Qwen/Qwen2.5-1.5B-Instruct': 'qwen_2.5_1.5b',
+        'Qwen/Qwen2.5-7B-Instruct': 'qwen_2.5_7b',
+        'Qwen/Qwen2.5-14B-Instruct': 'qwen_2.5_14b',
+        'meta-llama/Llama-3.2-3B-Instruct': 'llama_3.2_3b',
+        'meta-llama/Meta-Llama-3.1-8B-Instruct': 'llama_3.1_8b',
+        'mistralai/Mistral-7B-Instruct-v0.3': 'mistral_7b',
+        'HuggingFaceTB/SmolLM2-360M': 'smol_lm',
+    }
+    
+    if model_name in model_mapping:
+        logger.info(f"Normalizing model_name: {model_name} -> {model_mapping[model_name]}")
+        normalized['model_name'] = model_mapping[model_name]
+    elif model_name not in ['qwen_2.5_1.5b', 'qwen_2.5_7b', 'qwen_2.5_14b', 
+                             'llama_3.2_3b', 'llama_3.1_8b', 'mistral_7b', 'smol_lm']:
+        logger.warning(f"Unknown model_name: {model_name}, using qwen_2.5_1.5b as default")
+        normalized['model_name'] = 'qwen_2.5_1.5b'
+    
+    # 2. Ensure model_type is set
+    if 'model_type' not in normalized or normalized.get('model_type') == 'open-source':
+        normalized['model_type'] = normalized['model_name']
+        logger.info(f"Set model_type to: {normalized['model_type']}")
+    
+    # 3. Add max_tokens if missing (required by generate_response)
+    if 'max_tokens' not in normalized:
+        normalized['max_tokens'] = 500
+        logger.info(f"Added missing max_tokens: {normalized['max_tokens']}")
+    
+    # 4. Validate and adjust temperature (0.0 to 1.0)
+    temperature = normalized.get('temperature', 0.7)
+    if temperature > 1.0:
+        logger.warning(f"Temperature {temperature} > 1.0, capping at 1.0")
+        normalized['temperature'] = 1.0
+    elif temperature < 0.0:
+        logger.warning(f"Temperature {temperature} < 0.0, setting to 0.1")
+        normalized['temperature'] = 0.1
+    
+    # 5. Validate and adjust top_p (0.0 to 1.0)
+    top_p = normalized.get('top_p', 0.9)
+    if top_p > 1.0:
+        logger.warning(f"top_p {top_p} > 1.0, capping at 1.0")
+        normalized['top_p'] = 1.0
+    elif top_p < 0.0:
+        logger.warning(f"top_p {top_p} < 0.0, setting to 0.1")
+        normalized['top_p'] = 0.1
+    
+    # 6. Validate k (number of documents to retrieve)
+    k = normalized.get('k', 5)
+    if k < 1:
+        logger.warning(f"k={k} < 1, setting to 3")
+        normalized['k'] = 3
+    elif k > 10:
+        logger.warning(f"k={k} > 10, capping at 10")
+        normalized['k'] = 10
+    
+    # 7. Validate retrieval_method
+    valid_methods = ['similarity', 'weighted_score']
+    retrieval_method = normalized.get('retrieval_method', 'similarity')
+    if retrieval_method not in valid_methods:
+        logger.warning(f"Unknown retrieval_method: {retrieval_method}, using 'similarity'")
+        normalized['retrieval_method'] = 'similarity'
+    
+    # 8. Ensure embedding_model is set
+    if 'embedding_model' not in normalized:
+        normalized['embedding_model'] = 'BAAI/llm-embedder'
+        logger.info(f"Added default embedding_model: {normalized['embedding_model']}")
+    
+    # 9. Fix truncated or missing prompt
+    prompt = normalized.get('prompt', '')
+    if not prompt or len(prompt) < 50 or not '{context}' in prompt or not '{query}' in prompt:
+        logger.warning("Prompt is missing, truncated, or malformed. Using default prompt.")
+        normalized['prompt'] = """You are a medical information assistant that provides evidence-based responses using only the provided medical literature.
 
+CONTEXT DOCUMENTS:
+{context}
 
-def load_config_from_gcs(bucket_name: str) -> Dict:
-    """Load model configuration from GCS"""
-    try:
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        
-        # Try to get latest deployment info
-        try:
-            blob = bucket.blob("RAG/deployments/latest.txt")
-            build_id = blob.download_as_text().strip()
-            logger.info(f"Latest build ID: {build_id}")
-            
-            # Get config for this deployment
-            config_blob = bucket.blob(f"RAG/deployments/{build_id}/model_config.json")
-            config = json.loads(config_blob.download_as_text())
-            logger.info(f"Loaded config from deployment {build_id}")
-            return config
-        except Exception as e:
-            logger.warning(f"Could not load deployment config: {e}")
-            
-            # Fallback: Use default config
-            return {
-                "model_name": "Qwen/Qwen2.5-7B-Instruct",
-                "display_name": "qwen_2.5_7b",
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "k": 5,
-                "embedding_model": "BAAI/llm-embedder"
-            }
-    except Exception as e:
-        logger.error(f"Failed to load config: {e}")
-        raise
+QUESTION:
+{query}
+
+INSTRUCTIONS:
+1. Answer the question based ONLY on the information in the context documents above
+2. Cite specific details from the documents to support your answer
+3. If the context doesn't contain enough information to fully answer the question, acknowledge this limitation
+4. Provide a clear, concise, and medically accurate response
+5. Use professional medical terminology while remaining understandable
+
+ANSWER:"""
+    
+    logger.info("NORMALIZED CONFIG:")
+    logger.info(f"  model_name: {normalized['model_name']}")
+    logger.info(f"  model_type: {normalized['model_type']}")
+    logger.info(f"  temperature: {normalized['temperature']}")
+    logger.info(f"  top_p: {normalized['top_p']}")
+    logger.info(f"  max_tokens: {normalized['max_tokens']}")
+    logger.info(f"  k: {normalized['k']}")
+    logger.info(f"  retrieval_method: {normalized['retrieval_method']}")
+    logger.info(f"  embedding_model: {normalized['embedding_model']}")
+    logger.info(f"  prompt_length: {len(normalized['prompt'])} chars")
+    
+    return normalized
 
 
 @app.on_event("startup")
-async def startup_event():
-    """Initialize model and data on startup"""
-    global MODEL, INDEX, EMBEDDINGS_DATA, CONFIG
-    
-    bucket_name = os.getenv("GCS_BUCKET")
-    logger.info(f"🚀 Starting RAG service...")
-    logger.info(f"Bucket: {bucket_name}")
-    
+async def startup():
+    global STARTUP_ERROR, READY
     try:
-        # Step 1: Load configuration
-        logger.info("Step 1: Loading configuration...")
-        CONFIG = load_config_from_gcs(bucket_name)
-        logger.info(f"Config: {json.dumps(CONFIG, indent=2)}")
+        # Set env vars
+        bucket = os.getenv('GCS_BUCKET', 'medscan-pipeline-medscanai-476500')
+        os.environ['GCS_BUCKET_NAME'] = bucket
+        os.environ['GCS_BUCKET'] = bucket
+        os.environ['GCP_PROJECT_ID'] = 'medscanai-476500'
         
-        # Step 2: Download FAISS index and embeddings
-        logger.info("Step 2: Downloading FAISS index and embeddings...")
-        download_from_gcs(
-            bucket_name,
-            "RAG/index/index_latest.bin",
-            "/tmp/index/index.bin"
-        )
-        download_from_gcs(
-            bucket_name,
-            "RAG/index/embeddings_latest.json",
-            "/tmp/index/embeddings.json"
-        )
+        logger.info(f"Environment set: bucket={bucket}")
         
-        # Step 3: Set environment variables for your inference code
-        os.environ['FAISS_INDEX_PATH'] = '/tmp/index/index.bin'
-        os.environ['EMBEDDINGS_PATH'] = '/tmp/index/embeddings.json'
-        os.environ['GCS_BUCKET_NAME'] = bucket_name
+        logger.info("DEVICE INFORMATION")
+        logger.info(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+            logger.info(f"CUDA version: {torch.version.cuda}")
+            logger.info(f"GPU count: {torch.cuda.device_count()}")
+        else:
+            logger.info("Running on CPU only")
         
-        # Step 4: Load embeddings and FAISS index using your functions
-        logger.info("Step 3: Loading embeddings and FAISS index...")
-        EMBEDDINGS_DATA = load_embeddings_data()
-        INDEX = load_faiss_index()
+        from ModelInference.RAG_inference import load_config
         
-        if EMBEDDINGS_DATA is None or INDEX is None:
-            raise Exception("Failed to load embeddings or FAISS index")
+        # Load raw config
+        logger.info("Loading RAG configuration...")
+        raw_config = load_config()
+        logger.info(f"Raw config loaded: model_name={raw_config.get('model_name')}")
         
-        logger.info(f"✅ Loaded {len(EMBEDDINGS_DATA)} embeddings")
-        logger.info(f"✅ FAISS index has {INDEX.ntotal} vectors")
+        # Normalize config to handle MLflow format
+        normalized_config = normalize_config(raw_config)
         
-        # Step 5: Initialize model using your ModelFactory
-        logger.info("Step 4: Initializing model...")
-        model_key = CONFIG.get('display_name', 'qwen_2.5_7b')
+        # Store normalized config globally for the pipeline to use
+        import ModelInference.RAG_inference as rag_module
+        rag_module._NORMALIZED_CONFIG = normalized_config
+        logger.info("Normalized config stored globally")
         
-        MODEL = ModelFactory.create_model(
-            model_key=model_key,
-            temperature=CONFIG.get('temperature', 0.7),
-            top_p=CONFIG.get('top_p', 0.9),
-            max_tokens=CONFIG.get('max_tokens', 500)
-        )
+        # Validate data files
+        from ModelInference.RAG_inference import load_embeddings_data, load_faiss_index
         
-        logger.info(f"✅ Model initialized: {model_key}")
-        logger.info("="*60)
-        logger.info("🎉 RAG SERVICE READY!")
-        logger.info(f"Model: {model_key}")
-        logger.info(f"Embeddings: {len(EMBEDDINGS_DATA)}")
-        logger.info(f"FAISS vectors: {INDEX.ntotal}")
-        logger.info("="*60)
+        logger.info("VALIDATING DATA FILES")
+        embeddings = load_embeddings_data()
+        index = load_faiss_index()
         
+        if embeddings is None:
+            raise RuntimeError("Failed to load embeddings data")
+        if index is None:
+            raise RuntimeError("Failed to load FAISS index")
+        
+        logger.info(f"Embeddings: {len(embeddings)} records")
+        logger.info(f"FAISS index: {index.ntotal} vectors, dimension={index.d}")
+        
+        READY = True
+        logger.info("SERVICE READY ✓")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize service: {e}")
-        raise
-
-
-@app.get("/")
-async def root():
-    """Root endpoint with service info"""
-    return {
-        "service": "MedScan RAG Service",
-        "status": "running",
-        "model": CONFIG.get("display_name") if CONFIG else "unknown",
-        "endpoints": {
-            "health": "/health",
-            "predict": "/predict"
-        },
-        "version": "1.0.0"
-    }
+        STARTUP_ERROR = str(e)
+        logger.error(f"STARTUP FAILED: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    if MODEL is None or INDEX is None or EMBEDDINGS_DATA is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Service not ready - model, index, or embeddings not loaded"
-        )
-    
+def health():
     return {
-        "status": "healthy",
-        "model": CONFIG.get("display_name") if CONFIG else "unknown",
-        "embeddings_count": len(EMBEDDINGS_DATA),
-        "faiss_vectors": INDEX.ntotal
+        "status": "healthy" if READY else "failed",
+        "ready": READY,
+        "error": STARTUP_ERROR
     }
 
 
-@app.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest):
-    """
-    Main prediction endpoint
-    
-    Request:
-        {
-            "query": "What are the symptoms of tuberculosis?",
-            "k": 5,
-            "temperature": 0.7,
-            "max_tokens": 500
-        }
-    
-    Response:
-        {
-            "answer": "Generated answer with references...",
-            "retrieved_docs": [...],
-            "model_used": "qwen_2.5_7b",
-            "tokens": {"input": 123, "output": 456},
-            "success": true
-        }
-    """
-    start_time = time.time()
+@app.get("/config")
+def get_config():
+    """Get current normalized configuration"""
+    if not READY:
+        return {"error": "Service not ready"}
     
     try:
-        # Validate service is ready
-        if MODEL is None or INDEX is None or EMBEDDINGS_DATA is None:
-            raise HTTPException(503, "Service not initialized")
-        
-        logger.info(f"📝 Query: {request.query[:100]}...")
-        
-        # Step 1: Get query embedding
-        embedding_model = CONFIG.get('embedding_model', 'BAAI/llm-embedder')
-        query_embedding = get_embedding(request.query, embedding_model)
-        
-        if query_embedding is None:
-            raise HTTPException(500, "Failed to generate query embedding")
-        
-        # Step 2: Search FAISS index
-        k = request.k or CONFIG.get('k', 5)
-        query_vector = np.array(query_embedding).reshape(1, -1).astype('float32')
-        
-        distances, indices = INDEX.search(query_vector, k)
-        
-        # Step 3: Get retrieved documents
-        retrieved_docs = []
-        for rank, (idx, score) in enumerate(zip(indices[0], distances[0]), 1):
-            if idx < len(EMBEDDINGS_DATA):
-                doc = EMBEDDINGS_DATA[idx]
-                retrieved_docs.append({
-                    "text": doc.get("text", ""),
-                    "source": doc.get("source", doc.get("metadata", {}).get("link", "Unknown")),
-                    "title": doc.get("title", "Unknown"),
-                    "score": float(score),
-                    "rank": rank,
-                    "metadata": doc.get("metadata", {})
-                })
-        
-        logger.info(f"🔍 Retrieved {len(retrieved_docs)} documents")
-        
-        # Step 4: Build context for generation
-        context_parts = []
-        for doc in retrieved_docs:
-            title = doc.get('title', 'Unknown')
-            content = doc.get('text', '')
-            context_parts.append(
-                f"Document {doc['rank']} - {title}:\n{content}"
-            )
-        
-        context = "\n\n".join(context_parts)
-        
-        # Step 5: Create prompt
-        prompt_template = CONFIG.get('prompt', """Based on the following medical documents, answer the question accurately and concisely.
-
-Context:
-{context}
-
-Question: {query}
-
-Answer:""")
-        
-        formatted_prompt = prompt_template.format(
-            context=context,
-            query=request.query
-        )
-        
-        # Step 6: Generate response using your model
-        temperature = request.temperature or CONFIG.get('temperature', 0.7)
-        max_tokens = request.max_tokens or CONFIG.get('max_tokens', 500)
-        top_p = request.top_p or CONFIG.get('top_p', 0.9)
-        
-        # Update model parameters if provided
-        if hasattr(MODEL, 'sampling_params'):
-            from vllm import SamplingParams
-            MODEL.sampling_params = SamplingParams(
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens
-            )
-        
-        result = MODEL.infer(formatted_prompt)
-        
-        if not result or not result.get('success'):
-            raise HTTPException(500, f"Model inference failed: {result}")
-        
-        answer = result.get('generated_text', '')
-        input_tokens = result.get('input_tokens', 0)
-        output_tokens = result.get('output_tokens', 0)
-        
-        # Step 7: Add references to answer
-        references = "\n\n**References:**\n"
-        for doc in retrieved_docs:
-            source = doc.get('source', '')
-            title = doc.get('title', 'Unknown')
-            if source and source != 'Unknown':
-                references += f"{doc['rank']}. [{title}]({source})\n"
-            else:
-                references += f"{doc['rank']}. {title}\n"
-        
-        answer += references
-        
-        # Calculate latency
-        latency = time.time() - start_time
-        
-        # Log to Cloud Logging for monitoring
-        if cloud_logger:
-            try:
-                cloud_logger.log_struct({
-                    'prediction_result': True,
-                    'query': request.query,
-                    'latency': latency,
-                    'retrieved_docs': [
-                        {'score': d['score'], 'rank': d['rank']} 
-                        for d in retrieved_docs
-                    ],
-                    'success': True,
-                    'model': CONFIG.get('display_name'),
-                    'tokens': {
-                        'input': input_tokens,
-                        'output': output_tokens
-                    }
-                })
-            except Exception as e:
-                logger.warning(f"Failed to log to Cloud Logging: {e}")
-        
-        logger.info(f"✅ Generated answer in {latency:.2f}s")
-        logger.info(f"Tokens: {input_tokens} in, {output_tokens} out")
-        
-        # Return response
-        return PredictionResponse(
-            answer=answer,
-            retrieved_docs=[
-                RetrievedDoc(
-                    text=d['text'][:300] + "..." if len(d['text']) > 300 else d['text'],
-                    source=d['source'],
-                    score=d['score'],
-                    rank=d['rank']
-                )
-                for d in retrieved_docs
-            ],
-            model_used=CONFIG.get('display_name', 'unknown'),
-            tokens={
-                'input': input_tokens,
-                'output': output_tokens,
-                'total': input_tokens + output_tokens
-            },
-            success=True
-        )
-        
-    except HTTPException:
-        raise
+        import ModelInference.RAG_inference as rag_module
+        config = getattr(rag_module, '_NORMALIZED_CONFIG', None)
+        if config:
+            return {
+                "model_name": config.get('model_name'),
+                "model_type": config.get('model_type'),
+                "temperature": config.get('temperature'),
+                "top_p": config.get('top_p'),
+                "max_tokens": config.get('max_tokens'),
+                "k": config.get('k'),
+                "retrieval_method": config.get('retrieval_method'),
+                "embedding_model": config.get('embedding_model'),
+            }
+        return {"error": "Config not found"}
     except Exception as e:
-        logger.error(f"❌ Prediction error: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+@app.post("/predict")
+def predict(body: dict):
+    if not READY:
+        return {
+            "predictions": [{
+                "error": STARTUP_ERROR or "Service not ready",
+                "success": False
+            }]
+        }
+    
+    try:
+        # Import with normalized config
+        import ModelInference.RAG_inference as rag_module
         
-        # Log error to Cloud Logging
-        if cloud_logger:
-            try:
-                cloud_logger.log_struct({
-                    'prediction_result': True,
-                    'query': request.query,
-                    'success': False,
-                    'error': str(e)
-                })
-            except:
-                pass
+        # Extract query from instances
+        instances = body.get("instances", [])
+        if not instances:
+            return {
+                "predictions": [{
+                    "error": "No instances provided in request body",
+                    "success": False
+                }]
+            }
         
-        raise HTTPException(500, f"Prediction failed: {str(e)}")
+        query = instances[0].get("query")
+        if not query:
+            return {
+                "predictions": [{
+                    "error": "No query provided in instance",
+                    "success": False
+                }]
+            }
+        
+        logger.info(f"Processing query: {query[:100]}...")
+        
+        # Run pipeline (will use normalized config)
+        response, stats = rag_module.run_rag_pipeline(query)
+        
+        # Check if response indicates an error
+        if response and (response.startswith("Error") or response.startswith("Failed")):
+            logger.error(f"Pipeline returned error: {response}")
+            return {
+                "predictions": [{
+                    "error": response,
+                    "stats": stats,
+                    "success": False
+                }]
+            }
+        
+        logger.info(f"✓ Query processed successfully ({stats.get('total_tokens', 0)} tokens)")
+        return {
+            "predictions": [{
+                "answer": response,
+                "stats": stats,
+                "success": True
+            }]
+        }
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "predictions": [{
+                "error": str(e),
+                "success": False
+            }]
+        }
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    logger.info(f"Starting server on port {port}...")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

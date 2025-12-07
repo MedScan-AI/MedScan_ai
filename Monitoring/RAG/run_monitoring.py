@@ -71,7 +71,7 @@ def main():
     if drift_info.get('drift_details'):
         for feature, details in drift_info['drift_details'].items():
             if details.get('has_drift'):
-                print(f"  ⚠️  {feature}: DRIFT DETECTED")
+                print(f"{feature}: DRIFT DETECTED")
     
     # Step 5: Determine retraining strategy
     logger.info("\nStep 5: Determining retraining strategy...")
