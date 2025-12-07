@@ -44,6 +44,7 @@ steps:
         --cpu=4 \
         --gpu=1 \
         --gpu-type=nvidia-l4 \
+        --no-gpu-zonal-redundancy \
         --no-cpu-throttling \
         --execution-environment=gen2 \
         --timeout=600 \
