@@ -5,7 +5,7 @@
 .git/
 .gitignore
 
-# Python
+# Python compiled files (NOT source .py files!)
 __pycache__/
 *.pyc
 *.pyo
@@ -21,6 +21,7 @@ build/
 venv/
 env/
 ENV/
+.venv
 
 # IDE
 .vscode/
@@ -48,16 +49,10 @@ logs/
 airflow/logs/
 airflow/plugins/
 
-# Data (exclude actual data but keep .dvc metadata files)
+# Data directories (loaded from GCS instead)
 *.csv
 *.json.gz
-
-# Exclude top-level data/ directory (if it exists)
-# NOTE: Do NOT exclude DataPipeline/data/ entirely - we need the .dvc files there!
 /data/
-
-# DataPipeline: Exclude data subdirectories but keep .dvc files at DataPipeline/data/*.dvc
-# By only excluding subdirectories (ending with /), .dvc files at the data/ level are included
 DataPipeline/data/raw/
 DataPipeline/data/preprocessed/
 DataPipeline/data/synthetic_metadata/
@@ -65,29 +60,62 @@ DataPipeline/data/synthetic_metadata_mitigated/
 DataPipeline/data/RAG/
 DataPipeline/data/ge_outputs/
 DataPipeline/data/mlflow_store/
+RAG_inference/data/
+**/data/RAG/
 
-# .dvc files at DataPipeline/data/*.dvc will be included because patterns ending with /
-# only match directories, not files at that level
-
-# Models (too large to upload)
+# Large model weight files (NOT Python source files!)
+# IMPORTANT: Only exclude model weights, NOT .py files
 *.h5
 *.keras
 *.pkl
 *.bin
-models/
-ModelDevelopment/*/models/
+*.pth
+*.ckpt
+*.safetensors
+embeddings*.json
+index*.bin
+data*.pkl
 
-# MLflow
+# Exclude specific large model weight directories
+# (but allow .py files in those directories)
+models/*.h5
+models/*.pkl
+models/*.bin
+models/*.pth
+ModelDevelopment/*/models/*.h5
+ModelDevelopment/*/models/*.pkl
+ModelDevelopment/*/models/*.bin
+ModelDevelopment/*/models/*.pth
+
+# MLflow artifacts
 mlruns/
+mlartifacts/
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Node (if any)
+# Node
 node_modules/
+
+# Analysis outputs
+DataPipeline/scripts/RAG/analysis/py311
 
 # Duplicate files
 * 2.*
 * 2/
 
+# Build artifacts
+*.tmp
+*.temp
+.cache/
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/

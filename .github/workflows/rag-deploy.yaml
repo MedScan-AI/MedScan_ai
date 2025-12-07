@@ -1,0 +1,137 @@
+name: RAG Deployment
+
+on:
+  workflow_run:
+    workflows: ["RAG Model Deployment"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: 
+  push:
+    branches: [rag_deployment_monitoring]
+    paths:
+      - 'deployment/**'
+      - 'cloudbuild/rag-deploy.yaml'
+      - 'ModelDevelopment/RAG/**'
+      - 'RAG_Dockerfile'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: medscanai-476500
+      
+      - name: Deploy to Cloud Run via Cloud Build
+        id: cloud-build
+        run: |
+          echo "Starting Cloud Build deployment..."
+          
+          gcloud builds submit \
+            --config=cloudbuild/rag-deploy.yaml \
+            --project=medscanai-476500 \
+            --timeout=30m
+          
+          echo "Cloud Build completed successfully!"
+      
+      - name: Get Service URL
+        id: service-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe rag-service \
+            --region=us-central1 \
+            --platform=managed \
+            --format="value(status.url)" \
+            --project=medscanai-476500)
+          
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service URL: $SERVICE_URL"
+      
+      - name: Set IAM Permissions
+        run: |          
+          echo "Setting public access permissions..."
+          
+          gcloud run services add-iam-policy-binding rag-service \
+            --member="allUsers" \
+            --role="roles/run.invoker" \
+            --region=us-central1 \
+            --project=medscanai-476500
+          
+          echo "IAM Permission Set For Public Access"
+      
+      - name: Wait for Service Warmup
+        run: |
+          echo "⏳ Waiting 120 seconds for model to load..."
+          sleep 120
+      
+      - name: Test Health Endpoint
+        run: |
+          echo "Testing health endpoint..."
+          
+          HEALTH_RESPONSE=$(curl -s -f ${{ steps.service-url.outputs.url }}/health || echo '{"ready":false}')
+          echo "Health response: $HEALTH_RESPONSE"
+          
+          READY=$(echo $HEALTH_RESPONSE | jq -r '.ready // false')
+          
+          if [ "$READY" = "true" ]; then
+            echo "Health check passed!"
+          else
+            echo "Service not ready yet"
+            echo "$HEALTH_RESPONSE"
+            exit 1
+          fi
+      
+      - name: Test Config Endpoint
+        run: |
+          echo "Testing config endpoint..."
+          curl -s ${{ steps.service-url.outputs.url }}/config | jq
+      
+      - name: Test Prediction Endpoint
+        run: |
+          echo "Testing prediction with sample query..."
+          
+          RESPONSE=$(curl -s -X POST ${{ steps.service-url.outputs.url }}/predict \
+            -H "Content-Type: application/json" \
+            -d '{"instances":[{"query":"What is tuberculosis?"}]}')
+          
+          echo "$RESPONSE" | jq
+          
+          SUCCESS=$(echo $RESPONSE | jq -r '.predictions[0].success // false')
+          
+          if [ "$SUCCESS" = "true" ]; then
+            echo "Prediction test passed!"
+          else
+            echo "Prediction test failed"
+            exit 1
+          fi
+      
+      - name: Create Deployment Summary
+        if: always()
+        run: |
+          echo "## RAG Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service URL:** ${{ steps.service-url.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** us-central1" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Commands:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "curl ${{ steps.service-url.outputs.url }}/health" >> $GITHUB_STEP_SUMMARY
+          echo "curl ${{ steps.service-url.outputs.url }}/config" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "::error::RAG deployment failed! Check Cloud Build logs at:"
+          echo "https://console.cloud.google.com/cloud-build/builds?project=medscanai-476500"

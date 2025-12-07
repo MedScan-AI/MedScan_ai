@@ -1,0 +1,36 @@
+name: RAG Monitoring
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      trigger_retrain:
+        description: 'Trigger retraining'
+        type: boolean
+        default: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: pip install google-cloud-storage google-cloud-logging pandas scipy
+      
+      - uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Run monitoring
+        run: |
+          cd Monitoring/RAG
+          python run_monitoring.py \
+            --hours=24 \
+            ${{ github.event.inputs.trigger_retrain && '--trigger-retrain' || '' }}

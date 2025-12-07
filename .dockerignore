@@ -1,0 +1,94 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Data directories (loaded from GCS instead)
+RAG_inference/data/
+**/data/RAG/
+DataPipeline/
+
+# Model checkpoints and large files
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+*.h5
+*.pkl
+*.pickle
+embeddings*.json
+index*.bin
+data*.pkl
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/
+*.md
+README.md
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# MLflow artifacts
+mlruns/
+mlartifacts/
+
+# Airflow
+dags/
+plugins/
+
+# Docker
+Dockerfile.dev
+docker-compose*.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Large datasets
+*.csv
+*.tsv
+*.json
+!requirements.txt
+!**/RAG_config.json
