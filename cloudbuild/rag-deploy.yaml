@@ -67,7 +67,7 @@ steps:
           --platform=managed \
           --format="value(status.url)")
         
-        echo "Service URL: $SERVICE_URL"
+        echo "Service URL: $$SERVICE_URL"
     id: 'deploy-cloud-run'
     waitFor: ['push-container']
 
