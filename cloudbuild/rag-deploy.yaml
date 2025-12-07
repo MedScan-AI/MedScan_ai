@@ -52,19 +52,8 @@ steps:
         --min-instances=0 \
         --concurrency=1 \
         --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$$TOKEN"
-
         
         echo "Deployment complete!"
-        
-        echo "Setting IAM policy for public access..."
-        gcloud run services add-iam-policy-binding rag-service \
-          --member="allUsers" \
-          --role="roles/run.invoker" \
-          --region=us-central1 \
-          --project=${PROJECT_ID}
-          
-        
-        echo "IAM policy set!"
         
         SERVICE_URL=$$(gcloud run services describe rag-service \
           --region=us-central1 \
