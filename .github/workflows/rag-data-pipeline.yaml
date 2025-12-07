@@ -38,3 +38,5 @@ jobs:
           gsutil ls gs://medscan-pipeline-medscanai-476500/RAG/index/index_latest.bin
           echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | \
             gsutil cp - gs://medscan-pipeline-medscanai-476500/RAG/index/last_updated.txt
+
+            
