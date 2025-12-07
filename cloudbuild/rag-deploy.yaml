@@ -33,23 +33,23 @@ steps:
         # Fetch token from Secret Manager
         TOKEN=$(gcloud secrets versions access latest --secret=huggingface-token --project=${PROJECT_ID})
         
-        ( echo "Y" || true ) | gcloud run deploy rag-service \
-          --image=gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID} \
-          --platform=managed \
-          --region=us-central1 \
-          --project=${PROJECT_ID} \
-          --allow-unauthenticated \
-          --memory=16Gi \
-          --cpu=4 \
-          --gpu=1 \
-          --gpu-type=nvidia-l4 \
-          --no-cpu-throttling \
-          --execution-environment=gen2 \
-          --timeout=600 \
-          --max-instances=3 \
-          --min-instances=0 \
-          --concurrency=1 \
-          --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$TOKEN"
+        (echo "Y" || true ) | gcloud run deploy rag-service \
+        --image=gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID} \
+        --platform=managed \
+        --region=us-central1 \
+        --project=${PROJECT_ID} \
+        --allow-unauthenticated \
+        --memory=16Gi \
+        --cpu=4 \
+        --gpu=1 \
+        --gpu-type=nvidia-l4 \
+        --no-cpu-throttling \
+        --execution-environment=gen2 \
+        --timeout=600 \
+        --max-instances=3 \
+        --min-instances=0 \
+        --concurrency=1 \
+        --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$${TOKEN}"
         
         echo "Deployment complete!"
         
