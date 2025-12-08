@@ -505,7 +505,8 @@ def compute_stats(
     config: Dict[str, Any],
     prompt_template: str,
     in_tokens: int = 0,
-    out_tokens: int = 0
+    out_tokens: int = 0,
+    index_size: int = 0
 ) -> Dict[str, Any]:
     """
     Compute statistics and metrics for the RAG pipeline response.
@@ -568,6 +569,10 @@ def compute_stats(
         }
         
         # 4 & 5. Include query and prompt
+        # Extract document indices (doc_id) for embedding space usage tracking
+        retrieved_doc_indices = [doc.get("doc_id") for doc in retrieved_docs if doc.get("doc_id") is not None]
+        retrieved_chunk_ids = [doc.get("chunk_id") for doc in retrieved_docs if doc.get("chunk_id")]
+        
         stats = {
             "query": query,
             "prompt": prompt_template,
@@ -578,7 +583,19 @@ def compute_stats(
             "hallucination_scores": hallucination_scores,
             "sampling_params": sampling_params,
             "num_retrieved_docs": len(retrieved_docs),
-            "retrieved_doc_ids": [doc.get("chunk_id") for doc in retrieved_docs]
+            "retrieved_doc_ids": retrieved_chunk_ids,  # For backward compatibility
+            "retrieved_doc_indices": retrieved_doc_indices,  # NEW: FAISS index positions for embedding space tracking
+            # Store retrieval metrics per document (without content)
+            "retrieved_docs_metrics": [
+                {
+                    "doc_id": doc.get("doc_id"),
+                    "chunk_id": doc.get("chunk_id"),
+                    "score": round(doc.get("score", 0.0), 4),
+                    "rank": doc.get("rank")
+                }
+                for doc in retrieved_docs
+            ],
+            "index_size": index_size
         }
         
         logger.info("Statistics computed successfully")
@@ -768,7 +785,8 @@ def run_rag_pipeline(
             config,
             prompt_template,
             in_tokens,
-            out_tokens
+            out_tokens,
+            index.ntotal
         )
         
         logger.info("RAG pipeline completed successfully")

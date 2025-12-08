@@ -47,6 +47,27 @@ def main():
     print(f"P95 Latency:        {metrics['p95_latency']:.2f}s")
     print(f"Avg Relevance:      {metrics['avg_relevance']:.2f}")
     
+    # NEW: Display composite score metrics
+    if metrics.get('avg_composite_score') is not None:
+        print("\n" + "="*70)
+        print("🎯 PRODUCTION QUALITY METRICS (from inference)")
+        print("="*70)
+        print(f"Avg Composite Score:    {metrics['avg_composite_score']:.4f}")
+        if metrics.get('min_composite_score') is not None:
+            print(f"Min Composite Score:    {metrics['min_composite_score']:.4f}")
+        if metrics.get('avg_hallucination_score') is not None:
+            print(f"Avg Hallucination:      {metrics['avg_hallucination_score']:.4f}")
+        if metrics.get('avg_retrieval_score') is not None:
+            print(f"Avg Retrieval Score:    {metrics['avg_retrieval_score']:.4f}")
+    
+    # NEW: Display embedding space usage
+    if metrics.get('embedding_space_coverage') is not None:
+        print("\n" + "="*70)
+        print("🗺️  EMBEDDING SPACE USAGE")
+        print("="*70)
+        print(f"Unique Docs Retrieved:  {metrics.get('unique_docs_retrieved', 0)}")
+        print(f"Coverage:                {metrics['embedding_space_coverage']:.2f}%")
+    
     # Step 3: Get model quality metrics
     logger.info("\nStep 3: Checking model quality...")
     model_metrics = monitor.get_current_model_metrics()
@@ -68,7 +89,11 @@ def main():
     print("="*70)
     print(f"Has Drift:          {drift_info.get('has_drift', False)}")
     
+    if drift_info.get('note'):
+        print(f"Note:               {drift_info['note']}")
+    
     if drift_info.get('drift_details'):
+        print("\nDrift Details:")
         for feature, details in drift_info['drift_details'].items():
             if details.get('has_drift'):
                 print(f"{feature}: DRIFT DETECTED")

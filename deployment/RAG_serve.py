@@ -5,9 +5,12 @@ Handles MLflow-generated configs without modification
 import os
 import sys
 import logging
+import time
+from datetime import datetime
 from fastapi import FastAPI
 import uvicorn
 import torch
+# from google.cloud import logging as cloud_logging
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/app/ModelDevelopment/RAG')
@@ -268,12 +271,28 @@ def predict(body: dict):
         
         logger.info(f"Processing query: {query[:100]}...")
         
+        # Track execution time
+        start_time = time.time()
+        
         # Run pipeline (will use normalized config)
         response, stats = rag_module.run_rag_pipeline(query)
+        
+        # Calculate response time
+        response_time = time.time() - start_time
         
         # Check if response indicates an error
         if response and (response.startswith("Error") or response.startswith("Failed")):
             logger.error(f"Pipeline returned error: {response}")
+            
+            # Log error to Cloud Logging (without query/response text)
+            _log_prediction_metrics(
+                query=query,
+                success=False,
+                error=response,
+                response_time=response_time,
+                stats=stats
+            )
+            
             return {
                 "predictions": [{
                     "error": response,
@@ -282,7 +301,29 @@ def predict(body: dict):
                 }]
             }
         
-        logger.info(f"✓ Query processed successfully ({stats.get('total_tokens', 0)} tokens)")
+        # Calculate composite score from production metrics
+        # Composite score = (1 - hallucination_score) * 0.5 + avg_retrieval_score * 0.5
+        # Lower hallucination is better, so we invert it
+        hallucination_score = stats.get('hallucination_scores', {}).get('avg', 0.0) if stats else 0.0
+        avg_retrieval_score = stats.get('avg_retrieval_score', 0.0) if stats else 0.0
+        composite_score = (1.0 - hallucination_score) * 0.5 + avg_retrieval_score * 0.5
+        
+        # Extract document indices (doc_id from retrieved documents) for embedding space usage tracking
+        retrieved_doc_indices = stats.get('retrieved_doc_indices', []) if stats else []
+        
+        # Log metrics to Cloud Logging (without query/response text)
+        _log_prediction_metrics(
+            success=True,
+            response_time=response_time,
+            query=query,
+            composite_score=composite_score,
+            hallucination_score=hallucination_score,
+            avg_retrieval_score=avg_retrieval_score,
+            retrieved_doc_indices=retrieved_doc_indices,
+            stats=stats
+        )
+        
+        logger.info(f"Query processed successfully ({stats.get('total_tokens', 0)} tokens, composite_score={composite_score:.4f})")
         return {
             "predictions": [{
                 "answer": response,
@@ -294,12 +335,120 @@ def predict(body: dict):
         logger.error(f"Prediction error: {e}")
         import traceback
         traceback.print_exc()
+        
+        # Log error metrics
+        # Try to get query if it was extracted, otherwise try from body
+        error_query = None
+        try:
+            error_query = query  # query variable from try block
+        except NameError:
+            try:
+                error_query = body.get("instances", [{}])[0].get("query") if body else None
+            except:
+                pass
+        
+        _log_prediction_metrics(
+            success=False,
+            error=str(e),
+            response_time=0.0,
+            query=error_query
+        )
+        
         return {
             "predictions": [{
                 "error": str(e),
                 "success": False
             }]
         }
+
+
+def _log_prediction_metrics(
+    success: bool,
+    response_time: float,
+    query: str = None,
+    composite_score: float = None,
+    hallucination_score: float = None,
+    avg_retrieval_score: float = None,
+    retrieved_doc_indices: list = None,
+    stats: dict = None,
+    error: str = None
+):
+    """
+    Log prediction metrics to Cloud Logging for monitoring.
+    Does NOT store query or response text for privacy.
+    
+    Args:
+        success: Whether prediction succeeded
+        response_time: Execution time in seconds
+        composite_score: Calculated composite score
+        hallucination_score: Hallucination score from stats
+        avg_retrieval_score: Average retrieval score
+        retrieved_doc_indices: List of document indices (doc_id) retrieved
+        stats: Full stats dictionary from RAG pipeline
+        error: Error message if failed
+    """
+    try:
+        project_id = os.getenv('GCP_PROJECT_ID', 'medscanai-476500')
+        # logging_client = cloud_logging.Client(project=project_id)
+        # logger_instance = logging_client.logger("rag_predictions")
+        
+        # Build metrics payload (NO query/response text)
+        payload = {
+            "prediction_result": {
+                "success": success,
+                "latency": response_time,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
+        }
+        
+        if query is not None:
+            payload["prediction_result"]["query"] = query
+        
+        # Add composite score and component metrics if available
+        if composite_score is not None:
+            payload["prediction_result"]["composite_score"] = round(composite_score, 4)
+        
+        if hallucination_score is not None:
+            payload["prediction_result"]["hallucination_score"] = round(hallucination_score, 4)
+        
+        if avg_retrieval_score is not None:
+            payload["prediction_result"]["avg_retrieval_score"] = round(avg_retrieval_score, 4)
+        
+        # Add retrieved document indices (for embedding space usage tracking)
+        if retrieved_doc_indices:
+            payload["prediction_result"]["retrieved_doc_indices"] = retrieved_doc_indices
+            payload["prediction_result"]["num_retrieved_docs"] = len(retrieved_doc_indices)
+        
+        # Add existing inference metrics from stats
+        if stats:
+            if 'input_tokens' in stats:
+                payload["prediction_result"]["input_tokens"] = stats.get('input_tokens', 0)
+            if 'output_tokens' in stats:
+                payload["prediction_result"]["output_tokens"] = stats.get('output_tokens', 0)
+            if 'total_tokens' in stats:
+                payload["prediction_result"]["total_tokens"] = stats.get('total_tokens', 0)
+            if 'num_retrieved_docs' in stats:
+                payload["prediction_result"]["num_retrieved_docs"] = stats.get('num_retrieved_docs', 0)
+            # Store retrieval metrics per document (without content) - for detailed analysis
+            if 'retrieved_docs_metrics' in stats:
+                payload["prediction_result"]["retrieved_docs_metrics"] = stats.get('retrieved_docs_metrics', [])
+            # NEW: Store index_size for embedding space coverage calculation
+            if 'index_size' in stats:
+                payload["prediction_result"]["index_size"] = stats.get('index_size', 0)
+        
+        # Add error if failed
+        if error:
+            payload["prediction_result"]["error"] = error
+        
+        # Log to Cloud Logging
+        # logger_instance.log_struct(payload)
+        if success:
+            logger.info(f"Logged prediction metrics: success={success}, composite_score={composite_score if composite_score else 'N/A'}, latency={response_time:.3f}s")
+        else:
+            logger.error(f"Logged prediction metrics: success={success}, error={error}, latency={response_time:.3f}s, composite_score={composite_score if composite_score else 'N/A'}")
+    except Exception as e:
+        # Don't fail the request if logging fails
+        logger.warning(f"Failed to log prediction metrics to Cloud Logging: {e}")
 
 
 if __name__ == "__main__":
