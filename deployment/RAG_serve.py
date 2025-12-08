@@ -7,7 +7,7 @@ import sys
 import logging
 import time
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 import uvicorn
 import torch
 # from google.cloud import logging as cloud_logging
@@ -237,7 +237,11 @@ def get_config():
 
 
 @app.post("/predict")
-def predict(body: dict):
+async def predict(body: dict, background_tasks: BackgroundTasks):
+    """
+    Process RAG query and return response immediately.
+    Metrics logging happens in background to reduce latency.
+    """
     if not READY:
         return {
             "predictions": [{
@@ -271,10 +275,10 @@ def predict(body: dict):
         
         logger.info(f"Processing query: {query[:100]}...")
         
-        # Track execution time
+        # Track execution time (critical path - user waits for this)
         start_time = time.time()
         
-        # Run pipeline (will use normalized config)
+        # Run pipeline (will use normalized config) - CRITICAL PATH
         response, stats = rag_module.run_rag_pipeline(query)
         
         # Calculate response time
@@ -284,8 +288,9 @@ def predict(body: dict):
         if response and (response.startswith("Error") or response.startswith("Failed")):
             logger.error(f"Pipeline returned error: {response}")
             
-            # Log error to Cloud Logging (without query/response text)
-            _log_prediction_metrics(
+            # Queue error logging as background task
+            background_tasks.add_task(
+                _log_prediction_metrics,
                 query=query,
                 success=False,
                 error=response,
@@ -293,6 +298,7 @@ def predict(body: dict):
                 stats=stats
             )
             
+            # Return error response immediately
             return {
                 "predictions": [{
                     "error": response,
@@ -301,29 +307,18 @@ def predict(body: dict):
                 }]
             }
         
-        # Calculate composite score from production metrics
-        # Composite score = (1 - hallucination_score) * 0.5 + avg_retrieval_score * 0.5
-        # Lower hallucination is better, so we invert it
-        hallucination_score = stats.get('hallucination_scores', {}).get('avg', 0.0) if stats else 0.0
-        avg_retrieval_score = stats.get('avg_retrieval_score', 0.0) if stats else 0.0
-        composite_score = (1.0 - hallucination_score) * 0.5 + avg_retrieval_score * 0.5
-        
-        # Extract document indices (doc_id from retrieved documents) for embedding space usage tracking
-        retrieved_doc_indices = stats.get('retrieved_doc_indices', []) if stats else []
-        
-        # Log metrics to Cloud Logging (without query/response text)
-        _log_prediction_metrics(
-            success=True,
-            response_time=response_time,
+        # Queue metrics calculation and logging as background task
+        # This happens AFTER response is sent to user
+        background_tasks.add_task(
+            _process_and_log_metrics,
             query=query,
-            composite_score=composite_score,
-            hallucination_score=hallucination_score,
-            avg_retrieval_score=avg_retrieval_score,
-            retrieved_doc_indices=retrieved_doc_indices,
+            response=response,
+            response_time=response_time,
             stats=stats
         )
         
-        logger.info(f"Query processed successfully ({stats.get('total_tokens', 0)} tokens, composite_score={composite_score:.4f})")
+        # Return response immediately - user doesn't wait for metrics/logging
+        logger.info(f"Query processed successfully ({stats.get('total_tokens', 0)} tokens)")
         return {
             "predictions": [{
                 "answer": response,
@@ -336,8 +331,7 @@ def predict(body: dict):
         import traceback
         traceback.print_exc()
         
-        # Log error metrics
-        # Try to get query if it was extracted, otherwise try from body
+        # Try to get query for error logging
         error_query = None
         try:
             error_query = query  # query variable from try block
@@ -347,7 +341,9 @@ def predict(body: dict):
             except:
                 pass
         
-        _log_prediction_metrics(
+        # Queue error logging as background task
+        background_tasks.add_task(
+            _log_prediction_metrics,
             success=False,
             error=str(e),
             response_time=0.0,
@@ -360,6 +356,53 @@ def predict(body: dict):
                 "success": False
             }]
         }
+
+
+def _process_and_log_metrics(
+    query: str,
+    response: str,
+    response_time: float,
+    stats: dict
+):
+    """
+    Process metrics and log to Cloud Logging.
+    This runs in background after response is sent to user.
+    
+    Args:
+        query: User query
+        response: Generated response
+        response_time: Total execution time
+        stats: Pipeline statistics
+    """
+    try:
+        # Calculate composite score using same heuristic as model selection
+        # Composite score = semantic_score * 0.5 + hallucination_score * 0.5
+        # In production, we use avg_retrieval_score as proxy for semantic_score
+        # (both measure semantic relevance of retrieved documents to query)
+        hallucination_score = stats.get('hallucination_scores', {}).get('avg', 0.0) if stats else 0.0
+        avg_retrieval_score = stats.get('avg_retrieval_score', 0.0) if stats else 0.0
+        # Use retrieval_score as semantic_score proxy to match model selection heuristic
+        composite_score = avg_retrieval_score * 0.5 + hallucination_score * 0.5
+        
+        # Extract document indices (doc_id from retrieved documents) for embedding space usage tracking
+        retrieved_doc_indices = stats.get('retrieved_doc_indices', []) if stats else []
+        
+        # Log metrics to Cloud Logging
+        _log_prediction_metrics(
+            success=True,
+            response_time=response_time,
+            query=query,
+            composite_score=composite_score,
+            hallucination_score=hallucination_score,
+            avg_retrieval_score=avg_retrieval_score,
+            retrieved_doc_indices=retrieved_doc_indices,
+            stats=stats
+        )
+        
+        logger.info(f"Background metrics logged: composite_score={composite_score:.4f}, latency={response_time:.3f}s")
+    except Exception as e:
+        # Don't fail if background task has errors
+        logger.warning(f"Failed to process metrics in background: {e}")
 
 
 def _log_prediction_metrics(
