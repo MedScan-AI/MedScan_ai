@@ -7,9 +7,11 @@ import sys
 import logging
 import time
 from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
 from fastapi import FastAPI, BackgroundTasks
 import uvicorn
 import torch
+import numpy as np
 # from google.cloud import logging as cloud_logging
 
 sys.path.insert(0, '/app')
@@ -22,6 +24,13 @@ app = FastAPI(title="MedScan RAG")
 
 STARTUP_ERROR = None
 READY = False
+
+# Pre-loaded resources (initialized at startup)
+_rag_config = None
+_embeddings_data = None
+_faiss_index = None
+_llm_model = None
+_embedding_model = None
 
 def normalize_config(config: dict) -> dict:
     """
@@ -144,7 +153,7 @@ ANSWER:"""
 
 @app.on_event("startup")
 async def startup():
-    global STARTUP_ERROR, READY
+    global STARTUP_ERROR, READY, _rag_config, _embeddings_data, _faiss_index, _llm_model, _embedding_model
     try:
         # Set env vars
         bucket = os.getenv('GCS_BUCKET', 'medscan-pipeline-medscanai-476500')
@@ -172,29 +181,53 @@ async def startup():
         
         # Normalize config to handle MLflow format
         normalized_config = normalize_config(raw_config)
+        _rag_config = normalized_config
         
-        # Store normalized config globally for the pipeline to use
+        # Store normalized config globally for backward compatibility
         import ModelInference.RAG_inference as rag_module
         rag_module._NORMALIZED_CONFIG = normalized_config
         logger.info("Normalized config stored globally")
         
-        # Validate data files
+        # Load data files
         from ModelInference.RAG_inference import load_embeddings_data, load_faiss_index
         
-        logger.info("VALIDATING DATA FILES")
-        embeddings = load_embeddings_data()
-        index = load_faiss_index()
+        logger.info("LOADING DATA FILES")
+        _embeddings_data = load_embeddings_data()
+        _faiss_index = load_faiss_index()
         
-        if embeddings is None:
+        if _embeddings_data is None:
             raise RuntimeError("Failed to load embeddings data")
-        if index is None:
+        if _faiss_index is None:
             raise RuntimeError("Failed to load FAISS index")
         
-        logger.info(f"Embeddings: {len(embeddings)} records")
-        logger.info(f"FAISS index: {index.ntotal} vectors, dimension={index.d}")
+        logger.info(f"Embeddings: {len(_embeddings_data)} records")
+        logger.info(f"FAISS index: {_faiss_index.ntotal} vectors, dimension={_faiss_index.d}")
+        
+        # Pre-load embedding model
+        logger.info("Loading embedding model...")
+        from sentence_transformers import SentenceTransformer
+        embedding_model_name = _rag_config.get('embedding_model', 'BAAI/llm-embedder')
+        _embedding_model = SentenceTransformer(embedding_model_name, device='cpu')
+        logger.info(f"Embedding model loaded: {embedding_model_name}")
+        
+        # Pre-load LLM model
+        logger.info("Loading LLM model...")
+        from models.models import ModelFactory
+        model_name = _rag_config.get('model_name')
+        temperature = _rag_config.get('temperature', 0.7)
+        top_p = _rag_config.get('top_p', 0.9)
+        max_tokens = _rag_config.get('max_tokens', 500)
+        
+        _llm_model = ModelFactory.create_model(
+            model_name,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+        logger.info(f"LLM model loaded: {model_name} (temperature={temperature}, top_p={top_p}, max_tokens={max_tokens})")
         
         READY = True
-        logger.info("SERVICE READY ✓")
+        logger.info("SERVICE READY ✓ (All models pre-loaded)")
     except Exception as e:
         STARTUP_ERROR = str(e)
         logger.error(f"STARTUP FAILED: {e}")
@@ -218,30 +251,200 @@ def get_config():
         return {"error": "Service not ready"}
     
     try:
-        import ModelInference.RAG_inference as rag_module
-        config = getattr(rag_module, '_NORMALIZED_CONFIG', None)
-        if config:
+        if _rag_config:
             return {
-                "model_name": config.get('model_name'),
-                "model_type": config.get('model_type'),
-                "temperature": config.get('temperature'),
-                "top_p": config.get('top_p'),
-                "max_tokens": config.get('max_tokens'),
-                "k": config.get('k'),
-                "retrieval_method": config.get('retrieval_method'),
-                "embedding_model": config.get('embedding_model'),
+                "model_name": _rag_config.get('model_name'),
+                "model_type": _rag_config.get('model_type'),
+                "temperature": _rag_config.get('temperature'),
+                "top_p": _rag_config.get('top_p'),
+                "max_tokens": _rag_config.get('max_tokens'),
+                "k": _rag_config.get('k'),
+                "retrieval_method": _rag_config.get('retrieval_method'),
+                "embedding_model": _rag_config.get('embedding_model'),
             }
         return {"error": "Config not found"}
     except Exception as e:
         return {"error": str(e)}
 
 
+def _get_embedding(query: str) -> Optional[np.ndarray]:
+    """
+    Generate embedding using pre-loaded embedding model.
+    
+    Args:
+        query: User query string
+        
+    Returns:
+        Embedding vector or None on failure
+    """
+    global _embedding_model
+    try:
+        if not query or not query.strip():
+            logger.error("Empty query provided")
+            return None
+        
+        embedding = _embedding_model.encode(
+            query,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False
+        )
+        
+        if embedding is None or len(embedding) == 0:
+            logger.error("Generated embedding is empty")
+            return None
+        
+        return embedding
+    except Exception as e:
+        logger.error(f"Error generating embedding: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _generate_response_with_preloaded_model(
+    query: str,
+    documents: List[Dict[str, Any]]
+) -> Optional[Tuple[str, int, int]]:
+    """
+    Generate response using pre-loaded LLM model.
+    
+    Args:
+        query: User query
+        documents: Retrieved documents with metadata
+        
+    Returns:
+        Tuple of (response string, input_tokens, output_tokens) or None on failure
+    """
+    global _llm_model, _rag_config
+    try:
+        prompt_template = _rag_config.get("prompt", "")
+        
+        if not prompt_template:
+            raise ValueError("Prompt template not found in config")
+        
+        # Format context from documents with TRUNCATION for memory safety
+        context_parts = []
+        for d in documents:
+            title = d.get('title', 'Unknown')
+            content = d.get('content', '')
+            
+            # CRITICAL: Truncate long content to prevent OOM
+            if len(content) > 2000:  # Max 2000 chars per document
+                content = content[:2000] + "...[truncated]"
+            
+            context_parts.append(f"Document {d['rank']} - {title}:\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # CRITICAL: Truncate total context if too long (for L4 GPU)
+        max_context_length = 6000  # Conservative limit
+        if len(context) > max_context_length:
+            context = context[:max_context_length] + "\n\n[Context truncated due to length...]"
+            logger.warning(f"Context truncated to {max_context_length} characters")
+        
+        # Format prompt
+        formatted_prompt = prompt_template.format(context=context, query=query)
+        
+        # Generate response using pre-loaded model
+        response_d = _llm_model.infer(formatted_prompt)
+        
+        if not response_d or response_d.get('success') != True:
+            raise ValueError(f"Model inference failed: {response_d}")
+        
+        response = response_d.get('generated_text', '')
+        in_tokens = response_d.get('input_tokens', 0)
+        out_tokens = response_d.get('output_tokens', 0)
+        
+        # Add references section with links
+        references = "\n\n**References:**\n"
+        for d in documents:
+            link = d.get('metadata', {}).get('link', '')
+            title = d.get('title', 'Unknown')
+            if link:
+                references += f"{d['rank']}. [{title}]({link})\n"
+            else:
+                references += f"{d['rank']}. {title}\n"
+        
+        response += references
+        
+        # Add medical disclaimer
+        footer = (
+            "\n\n---\n"
+            "**Important:** This information is for educational purposes only and "
+            "should not replace professional medical advice. Please consult a "
+            "healthcare provider for diagnosis, treatment, or medical guidance."
+        )
+        response += footer
+        
+        logger.info(f"Response generated successfully: {in_tokens} input tokens, {out_tokens} output tokens")
+        return response, in_tokens, out_tokens
+        
+    except Exception as e:
+        logger.error(f"Error generating response: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _create_lightweight_stats(
+    query: str,
+    response: str,
+    retrieved_docs: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Create lightweight stats with query, response, and sources.
+    This is returned immediately to the user.
+    
+    Args:
+        query: User query
+        response: Generated response
+        retrieved_docs: Retrieved documents
+        
+    Returns:
+        Dictionary with query, response, sources, and basic metrics
+    """
+    sources = []
+    scores = []
+    
+    for doc in retrieved_docs:
+        source_info = {
+            "rank": doc.get("rank"),
+            "title": doc.get("title", "Unknown"),
+            "chunk_id": doc.get("chunk_id"),
+            "score": round(doc.get("score", 0.0), 4),
+            "link": doc.get("metadata", {}).get("link", "")
+        }
+        sources.append(source_info)
+        
+        # Collect scores for avg_retrieval_score calculation
+        # Same calculation as compute_stats() for consistency
+        score = doc.get("score", 0.0)
+        scores.append(score)
+    
+    # Calculate average retrieval score (same as compute_stats)
+    # These are REAL scores from FAISS distance: score = 1 / (1 + distance)
+    avg_retrieval_score = round(sum(scores) / len(scores), 4) if scores else 0.0
+    
+    return {
+        "query": query,
+        "response": response,
+        "sources": sources,
+        "num_sources": len(sources),
+        "num_retrieved_docs": len(retrieved_docs),  # For client compatibility
+        "avg_retrieval_score": avg_retrieval_score  # For client compatibility (confidence)
+    }
+
+
 @app.post("/predict")
 async def predict(body: dict, background_tasks: BackgroundTasks):
     """
     Process RAG query and return response immediately.
-    Metrics logging happens in background to reduce latency.
+    Uses pre-loaded models for efficiency.
+    Full metrics computation happens in background to reduce latency.
     """
+    global _rag_config, _embeddings_data, _faiss_index
+    
     if not READY:
         return {
             "predictions": [{
@@ -251,9 +454,6 @@ async def predict(body: dict, background_tasks: BackgroundTasks):
         }
     
     try:
-        # Import with normalized config
-        import ModelInference.RAG_inference as rag_module
-        
         # Extract query from instances
         instances = body.get("instances", [])
         if not instances:
@@ -278,51 +478,74 @@ async def predict(body: dict, background_tasks: BackgroundTasks):
         # Track execution time (critical path - user waits for this)
         start_time = time.time()
         
-        # Run pipeline (will use normalized config) - CRITICAL PATH
-        response, stats = rag_module.run_rag_pipeline(query)
-        
-        # Calculate response time
-        response_time = time.time() - start_time
-        
-        # Check if response indicates an error
-        if response and (response.startswith("Error") or response.startswith("Failed")):
-            logger.error(f"Pipeline returned error: {response}")
-            
-            # Queue error logging as background task
-            background_tasks.add_task(
-                _log_prediction_metrics,
-                query=query,
-                success=False,
-                error=response,
-                response_time=response_time,
-                stats=stats
-            )
-            
-            # Return error response immediately
+        # Step 1: Generate embedding using pre-loaded model
+        embedding = _get_embedding(query)
+        if embedding is None:
+            error_msg = "Failed to generate query embedding."
+            logger.error(error_msg)
             return {
                 "predictions": [{
-                    "error": response,
-                    "stats": stats,
+                    "error": error_msg,
                     "success": False
                 }]
             }
         
-        # Queue metrics calculation and logging as background task
+        # Step 2: Retrieve documents using pre-loaded index
+        from ModelInference.RAG_inference import retrieve_documents
+        k = _rag_config.get("k", 5)
+        retrieval_method = _rag_config.get("retrieval_method", "similarity")
+        documents = retrieve_documents(embedding, _faiss_index, _embeddings_data, k, retrieval_method)
+        
+        if not documents:
+            error_msg = "Failed to retrieve documents."
+            logger.error(error_msg)
+            return {
+                "predictions": [{
+                    "error": error_msg,
+                    "success": False
+                }]
+            }
+        
+        logger.info(f"Retrieved {len(documents)} documents")
+        
+        # Step 3: Generate response using pre-loaded LLM model
+        result = _generate_response_with_preloaded_model(query, documents)
+        if result is None:
+            error_msg = "Failed to generate response from LLM."
+            logger.error(error_msg)
+            return {
+                "predictions": [{
+                    "error": error_msg,
+                    "success": False
+                }]
+            }
+        
+        response, in_tokens, out_tokens = result
+        
+        # Calculate response time
+        response_time = time.time() - start_time
+        
+        # Step 4: Create lightweight stats for immediate return
+        lightweight_stats = _create_lightweight_stats(query, response, documents)
+        
+        # Step 5: Queue full stats computation and logging as background task
         # This happens AFTER response is sent to user
         background_tasks.add_task(
-            _process_and_log_metrics,
+            _compute_and_log_full_stats,
             query=query,
             response=response,
-            response_time=response_time,
-            stats=stats
+            documents=documents,
+            in_tokens=in_tokens,
+            out_tokens=out_tokens,
+            response_time=response_time
         )
         
-        # Return response immediately - user doesn't wait for metrics/logging
-        logger.info(f"Query processed successfully ({stats.get('total_tokens', 0)} tokens)")
+        # Return lightweight stats immediately - user doesn't wait for full stats/logging
+        logger.info(f"Query processed successfully ({in_tokens + out_tokens} tokens, {response_time:.3f}s)")
         return {
             "predictions": [{
                 "answer": response,
-                "stats": stats,
+                "stats": lightweight_stats,
                 "success": True
             }]
         }
@@ -358,23 +581,43 @@ async def predict(body: dict, background_tasks: BackgroundTasks):
         }
 
 
-def _process_and_log_metrics(
+def _compute_and_log_full_stats(
     query: str,
     response: str,
-    response_time: float,
-    stats: dict
+    documents: List[Dict[str, Any]],
+    in_tokens: int,
+    out_tokens: int,
+    response_time: float
 ):
     """
-    Process metrics and log to Cloud Logging.
+    Compute full statistics and log to Cloud Logging.
     This runs in background after response is sent to user.
     
     Args:
         query: User query
         response: Generated response
+        documents: Retrieved documents with metadata
+        in_tokens: Number of input tokens
+        out_tokens: Number of output tokens
         response_time: Total execution time
-        stats: Pipeline statistics
     """
+    global _rag_config, _faiss_index
     try:
+        # Compute full stats using the compute_stats function from RAG_inference
+        from ModelInference.RAG_inference import compute_stats
+        
+        prompt_template = _rag_config.get("prompt", "")
+        stats = compute_stats(
+            query,
+            response,
+            documents,
+            _rag_config,
+            prompt_template,
+            in_tokens,
+            out_tokens,
+            _faiss_index.ntotal if _faiss_index else 0
+        )
+        
         # Calculate composite score using same heuristic as model selection
         # Composite score = semantic_score * 0.5 + hallucination_score * 0.5
         # In production, we use avg_retrieval_score as proxy for semantic_score
@@ -402,7 +645,9 @@ def _process_and_log_metrics(
         logger.info(f"Background metrics logged: composite_score={composite_score:.4f}, latency={response_time:.3f}s")
     except Exception as e:
         # Don't fail if background task has errors
-        logger.warning(f"Failed to process metrics in background: {e}")
+        logger.warning(f"Failed to compute and log full stats in background: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def _log_prediction_metrics(
