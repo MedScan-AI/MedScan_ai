@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 import pandas as pd
-from google.cloud import storage, logging as cloud_logging
+from google.cloud import storage
+from google.cloud import logging as cloud_logging
 
 import sys
 project_root = Path(__file__).parent.parent.parent
@@ -49,13 +50,14 @@ class RAGMonitor:
     
     def collect_prediction_logs(self, hours: int = 24) -> List[Dict]:
         """Collect prediction logs from Cloud Logging"""
-        logging_client = cloud_logging.Client()
+        logging_client = cloud_logging.Client(project=self.project_id)
         
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(hours=hours)
         
         filter_str = f"""
-        resource.type="aiplatform.googleapis.com/Endpoint"
+        resource.type="cloud_run_revision"
+        resource.labels.service_name="rag-service"
         timestamp >= "{start_time.isoformat()}Z"
         jsonPayload.prediction_result:*
         """
@@ -281,9 +283,9 @@ class RAGMonitor:
             if strategy != 'full':
                 strategy = 'model_only'
         
-        if model_metrics['hallucination_score'] > self.THRESHOLDS['max_hallucination_score']:
+        if model_metrics['hallucination_score'] < self.THRESHOLDS['max_hallucination_score']:
             reasons.append(
-                f"Hallucination score {model_metrics['hallucination_score']:.2f} exceeds "
+                f"Hallucination score {model_metrics['hallucination_score']:.2f} below "
                 f"threshold {self.THRESHOLDS['max_hallucination_score']}"
             )
             if strategy != 'full':
