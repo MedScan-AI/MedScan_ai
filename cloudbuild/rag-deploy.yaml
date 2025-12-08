@@ -1,0 +1,91 @@
+# cloudbuild/rag-deploy.yaml
+# Automated deployment of RAG model to Cloud Run with GPU support
+
+steps:
+  # Step 1: Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID}'
+      - '-f'
+      - 'RAG_Dockerfile'
+      - '.'
+    id: 'build-container'
+
+  # Step 2: Push image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID}'
+    id: 'push-container'
+    waitFor: ['build-container']
+
+  # Step 3: Deploy to Cloud Run with GPU
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Deploying RAG service to Cloud Run with GPU..."
+        
+        # Fetch token from Secret Manager
+        TOKEN=$$(gcloud secrets versions access latest --secret=huggingface-token --project=${PROJECT_ID})
+
+        
+        (echo "Y" || true ) | gcloud run deploy rag-service \
+        --image=gcr.io/${PROJECT_ID}/rag-service:${BUILD_ID} \
+        --platform=managed \
+        --region=us-central1 \
+        --project=${PROJECT_ID} \
+        --allow-unauthenticated \
+        --memory=16Gi \
+        --cpu=4 \
+        --gpu=1 \
+        --gpu-type=nvidia-l4 \
+        --no-gpu-zonal-redundancy \
+        --no-cpu-throttling \
+        --execution-environment=gen2 \
+        --timeout=600 \
+        --max-instances=3 \
+        --min-instances=0 \
+        --concurrency=1 \
+        --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$$TOKEN"
+        
+        echo "Deployment complete!"
+        
+        SERVICE_URL=$$(gcloud run services describe rag-service \
+          --region=us-central1 \
+          --platform=managed \
+          --format="value(status.url)")
+        
+        echo "Service URL: $$SERVICE_URL"
+    id: 'deploy-cloud-run'
+    waitFor: ['push-container']
+
+  # Step 4: Verify deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Deployment Complete!"
+        
+        SERVICE_URL=$$(gcloud run services describe rag-service \
+          --region=us-central1 \
+          --platform=managed \
+          --format="value(status.url)")
+        
+        echo "Service URL: $$SERVICE_URL"
+        echo "Test with:"
+        echo "curl $$SERVICE_URL/health"
+        echo "curl $$SERVICE_URL/config"
+    id: 'verify-deployment'
+    waitFor: ['deploy-cloud-run']
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+timeout: 1800s

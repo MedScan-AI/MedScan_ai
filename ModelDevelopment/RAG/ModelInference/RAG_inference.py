@@ -2,6 +2,7 @@
 RAG_inference.py - Updated to read directly from GCS with local fallback
 Supports running in Airflow, Cloud Build, and local development
 """
+
 import logging
 import json
 import pickle
@@ -30,15 +31,14 @@ except RuntimeError:
 
 from models.models import ModelFactory
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
 logger = logging.getLogger(__name__)
 
-
-# ==================== GCS- Data Loading ====================
+_NORMALIZED_CONFIG = None
 
 class RAGDataLoader:
     """Load RAG data from GCS with local fallback"""
@@ -284,6 +284,7 @@ def load_data_pkl() -> Optional[Any]:
 def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
     """
     Load configuration from GCS or local file.
+    Uses normalized config from RAG_serve if available.
     
     Args:
         config_path: Path to config file (can be GCS URI or local path)
@@ -291,6 +292,12 @@ def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
     Returns:
         Dictionary containing configuration parameters
     """
+    # If normalized config was set by RAG_serve, use it
+    global _NORMALIZED_CONFIG
+    if _NORMALIZED_CONFIG is not None:
+        logger.info("Using normalized config from RAG_serve")
+        return _NORMALIZED_CONFIG
+    
     try:
         # Check if it's a GCS URI
         if config_path.startswith('gs://'):
@@ -317,9 +324,10 @@ def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
             
             possible_paths = [
                 Path(config_path),
+                Path(__file__).parent / 'utils' / 'RAG_config.json',
                 Path(__file__).parent.parent / 'utils' / 'RAG_config.json',
+                Path('/app/ModelDevelopment/RAG/utils/RAG_config.json'),
                 Path('/workspace/RAG_config.json'),  # Cloud Build
-                Path(__file__).parent.parent.parent.parent / 'ModelDevelopment' / 'RAG' / 'utils' / 'RAG_config.json',  # Absolute
             ]
             
             for path in possible_paths:
@@ -339,33 +347,7 @@ def load_config(config_path: str = "utils/RAG_config.json") -> Dict[str, Any]:
 
 # ==================== Core RAG Functions (Unchanged) ====================
 
-def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional[np.ndarray]:
-    """
-    Generate embedding vector for query using sentence transformer.
-    
-    Args:
-        query: Input text to embed
-        model_name: Name of the embedding model
-        
-    Returns:
-        Numpy array of embedding vector or None on failure
-    """
-    try:
-        logger.info(f"Generating embedding with model: {model_name}")
-        
-        model = SentenceTransformer(model_name, device='cpu')
-        embedding = model.encode(query, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
-        logger.info(f"Embedding generated with shape: {embedding.shape}")
-        del model
-        gc.collect()
-        
-        return embedding
-        
-    except Exception as e:
-        logger.error(f"Error generating embedding: {e}")
-        return None
-
-
+# FIX 2: retrieve_documents - Add validation and error handling
 def retrieve_documents(
     embedding: np.ndarray,
     index: faiss.Index,
@@ -374,23 +356,41 @@ def retrieve_documents(
     retrieval_method: str = "similarity"
 ) -> Optional[List[Dict[str, Any]]]:
     """
-    Retrieve top-k documents from FAISS index.
-    
-    Args:
-        embedding: Query embedding vector
-        index: FAISS index containing document embeddings
-        embeddings_data: List of embedding records with metadata
-        k: Number of documents to retrieve
-        retrieval_method: Method for retrieval (e.g., 'similarity')
-        
-    Returns:
-        List of retrieved documents with full content and metadata or None on failure
+    Retrieve top-k documents from FAISS index with robust error handling.
     """
     try:
+        # Validate inputs
+        if embedding is None:
+            logger.error("Embedding is None")
+            return None
+        
+        if index is None:
+            logger.error("FAISS index is None")
+            return None
+        
+        if not embeddings_data:
+            logger.error("Embeddings data is empty")
+            return None
+        
+        if index.ntotal == 0:
+            logger.error("FAISS index is empty (0 vectors)")
+            return None
+        
         logger.info(f"Retrieving {k} documents using {retrieval_method} method")
+        logger.info(f"Index has {index.ntotal} vectors, embeddings_data has {len(embeddings_data)} records")
+        
+        # Validate embedding dimension
+        expected_dim = index.d
+        if embedding.shape[0] != expected_dim:
+            logger.error(f"Embedding dimension mismatch: got {embedding.shape[0]}, expected {expected_dim}")
+            return None
         
         # Reshape embedding for FAISS (needs 2D array)
         query_vector = embedding.reshape(1, -1).astype('float32')
+        
+        # Ensure k doesn't exceed available documents
+        k = min(k, index.ntotal, len(embeddings_data))
+        logger.info(f"Adjusted k to {k}")
         
         # Search FAISS index
         distances, indices = index.search(query_vector, k)
@@ -398,99 +398,79 @@ def retrieve_documents(
         # Format results with full document data
         documents = []
         for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
-            if idx != -1 and idx < len(embeddings_data):  # Valid index
-                record = embeddings_data[idx]
-                documents.append({
-                    "rank": i + 1,
-                    "doc_id": idx,
-                    "chunk_id": record.get("chunk_id"),
-                    "title": record.get("title"),
-                    "content": record.get("content"),
-                    "metadata": record.get("metadata", {}),
-                    "distance": float(dist),
-                    "score": float(1 / (1 + dist))  # Convert distance to similarity score
-                })
+            if idx == -1:
+                logger.warning(f"Invalid index at position {i}: {idx}")
+                continue
+            
+            if idx >= len(embeddings_data):
+                logger.warning(f"Index {idx} out of bounds (embeddings_data size: {len(embeddings_data)})")
+                continue
+            
+            record = embeddings_data[idx]
+            documents.append({
+                "rank": i + 1,
+                "doc_id": int(idx),
+                "chunk_id": record.get("chunk_id", f"chunk_{idx}"),
+                "title": record.get("title", "Unknown"),
+                "content": record.get("content", ""),
+                "metadata": record.get("metadata", {}),
+                "distance": float(dist),
+                "score": float(1 / (1 + dist))  # Convert distance to similarity score
+            })
         
-        logger.info(f"Retrieved {len(documents)} documents")
+        if not documents:
+            logger.error("No valid documents retrieved")
+            return None
+        
+        logger.info(f"Successfully retrieved {len(documents)} documents")
         return documents
         
     except Exception as e:
         logger.error(f"Error retrieving documents: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
-def generate_response(
-    query: str,
-    documents: List[Dict[str, Any]],
-    config: Dict[str, Any]
-) -> Optional[Tuple[str, int, int]]:
+# FIX 3: get_embedding - Add better error handling
+def get_embedding(query: str, model_name: str = "BAAI/llm-embedder") -> Optional[np.ndarray]:
     """
-    Generate response using LLM with retrieved context.
-    
-    Args:
-        query: Original user query
-        documents: Retrieved documents with metadata
-        config: Configuration containing model params and prompt
-        
-    Returns:
-        Tuple of (response string, input_tokens, output_tokens) or None on failure
+    Generate embedding vector for query with robust error handling.
     """
     try:
-        logger.info("Generating response")
+        if not query or not query.strip():
+            logger.error("Empty query provided")
+            return None
         
-        # Extract config parameters
-        model_name = config.get("model_name", None)
-        model_type = config.get("model_type", None)
-        prompt_template = config.get("prompt", None)
-
-        if model_name is None or model_type is None or prompt_template is None:
-            raise ValueError(f"Empty/None values detected\n\nModel Name: {model_name}\nModel type: {model_type}\nPrompt:{prompt_template}")
-
-        temperature = config.get("temperature", 0.7)
-        top_p = config.get("top_p", 0.9)
+        logger.info(f"Generating embedding with model: {model_name}")
         
-        # Format context from documents with actual content
-        context_parts = []
-        for d in documents:
-            title = d.get('title', 'Unknown')
-            content = d.get('content', '')
-            context_parts.append(f"Document {d['rank']} - {title}:\n{content}")
+        # Use CPU for embeddings to avoid memory issues
+        model = SentenceTransformer(model_name, device='cpu')
         
-        context = "\n\n".join(context_parts)
+        embedding = model.encode(
+            query,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False
+        )
         
-        # Format prompt
-        formatted_prompt = prompt_template.format(context=context, query=query)
+        logger.info(f"Embedding generated with shape: {embedding.shape}")
         
-        logger.info(f"Using model: {model_name} (type: {model_type})")
-        logger.info(f"Temperature: {temperature}, Top-p: {top_p}")
+        # Cleanup
+        del model
+        gc.collect()
         
-        model = ModelFactory.create_model(model_name, temperature, top_p)
-        response_d = model.infer(formatted_prompt)
-
-        if response_d is None or response_d.get('success') != True:
-            raise ValueError(f"Error generating response - {response_d}")
-
-        response = response_d.get('generated_text', None)
-        in_tokens = response_d.get('input_tokens', 0)
-        out_tokens = response_d.get('output_tokens', 0)
+        # Validate embedding
+        if embedding is None or len(embedding) == 0:
+            logger.error("Generated embedding is empty")
+            return None
         
-        # Add references section with links
-        references = "\n\n**References:**\n"
-        for d in documents:
-            link = d.get('metadata', {}).get('link', '')
-            title = d.get('title', 'Unknown')
-            if link:
-                references += f"{d['rank']}. [{title}]({link})\n"
-            else:
-                references += f"{d['rank']}. {title}\n"
-        
-        response += references
-
-        logger.info("Response generated successfully")
-        return response, in_tokens, out_tokens
+        return embedding
         
     except Exception as e:
-        logger.error(f"Error generating response: {e}")
+        logger.error(f"Error generating embedding: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -525,7 +505,8 @@ def compute_stats(
     config: Dict[str, Any],
     prompt_template: str,
     in_tokens: int = 0,
-    out_tokens: int = 0
+    out_tokens: int = 0,
+    index_size: int = 0
 ) -> Dict[str, Any]:
     """
     Compute statistics and metrics for the RAG pipeline response.
@@ -588,6 +569,10 @@ def compute_stats(
         }
         
         # 4 & 5. Include query and prompt
+        # Extract document indices (doc_id) for embedding space usage tracking
+        retrieved_doc_indices = [doc.get("doc_id") for doc in retrieved_docs if doc.get("doc_id") is not None]
+        retrieved_chunk_ids = [doc.get("chunk_id") for doc in retrieved_docs if doc.get("chunk_id")]
+        
         stats = {
             "query": query,
             "prompt": prompt_template,
@@ -598,7 +583,19 @@ def compute_stats(
             "hallucination_scores": hallucination_scores,
             "sampling_params": sampling_params,
             "num_retrieved_docs": len(retrieved_docs),
-            "retrieved_doc_ids": [doc.get("chunk_id") for doc in retrieved_docs]
+            "retrieved_doc_ids": retrieved_chunk_ids,  # For backward compatibility
+            "retrieved_doc_indices": retrieved_doc_indices,  # NEW: FAISS index positions for embedding space tracking
+            # Store retrieval metrics per document (without content)
+            "retrieved_docs_metrics": [
+                {
+                    "doc_id": doc.get("doc_id"),
+                    "chunk_id": doc.get("chunk_id"),
+                    "score": round(doc.get("score", 0.0), 4),
+                    "rank": doc.get("rank")
+                }
+                for doc in retrieved_docs
+            ],
+            "index_size": index_size
         }
         
         logger.info("Statistics computed successfully")
@@ -615,51 +612,162 @@ def compute_stats(
             "hallucination_scores": {"avg": 0.0},
             "sampling_params": {}
         }
+    
+def generate_response(
+    query: str,
+    documents: List[Dict[str, Any]],
+    config: Dict[str, Any]
+) -> Optional[Tuple[str, int, int]]:
+    """
+    Generate response using LLM with retrieved context.
+    MEMORY-OPTIMIZED for L4 GPU.
+    
+    Args:
+        query: Original user query
+        documents: Retrieved documents with metadata
+        config: Configuration containing model params and prompt
+        
+    Returns:
+        Tuple of (response string, input_tokens, output_tokens) or None on failure
+    """
+    try:
+        logger.info("Generating response")
+        
+        # Extract config parameters
+        model_name = config.get("model_name")
+        model_type = config.get("model_type")
+        prompt_template = config.get("prompt")
 
+        if not all([model_name, model_type, prompt_template]):
+            raise ValueError(f"Missing config values: model={model_name}, type={model_type}, prompt={bool(prompt_template)}")
 
+        temperature = config.get("temperature", 0.7)
+        top_p = config.get("top_p", 0.9)
+        max_tokens = config.get("max_tokens", 500)
+        
+        # Format context from documents with TRUNCATION for memory safety
+        context_parts = []
+        for d in documents:
+            title = d.get('title', 'Unknown')
+            content = d.get('content', '')
+            
+            # CRITICAL: Truncate long content to prevent OOM
+            if len(content) > 2000:  # Max 2000 chars per document
+                content = content[:2000] + "...[truncated]"
+            
+            context_parts.append(f"Document {d['rank']} - {title}:\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # CRITICAL: Truncate total context if too long (for L4 GPU)
+        max_context_length = 6000  # Conservative limit
+        if len(context) > max_context_length:
+            context = context[:max_context_length] + "\n\n[Context truncated due to length...]"
+            logger.warning(f"Context truncated to {max_context_length} characters")
+        
+        # Format prompt
+        formatted_prompt = prompt_template.format(context=context, query=query)
+        
+        logger.info(f"Using model: {model_name} (type: {model_type})")
+        logger.info(f"Temperature: {temperature}, Top-p: {top_p}, Max tokens: {max_tokens}")
+        logger.info(f"Prompt length: {len(formatted_prompt)} characters")
+        
+        # Create model
+        model = ModelFactory.create_model(
+            model_name, 
+            temperature=temperature, 
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+        
+        # Generate response
+        response_d = model.infer(formatted_prompt)
+
+        if not response_d or response_d.get('success') != True:
+            raise ValueError(f"Model inference failed: {response_d}")
+
+        response = response_d.get('generated_text', '')
+        in_tokens = response_d.get('input_tokens', 0)
+        out_tokens = response_d.get('output_tokens', 0)
+        
+        # Add references section with links
+        references = "\n\n**References:**\n"
+        for d in documents:
+            link = d.get('metadata', {}).get('link', '')
+            title = d.get('title', 'Unknown')
+            if link:
+                references += f"{d['rank']}. [{title}]({link})\n"
+            else:
+                references += f"{d['rank']}. {title}\n"
+        
+        response += references
+
+        logger.info(f"Response generated successfully: {in_tokens} input tokens, {out_tokens} output tokens")
+        return response, in_tokens, out_tokens
+        
+    except Exception as e:
+        logger.error(f"Error generating response: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 def run_rag_pipeline(
-    query: str, 
+    query: str,
     guardrail_checker: Optional[Any] = None
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
-    Main RAG pipeline orchestrating all functions.
-    
-    Args:
-        query: User query string
-        guardrail_checker: Optional guardrail checker instance
-        
-    Returns:
-        Tuple of (final_response, stats) or (None, None) if any step fails
+    Main RAG pipeline with detailed error reporting.
     """
     try:
-        # Load all required data
-        config = load_config()
-        embeddings_data = load_embeddings_data()
-        index = load_faiss_index()
+        logger.info(f"Starting RAG pipeline for query: {query[:100]}...")
         
-        if embeddings_data is None or index is None:
-            return "Error loading required data files.", None
+        # Load config
+        config = load_config()
+        logger.info(f"Config loaded: model={config.get('model_name')}, k={config.get('k')}")
+        
+        # Load data
+        embeddings_data = load_embeddings_data()
+        if embeddings_data is None:
+            error_msg = "Failed to load embeddings data. Check GCS bucket or local files."
+            logger.error(error_msg)
+            return error_msg, None
+        
+        index = load_faiss_index()
+        if index is None:
+            error_msg = "Failed to load FAISS index. Check GCS bucket or local files."
+            logger.error(error_msg)
+            return error_msg, None
+        
+        logger.info(f"Data loaded: {len(embeddings_data)} embeddings, {index.ntotal} vectors")
         
         # Get embedding
         embedding = get_embedding(query, config.get("embedding_model", "BAAI/llm-embedder"))
         if embedding is None:
-            return "Error generating query embedding.", None
+            error_msg = "Failed to generate query embedding."
+            logger.error(error_msg)
+            return error_msg, None
         
         # Retrieve documents
         k = config.get("k", 5)
         retrieval_method = config.get("retrieval_method", "similarity")
         documents = retrieve_documents(embedding, index, embeddings_data, k, retrieval_method)
+        
         if not documents:
-            return "Error retrieving documents.", None
+            error_msg = "Failed to retrieve documents. Check index compatibility with embeddings."
+            logger.error(error_msg)
+            return error_msg, None
+        
+        logger.info(f"Retrieved {len(documents)} documents")
         
         # Generate response
         result = generate_response(query, documents, config)
         if result is None:
-            return "Error generating response.", None
+            error_msg = "Failed to generate response from LLM."
+            logger.error(error_msg)
+            return error_msg, None
         
         response, in_tokens, out_tokens = result
         
-        # Add medical disclaimer footer
+        # Add medical disclaimer
         footer = (
             "\n\n---\n"
             "**Important:** This information is for educational purposes only and "
@@ -671,26 +779,22 @@ def run_rag_pipeline(
         # Compute stats
         prompt_template = config.get("prompt", "")
         stats = compute_stats(
-            query, 
-            final_response, 
-            documents, 
-            config, 
+            query,
+            final_response,
+            documents,
+            config,
             prompt_template,
             in_tokens,
-            out_tokens
+            out_tokens,
+            index.ntotal
         )
         
+        logger.info("RAG pipeline completed successfully")
         return final_response, stats
         
     except Exception as e:
-        logger.error(f"Error in RAG pipeline: {e}")
-        return "An error occurred processing your query.", None
-
-
-if __name__ == "__main__":
-    query = "What is Tuberculosis (TB)?"
-    response, stats = run_rag_pipeline(query)
-
-    logger.info(response)
-    logger.info("*"*80)
-    logger.info(stats)
+        error_msg = f"Error in RAG pipeline: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+        return error_msg, None
