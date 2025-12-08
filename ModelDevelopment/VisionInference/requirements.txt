@@ -1,0 +1,16 @@
+# TensorFlow for model inference
+tensorflow
+
+# FastAPI for API server
+fastapi
+uvicorn[standard]
+python-multipart  # Required for file uploads in FastAPI
+
+# Image processing
+Pillow
+numpy
+opencv-python-headless  # For GradCAM visualization (headless version, no GUI dependencies)
+matplotlib  # For plotting GradCAM visualizations
+
+# GCP dependencies (for Cloud Run deployment)
+google-cloud-storage  # For reading models from GCS

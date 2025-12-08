@@ -1,0 +1,6 @@
+Create request issued for: [vision-inference]
+
+Waiting for operation [projects/medscanai-476500/locations/us-central1/operations/1285c343-21f7-425e-8297-9685fc1fc7d2]
+ to complete...done.
+
+Created repository [vision-inference].

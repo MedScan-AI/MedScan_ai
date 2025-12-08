@@ -1,0 +1,7 @@
+ID                                    CREATE_TIME                DURATION  SOURCE                                                                                          IMAGES  STATUS
+
+f5a7eac6-e41f-4c14-a939-54971ed9148b  2025-12-07T03:09:12+00:00  20M59S    gs://medscanai-476500_cloudbuild/source/1765076950.755399-20cd3e2014af41739f43cab93f38e45a.tgz  -       SUCCESS
+
+917cf4da-4280-4ae5-9343-8bb1f27db1f5  2025-12-07T02:41:57+00:00  8M22S     gs://medscanai-476500_cloudbuild/source/1765075316.125745-ad0bd8ccb5a8404c9799302a28e0fd29.tgz  -       CANCELLED
+
+e31ae249-6b12-4aa2-b3df-0da4cf3e1cb7  2025-12-07T02:16:39+00:00  17M1S     gs://medscanai-476500_cloudbuild/source/1765073798.686071-57d9172f149e4c0ba368f50683fcac70.tgz  -       SUCCESS

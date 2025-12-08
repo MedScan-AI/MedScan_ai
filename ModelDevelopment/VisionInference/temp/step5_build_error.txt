@@ -1,0 +1,6 @@
+ERROR: name unknown: Repository "vision-inference" not found
+
+The Docker image built successfully, but failed to push because the Artifact Registry repository doesn't exist yet.
+
+Full error:
+ERROR: build step 1 "gcr.io/cloud-builders/docker" failed: step exited with non-zero status: 1

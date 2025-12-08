@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  resnet18-training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: resnet18-training:latest
+    container_name: resnet18-training
+    volumes:
+      # Mount preprocessed data directory
+      - ../../DataPipeline/data/preprocessed:/app/data/preprocessed:ro
+      # Mount output directory for models and logs
+      - ../../data:/app/data
+      # Mount config file (optional, can override with command)
+      - ./config.yml:/app/config.yml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TF_CPP_MIN_LOG_LEVEL=2
+    # Resource limits (optional - adjust based on your system)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    # Override command if needed (e.g., to train specific dataset)
+    # command: ["python", "resnet.py", "--config", "/app/config.yml", "--datasets", "tb"]
+    restart: unless-stopped

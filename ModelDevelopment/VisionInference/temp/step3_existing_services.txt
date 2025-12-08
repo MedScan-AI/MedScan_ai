@@ -1,0 +1,3 @@
+   SERVICE      REGION       URL                                                   LAST DEPLOYED BY                                    LAST DEPLOYED AT
+
++  rag-service  us-central1  https://rag-service-246542889931.us-central1.run.app  246542889931-compute@developer.gserviceaccount.com  2025-12-07T18:57:57.496351Z

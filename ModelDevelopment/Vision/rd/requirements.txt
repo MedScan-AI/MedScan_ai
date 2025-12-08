@@ -1,0 +1,8 @@
+# TensorFlow packages
+tensorflow
+
+# Core dependencies (order matters - numpy must be first)
+numpy
+pandas
+Pillow
+pyyaml  # For config file loading

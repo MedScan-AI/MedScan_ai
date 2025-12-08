@@ -7,7 +7,7 @@ paths:
   
 # Training Configuration
 training:
-  epochs: 6
+  epochs: 5
   batch_size: 32
   image_size: [224, 224]
   validation_split: 0.2
@@ -16,7 +16,7 @@ training:
     - "lung_cancer_ct_scan"
   
   # Data subset configuration (for faster training)
-  data_percent_use: 0.25  # Percentage of data to use (1.0 = 100%, 0.5 = 50%, 0.25 = 25%, etc.)
+  data_percent_use: 1  # Percentage of data to use (1.0 = 100%, 0.5 = 50%, 0.25 = 25%, etc.)
   data_seed: 42  # Random seed for reproducible data subset selection
 
 # Data Augmentation Configuration
@@ -104,7 +104,7 @@ model_selection:
 hyperparameter_tuning:
   enabled: true  # Set to true to enable hyperparameter tuning
   tuner_type: "random"  # Options: "random", "bayesian", "hyperband"
-  max_trials: 4  # Maximum number of trials to run
+  max_trials: 1  # Maximum number of trials to run
   executions_per_trial: 1  # Number of times to train each model
   objective: "val_accuracy"  # Metric to optimize
   direction: "max"  # "max" for accuracy, "min" for loss

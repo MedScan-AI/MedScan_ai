@@ -1,0 +1,26 @@
+# ResNet18 Training Configuration
+
+# Paths Configuration
+paths:
+  data_path: "../../DataPipeline/data/preprocessed"
+  output_path: "../../data"
+
+# Training Configuration
+training:
+  epochs: 2
+  batch_size: 32
+  image_size: [224, 224]
+  validation_split: 0.2
+  datasets:
+    - "tb"
+    - "lung_cancer_ct_scan"
+
+# Model Configuration
+models:
+  resnet18:
+    head:
+      dropout_1: 0.5
+      dense_1: 512
+      dropout_2: 0.3
+      activation: "relu"
+    learning_rate: 0.01

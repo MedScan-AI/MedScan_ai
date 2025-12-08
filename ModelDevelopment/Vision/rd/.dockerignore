@@ -1,0 +1,30 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.git
+.gitignore
+*.md
+.env
+.venv
+venv/
+*.log
+models/
+*.csv
+*.json
+*.html
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+# Exclude data directories (mounted as volumes)
+data/

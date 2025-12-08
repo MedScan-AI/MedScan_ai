@@ -1,0 +1,29 @@
+# Vision Inference API Deployment Summary
+
+## Deployment Status: ✅ SUCCESS
+
+**Service Name:** vision-inference-api
+**Region:** us-central1
+**Service URL:** https://vision-inference-api-246542889931.us-central1.run.app
+
+## Steps Completed:
+1. ✅ Verified gcloud installation
+2. ✅ Confirmed project: medscanai-476500
+3. ✅ Created Artifact Registry repository: vision-inference
+4. ✅ Granted Cloud Build permissions (Cloud Run Admin + Service Account User)
+5. ✅ Fixed cloudbuild.yaml (removed PORT env var)
+6. ✅ Built Docker image successfully
+7. ✅ Pushed to Artifact Registry
+8. ✅ Deployed to Cloud Run
+
+## Endpoints:
+- Health check: https://vision-inference-api-246542889931.us-central1.run.app/health
+- TB prediction: https://vision-inference-api-246542889931.us-central1.run.app/predict/tb
+- Lung Cancer prediction: https://vision-inference-api-246542889931.us-central1.run.app/predict/lung_cancer
+- API docs: https://vision-inference-api-246542889931.us-central1.run.app/docs
+
+## Next Steps:
+1. Check logs to verify service started correctly
+2. Test the health endpoint
+3. Test predictions with sample images
+
