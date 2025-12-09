@@ -20,24 +20,28 @@
 #
 ################################################################################
 
-# Enable required APIs
+# Enable required APIs (optional - set enable_apis=true if needed)
 resource "google_project_service" "run_api" {
-  service            = "run.googleapis.com"
+  count            = var.enable_apis ? 1 : 0
+  service          = "run.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_project_service" "artifact_registry_api" {
-  service            = "artifactregistry.googleapis.com"
+  count            = var.enable_apis ? 1 : 0
+  service          = "artifactregistry.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_project_service" "cloudbuild_api" {
-  service            = "cloudbuild.googleapis.com"
+  count            = var.enable_apis ? 1 : 0
+  service          = "cloudbuild.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_project_service" "storage_api" {
-  service            = "storage-api.googleapis.com"
+  count            = var.enable_apis ? 1 : 0
+  service          = "storage-api.googleapis.com"
   disable_on_destroy = false
 }
 
@@ -48,7 +52,7 @@ resource "google_artifact_registry_repository" "vision_inference" {
   description   = "Docker repository for Vision Inference API"
   format        = "DOCKER"
 
-  depends_on = [google_project_service.artifact_registry_api]
+  depends_on = var.enable_apis ? [google_project_service.artifact_registry_api[0]] : []
 }
 
 # Get the Cloud Build service account
@@ -65,7 +69,7 @@ resource "google_project_iam_member" "cloudbuild_run_admin" {
   role    = "roles/run.admin"
   member  = "serviceAccount:${local.cloudbuild_sa}"
 
-  depends_on = [google_project_service.cloudbuild_api]
+  depends_on = var.enable_apis ? [google_project_service.cloudbuild_api[0]] : []
 }
 
 # Grant Cloud Build service account permissions to act as service accounts
@@ -74,7 +78,7 @@ resource "google_project_iam_member" "cloudbuild_sa_user" {
   role    = "roles/iam.serviceAccountUser"
   member  = "serviceAccount:${local.cloudbuild_sa}"
 
-  depends_on = [google_project_service.cloudbuild_api]
+  depends_on = var.enable_apis ? [google_project_service.cloudbuild_api[0]] : []
 }
 
 # Grant Cloud Build service account permissions to read from GCS
@@ -156,10 +160,10 @@ resource "google_cloud_run_service" "vision_inference_api" {
     latest_revision = true
   }
 
-  depends_on = [
-    google_project_service.run_api,
-    google_artifact_registry_repository.vision_inference
-  ]
+  depends_on = concat(
+    var.enable_apis ? [google_project_service.run_api[0]] : [],
+    [google_artifact_registry_repository.vision_inference]
+  )
 
   # Lifecycle to prevent destruction due to image changes
   lifecycle {

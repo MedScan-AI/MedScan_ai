@@ -60,6 +60,24 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Check API Enablement Status
+        run: |
+          echo "Checking if required APIs are enabled..."
+          echo ""
+          echo "Note: If APIs are not enabled, you may need to:"
+          echo "  1. Enable them manually in GCP Console, OR"
+          echo "  2. Grant 'roles/serviceusage.serviceUsageAdmin' to your service account"
+          echo ""
+          echo "Required APIs:"
+          echo "  - run.googleapis.com"
+          echo "  - artifactregistry.googleapis.com"
+          echo "  - cloudbuild.googleapis.com"
+          echo "  - storage-api.googleapis.com"
+          echo ""
+          echo "Terraform will skip API enablement by default (enable_apis=false)"
+          echo "If you need to enable APIs, set enable_apis=true in terraform.tfvars"
+        continue-on-error: true
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:

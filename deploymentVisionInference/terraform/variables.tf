@@ -76,3 +76,9 @@ variable "allow_unauthenticated" {
   type        = bool
   default     = true
 }
+
+variable "enable_apis" {
+  description = "Enable required GCP APIs (set to false if APIs are already enabled)"
+  type        = bool
+  default     = false
+}
