@@ -19,7 +19,7 @@ resource "google_monitoring_notification_channel" "email" {
     email_address = var.monitoring_email
   }
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Alert Policy: High Error Rate
@@ -57,7 +57,7 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
 
   notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Alert Policy: High Latency (P95 > 5 seconds)
@@ -87,7 +87,7 @@ resource "google_monitoring_alert_policy" "high_latency" {
 
   notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Alert Policy: Service Unavailable (No requests in 5 minutes)
@@ -117,7 +117,7 @@ resource "google_monitoring_alert_policy" "service_unavailable" {
 
   notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Alert Policy: High CPU Usage
@@ -147,7 +147,7 @@ resource "google_monitoring_alert_policy" "high_cpu" {
 
   notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Alert Policy: High Memory Usage
@@ -177,7 +177,7 @@ resource "google_monitoring_alert_policy" "high_memory" {
 
   notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Monitoring Dashboard
@@ -386,5 +386,5 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
     }
   })
 
-  depends_on = var.enable_apis ? [google_project_service.monitoring_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
