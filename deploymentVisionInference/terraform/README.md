@@ -33,7 +33,7 @@ This Terraform configuration creates:
 ### 1. Initialize Terraform
 
 ```bash
-cd ModelDevelopment/VisionInference/terraform
+cd deploymentVisionInference/terraform
 terraform init
 ```
 
@@ -145,13 +145,40 @@ terraform apply
 
 ## 🗑️ Destroying Resources
 
-To remove all created resources:
+### ⚠️ IMPORTANT: Scope of Destruction
+
+`terraform destroy` will **ONLY** delete Vision Inference resources managed by this Terraform configuration:
+
+#### Resources that WILL BE DELETED:
+- ❌ **Cloud Run service**: `vision-inference-api`
+  - Service and all revisions permanently removed
+- ❌ **Artifact Registry repository**: `vision-inference`
+  - Docker image repository deleted
+  - All stored Docker images removed
+- ❌ **IAM Bindings** for Cloud Build:
+  - `roles/run.admin`
+  - `roles/iam.serviceAccountUser`
+  - `roles/storage.objectViewer`
+
+#### Resources that WILL NOT BE AFFECTED:
+- ✅ **GCS Bucket**: `medscan-pipeline-medscanai-476500`
+- ✅ **Trained Models** in GCS
+- ✅ **Other Cloud Run services** (e.g., `rag-service`)
+- ✅ **Other Artifact Registry repositories**
+- ✅ **Cloud Build service account** (only IAM bindings removed)
+- ✅ **Any other GCP resources** not defined in this Terraform
+
+### Execute Destroy
 
 ```bash
+# Preview what will be destroyed
+terraform plan -destroy
+
+# Destroy after review
 terraform destroy
 ```
 
-⚠️ **Warning**: This will delete the Cloud Run service and Artifact Registry repository. Your Docker images and GCS models will remain.
+Type `yes` when prompted to confirm deletion.
 
 ## 📦 Building and Deploying the Container
 

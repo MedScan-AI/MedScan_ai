@@ -1,3 +1,25 @@
+################################################################################
+# Vision Inference API - Terraform Infrastructure
+################################################################################
+#
+# This Terraform configuration manages ONLY the following Vision Inference resources:
+#
+# Resources Managed (will be created/updated/destroyed by Terraform):
+#   • Cloud Run service: vision-inference-api
+#   • Artifact Registry repository: vision-inference
+#   • IAM bindings for Cloud Build service account
+#   • API enablement (Cloud Run, Artifact Registry, Cloud Build, Storage)
+#
+# Resources NOT Managed (will NOT be affected by terraform destroy):
+#   • GCS Bucket: medscan-pipeline-medscanai-476500
+#   • Trained models in GCS
+#   • Other Cloud Run services (e.g., rag-service)
+#   • Other Artifact Registry repositories
+#   • Cloud Build service account itself
+#   • Any manually created resources
+#
+################################################################################
+
 # Enable required APIs
 resource "google_project_service" "run_api" {
   service            = "run.googleapis.com"

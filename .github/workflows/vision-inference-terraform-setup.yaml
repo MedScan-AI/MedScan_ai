@@ -1,0 +1,330 @@
+name: Vision Inference - Terraform Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      auto_approve:
+        description: 'Auto-approve apply/destroy (use with caution)'
+        required: false
+        default: false
+        type: boolean
+
+  push:
+    branches: [main]
+    paths:
+      - "deploymentVisionInference/terraform/**"
+      - ".github/workflows/vision-inference-terraform-setup.yaml"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    
+    env:
+      PROJECT_ID: medscanai-476500
+      REGION: us-central1
+      TF_VAR_project_id: medscanai-476500
+      TF_VAR_region: us-central1
+      TERRAFORM_VERSION: 1.6.0
+
+    defaults:
+      run:
+        working-directory: deploymentVisionInference/terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: |
+          echo "Initializing Terraform..."
+          terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          echo "Validating Terraform configuration..."
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          echo "Creating Terraform execution plan..."
+          terraform plan -no-color -out=tfplan
+        continue-on-error: false
+
+      - name: Show Terraform Plan
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Terraform Plan Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          terraform show tfplan
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          echo "Applying Terraform configuration..."
+          
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+            terraform apply -auto-approve tfplan
+          else
+            echo "⚠️ Manual approval required. Set auto_approve=true to apply automatically."
+            echo "Or run: terraform apply in the terraform directory"
+            exit 1
+          fi
+
+      - name: Preview Destroy (What will be deleted)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "⚠️  DESTROY ACTION - VISION INFERENCE RESOURCES ONLY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "The following Vision Inference resources will be DELETED:"
+          echo ""
+          echo "  ❌ Cloud Run Service: vision-inference-api"
+          echo "     └─ Service will be permanently deleted"
+          echo "     └─ All revisions will be removed"
+          echo ""
+          echo "  ❌ Artifact Registry Repository: vision-inference"
+          echo "     └─ Docker image repository will be deleted"
+          echo "     └─ All stored Docker images will be removed"
+          echo ""
+          echo "  ❌ IAM Bindings for Cloud Build Service Account:"
+          echo "     └─ roles/run.admin (Cloud Run management)"
+          echo "     └─ roles/iam.serviceAccountUser (Service account usage)"
+          echo "     └─ roles/storage.objectViewer (GCS read access)"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ RESOURCES THAT WILL NOT BE AFFECTED:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "  ✓ GCS Bucket: medscan-pipeline-medscanai-476500"
+          echo "  ✓ Trained Models in GCS"
+          echo "  ✓ Other Cloud Run services (e.g., rag-service)"
+          echo "  ✓ Other Artifact Registry repositories"
+          echo "  ✓ Cloud Build service account"
+          echo "  ✓ Any other GCP resources not managed by this Terraform"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          
+          # Show actual plan
+          terraform plan -destroy -no-color
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        run: |
+          echo "🗑️  Destroying Vision Inference infrastructure..."
+          echo ""
+          
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+            echo "⚠️  Auto-approve enabled. Proceeding with destroy..."
+            terraform destroy -auto-approve
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "✅ Vision Inference resources destroyed successfully"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "Deleted resources:"
+            echo "  • Cloud Run service: vision-inference-api"
+            echo "  • Artifact Registry repo: vision-inference"
+            echo "  • IAM bindings for Cloud Build"
+            echo ""
+            echo "To recreate infrastructure, run this workflow with action=apply"
+          else
+            echo "⚠️ Manual approval required for destroy."
+            echo ""
+            echo "To proceed with destroy:"
+            echo "  Option 1: Re-run workflow with auto_approve=true"
+            echo "  Option 2: Run manually in terminal:"
+            echo "    cd deploymentVisionInference/terraform"
+            echo "    terraform init"
+            echo "    terraform destroy"
+            echo ""
+            exit 1
+          fi
+
+      - name: Get Terraform Outputs
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        id: outputs
+        run: |
+          echo "Fetching Terraform outputs..."
+          
+          SERVICE_URL=$(terraform output -raw service_url 2>/dev/null || echo "Not available")
+          HEALTH_ENDPOINT=$(terraform output -raw health_endpoint 2>/dev/null || echo "Not available")
+          API_DOCS=$(terraform output -raw api_docs_endpoint 2>/dev/null || echo "Not available")
+          
+          echo "service_url=${SERVICE_URL}" >> $GITHUB_OUTPUT
+          echo "health_endpoint=${HEALTH_ENDPOINT}" >> $GITHUB_OUTPUT
+          echo "api_docs=${API_DOCS}" >> $GITHUB_OUTPUT
+
+      - name: Test Deployed Infrastructure
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          SERVICE_URL="${{ steps.outputs.outputs.service_url }}"
+          
+          if [ "$SERVICE_URL" != "Not available" ] && [ ! -z "$SERVICE_URL" ]; then
+            echo "Testing deployed service..."
+            
+            # Wait a bit for service to be ready
+            sleep 10
+            
+            # Test health endpoint
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" || echo "000")
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Service is accessible and healthy!"
+            else
+              echo "⚠️ Service returned status: ${HTTP_CODE}"
+              echo "Note: Service may still be deploying. Check Cloud Run console."
+            fi
+          else
+            echo "⚠️ Service URL not available yet. Infrastructure created but service may not be deployed."
+            echo "Run the vision-inference-deploy.yaml workflow to deploy the application."
+          fi
+
+      - name: Infrastructure Summary
+        if: success()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Terraform ${{ github.event.inputs.action || 'plan' }} Complete"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📊 Terraform Outputs:"
+          terraform output
+          echo ""
+          echo "🔗 Useful Links:"
+          echo "  • Cloud Run Console: https://console.cloud.google.com/run?project=${{ env.PROJECT_ID }}"
+          echo "  • Artifact Registry: https://console.cloud.google.com/artifacts?project=${{ env.PROJECT_ID }}"
+          echo "  • Cloud Build: https://console.cloud.google.com/cloud-build?project=${{ env.PROJECT_ID }}"
+          echo ""
+          
+          if [ "${{ github.event.inputs.action }}" = "apply" ] || [ "${{ github.event_name }}" = "push" ]; then
+            echo "🚀 Next Steps:"
+            echo "  1. Deploy the application using: vision-inference-deploy.yaml workflow"
+            echo "  2. Or manually run: gcloud builds submit --config=ModelDevelopment/VisionInference/cloudbuild.yaml"
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Upload Terraform Plan
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: deploymentVisionInference/terraform/tfplan
+          retention-days: 7
+
+      - name: Save Terraform State Info
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          mkdir -p ../../../terraform-state-info
+          
+          cat > ../../../terraform-state-info/infrastructure-state.json <<EOF
+          {
+            "project_id": "${{ env.PROJECT_ID }}",
+            "region": "${{ env.REGION }}",
+            "service_url": "${{ steps.outputs.outputs.service_url }}",
+            "health_endpoint": "${{ steps.outputs.outputs.health_endpoint }}",
+            "api_docs": "${{ steps.outputs.outputs.api_docs }}",
+            "applied_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "applied_by": "${{ github.actor }}",
+            "commit_sha": "${{ github.sha }}"
+          }
+          EOF
+          
+          cat ../../../terraform-state-info/infrastructure-state.json
+
+      - name: Upload Infrastructure State
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-state-info
+          path: terraform-state-info/infrastructure-state.json
+          retention-days: 90
+
+      - name: Cleanup on Failure
+        if: failure()
+        run: |
+          echo "⚠️ Workflow failed. Terraform state may be inconsistent."
+          echo "Check the logs above for errors."
+          echo ""
+          echo "To fix manually:"
+          echo "  1. cd ModelDevelopment/VisionInference/terraform"
+          echo "  2. terraform init"
+          echo "  3. terraform plan"
+          echo "  4. Review and fix issues"
+          echo ""
+          echo "For Terraform state issues:"
+          echo "  • View state: terraform show"
+          echo "  • List resources: terraform state list"
+          echo "  • Remove stuck resource: terraform state rm <resource>"

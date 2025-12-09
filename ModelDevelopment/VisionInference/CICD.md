@@ -4,9 +4,14 @@ This document describes the automated deployment pipeline for the Vision Inferen
 
 ## 📦 Files Created
 
-### GitHub Actions Workflow
+### GitHub Actions Workflows
+- **`.github/workflows/vision-inference-terraform-setup.yaml`**
+  - Infrastructure provisioning workflow (Terraform)
+  - One-time setup or manual trigger
+  - Creates Cloud Run, Artifact Registry, IAM permissions
+  
 - **`.github/workflows/vision-inference-deploy.yaml`**
-  - Main CI/CD workflow
+  - Application deployment workflow
   - Triggers on changes to `ModelDevelopment/VisionInference/`
   - Automatically deploys to Cloud Run
 
@@ -23,6 +28,31 @@ This document describes the automated deployment pipeline for the Vision Inferen
   - Grants necessary permissions
 
 ## 🚀 Quick Start
+
+### 0. (Optional) Setup Infrastructure with Terraform
+
+If infrastructure doesn't exist yet, run the Terraform workflow:
+
+**Via GitHub Actions UI:**
+1. Go to: **Actions → Vision Inference - Terraform Setup**
+2. Click: **Run workflow**
+3. Select:
+   - Action: `plan` (to preview changes)
+   - Then run again with: `apply` + auto_approve=true
+
+**Or push changes to:**
+```bash
+git add deploymentVisionInference/terraform/
+git commit -m "Update Terraform config"
+git push origin main
+# This will run `terraform plan` only
+```
+
+**What it creates:**
+- ✅ Artifact Registry repository
+- ✅ Cloud Run service (placeholder, no container yet)
+- ✅ IAM permissions for Cloud Build
+- ✅ Enabled APIs
 
 ### 1. Run Setup Script
 
@@ -339,3 +369,39 @@ gcloud run services update-traffic vision-inference-api \
 - [GitHub Actions Best Practices](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions)
 - [Cloud Run CI/CD](https://cloud.google.com/run/docs/continuous-deployment-with-cloud-build)
 - [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
+- [Terraform GCP Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+
+## 📋 Workflow Comparison
+
+### When to Use Which Workflow?
+
+| Workflow | Purpose | When to Run | Frequency |
+|----------|---------|-------------|-----------|
+| **vision-inference-terraform-setup.yaml** | Infrastructure provisioning | First-time setup, infrastructure changes | Once / Rarely |
+| **vision-inference-deploy.yaml** | Application deployment | Code changes, model updates | Every push to main |
+
+### Typical Setup Sequence
+
+```
+1. Run Terraform Setup (once)
+   ↓
+   Creates: Cloud Run, Artifact Registry, IAM
+
+2. Run Application Deploy (automatic)
+   ↓
+   Builds: Docker image, deploys to Cloud Run
+
+3. Code changes (automatic)
+   ↓
+   Triggers: Application Deploy workflow
+```
+
+### Manual Workflow Triggers
+
+**Terraform Setup:**
+- Actions → Vision Inference - Terraform Setup → Run workflow
+- Choose: `plan` (preview) or `apply` (create) or `destroy` (delete)
+
+**Application Deploy:**
+- Actions → Vision Inference API - Deploy → Run workflow
+- Force deployment checkbox available
