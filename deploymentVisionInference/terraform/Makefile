@@ -1,6 +1,6 @@
 # Makefile for Vision Inference API Terraform deployment
 
-.PHONY: help init plan apply destroy output clean validate format
+.PHONY: help init plan apply destroy cleanup output clean validate format
 
 help:
 	@echo "Vision Inference API - Terraform Commands"
@@ -11,7 +11,8 @@ help:
 	@echo "  make format     - Format Terraform files"
 	@echo "  make plan       - Show execution plan"
 	@echo "  make apply      - Apply changes"
-	@echo "  make destroy    - Destroy all resources"
+	@echo "  make destroy    - Destroy Terraform resources only"
+	@echo "  make cleanup    - Smart cleanup (Terraform + manual resources)"
 	@echo "  make output     - Show all outputs"
 	@echo "  make clean      - Clean Terraform files"
 	@echo ""
@@ -39,6 +40,11 @@ apply:
 destroy:
 	@echo "Destroying Terraform resources..."
 	terraform destroy
+
+cleanup:
+	@echo "Running smart cleanup script..."
+	@chmod +x cleanup_resources.sh
+	@./cleanup_resources.sh
 
 output:
 	@echo "=== Terraform Outputs ==="

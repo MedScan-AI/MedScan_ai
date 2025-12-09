@@ -184,20 +184,29 @@ jobs:
           echo ""
           
           if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
-            echo "⚠️  Auto-approve enabled. Proceeding with destroy..."
-            terraform destroy -auto-approve
+            echo "⚠️  Auto-approve enabled. Running cleanup script..."
+            echo ""
             
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "✅ Vision Inference resources destroyed successfully"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo ""
-            echo "Deleted resources:"
-            echo "  • Cloud Run service: vision-inference-api"
-            echo "  • Artifact Registry repo: vision-inference"
-            echo "  • IAM bindings for Cloud Build"
-            echo ""
-            echo "To recreate infrastructure, run this workflow with action=apply"
+            # Make script executable
+            chmod +x cleanup_resources.sh
+            
+            # Run cleanup script (handles both Terraform and manual resources)
+            if ./cleanup_resources.sh; then
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "✅ Vision Inference resources destroyed successfully"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "To recreate infrastructure, run this workflow with action=apply"
+            else
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "⚠️  Cleanup completed with warnings"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "Check the logs above for details."
+              echo "You may need to manually verify resource deletion in GCP Console."
+            fi
           else
             echo "⚠️ Manual approval required for destroy."
             echo ""
@@ -205,8 +214,8 @@ jobs:
             echo "  Option 1: Re-run workflow with auto_approve=true"
             echo "  Option 2: Run manually in terminal:"
             echo "    cd deploymentVisionInference/terraform"
-            echo "    terraform init"
-            echo "    terraform destroy"
+            echo "    chmod +x cleanup_resources.sh"
+            echo "    ./cleanup_resources.sh"
             echo ""
             exit 1
           fi

@@ -147,7 +147,7 @@ terraform apply
 
 ### ⚠️ IMPORTANT: Scope of Destruction
 
-`terraform destroy` will **ONLY** delete Vision Inference resources managed by this Terraform configuration:
+The cleanup process will **ONLY** delete Vision Inference resources:
 
 #### Resources that WILL BE DELETED:
 - ❌ **Cloud Run service**: `vision-inference-api`
@@ -170,6 +170,25 @@ terraform apply
 
 ### Execute Destroy
 
+#### Option 1: Smart Cleanup Script (Recommended)
+
+This script handles both Terraform-managed and manually created resources:
+
+```bash
+cd deploymentVisionInference/terraform
+chmod +x cleanup_resources.sh
+./cleanup_resources.sh
+```
+
+**What it does:**
+1. Attempts Terraform destroy first
+2. If resources were created manually, deletes them via gcloud
+3. Verifies all resources are removed
+
+#### Option 2: Terraform Only
+
+If resources were created by Terraform:
+
 ```bash
 # Preview what will be destroyed
 terraform plan -destroy
@@ -179,6 +198,8 @@ terraform destroy
 ```
 
 Type `yes` when prompted to confirm deletion.
+
+**Note:** If resources were created manually (via `gcloud` or console), use the cleanup script instead.
 
 ## 📦 Building and Deploying the Container
 

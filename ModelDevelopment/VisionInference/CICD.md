@@ -448,7 +448,18 @@ gcloud run services update-traffic vision-inference-api \
 **Terraform Setup:**
 - Actions → Vision Inference - Terraform Setup → Run workflow
 - Choose: `plan` (preview) or `apply` (create) or `destroy` (delete)
+- **Destroy uses smart cleanup script** that handles both Terraform and manual resources
 
 **Application Deploy:**
 - Actions → Vision Inference API - Deploy → Run workflow
 - Force deployment checkbox available
+
+### Smart Cleanup on Destroy
+
+When running `destroy` action:
+1. ✅ Attempts Terraform destroy first
+2. ✅ Detects manually created resources
+3. ✅ Deletes remaining resources via gcloud
+4. ✅ Verifies complete cleanup
+
+**Script:** `deploymentVisionInference/terraform/cleanup_resources.sh`
