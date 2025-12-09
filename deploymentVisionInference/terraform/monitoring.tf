@@ -10,8 +10,9 @@ resource "google_project_service" "monitoring_api" {
 }
 
 # Notification channel for alerts (email)
+# Note: Requires roles/monitoring.notificationChannelEditor permission
 resource "google_monitoring_notification_channel" "email" {
-  count        = var.monitoring_email != "" ? 1 : 0
+  count        = (var.monitoring_email != "" && var.create_notification_channel) ? 1 : 0
   display_name = "Vision Inference API - Email Alerts"
   type         = "email"
 
@@ -55,7 +56,7 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
     }
   }
 
-  notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   # depends_on removed - Terraform will infer dependencies
 }
@@ -85,7 +86,7 @@ resource "google_monitoring_alert_policy" "high_latency" {
     }
   }
 
-  notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   # depends_on removed - Terraform will infer dependencies
 }
@@ -115,7 +116,7 @@ resource "google_monitoring_alert_policy" "service_unavailable" {
     }
   }
 
-  notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   # depends_on removed - Terraform will infer dependencies
 }
@@ -145,7 +146,7 @@ resource "google_monitoring_alert_policy" "high_cpu" {
     }
   }
 
-  notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   # depends_on removed - Terraform will infer dependencies
 }
@@ -175,7 +176,7 @@ resource "google_monitoring_alert_policy" "high_memory" {
     }
   }
 
-  notification_channels = var.monitoring_email != "" ? [google_monitoring_notification_channel.email[0].id] : []
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   # depends_on removed - Terraform will infer dependencies
 }
@@ -189,6 +190,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
       columns = 12
       tiles = [
         {
+          xPos   = 0
+          yPos   = 0
           width  = 6
           height = 4
           widget = {
@@ -217,6 +220,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
           }
         },
         {
+          xPos   = 6
+          yPos   = 0
           width  = 6
           height = 4
           widget = {
@@ -244,6 +249,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
           }
         },
         {
+          xPos   = 0
+          yPos   = 4
           width  = 6
           height = 4
           widget = {
@@ -302,6 +309,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
           }
         },
         {
+          xPos   = 6
+          yPos   = 4
           width  = 6
           height = 4
           widget = {
@@ -329,6 +338,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
           }
         },
         {
+          xPos   = 0
+          yPos   = 8
           width  = 6
           height = 4
           widget = {
@@ -356,6 +367,8 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
           }
         },
         {
+          xPos   = 6
+          yPos   = 8
           width  = 6
           height = 4
           widget = {

@@ -95,3 +95,9 @@ variable "monitoring_email" {
   type        = string
   default     = "sriharsha.py@gmail.com"
 }
+
+variable "create_notification_channel" {
+  description = "Create email notification channel (set to false if you lack monitoring.notificationChannelEditor permission)"
+  type        = bool
+  default     = true
+}

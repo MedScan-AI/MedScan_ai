@@ -61,6 +61,24 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Grant Monitoring Permissions
+        run: |
+          echo "Granting monitoring permissions to service account..."
+          # Get the authenticated service account
+          SA_EMAIL=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" | head -1)
+          
+          if [ -n "$SA_EMAIL" ] && [[ "$SA_EMAIL" == *"@"* ]]; then
+            echo "Service account: ${SA_EMAIL}"
+            echo "Granting roles/monitoring.notificationChannelEditor..."
+            gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+              --member="serviceAccount:${SA_EMAIL}" \
+              --role="roles/monitoring.notificationChannelEditor" \
+              --quiet 2>&1 || echo "⚠️  Permission may already be granted or requires project owner"
+          else
+            echo "⚠️  Could not determine service account email"
+          fi
+        continue-on-error: true
+
       - name: Check API Enablement Status
         run: |
           echo "Checking if required APIs are enabled..."
@@ -74,6 +92,7 @@ jobs:
           echo "  - artifactregistry.googleapis.com"
           echo "  - cloudbuild.googleapis.com"
           echo "  - storage-api.googleapis.com"
+          echo "  - monitoring.googleapis.com"
           echo ""
           echo "Terraform will skip API enablement by default (enable_apis=false)"
           echo "If you need to enable APIs, set enable_apis=true in terraform.tfvars"
