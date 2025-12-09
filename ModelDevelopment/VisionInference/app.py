@@ -25,6 +25,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+# Threshold for flagging low-confidence predictions (can be overridden via env var)
+LOW_CONF_THRESHOLD = float(os.getenv("LOW_CONF_THRESHOLD", "0.6"))
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -159,6 +161,42 @@ def predict_with_model(model, image_array: np.ndarray, class_names: list = None)
         raise
 
 
+def log_prediction_event(model_name: str, result: Dict[str, Any]) -> None:
+    """
+    Log a structured prediction event for monitoring and alerting.
+    
+    Args:
+        model_name: Name of the model used for inference.
+        result: Prediction result dictionary from predict_with_model.
+    """
+    confidence = result.get("confidence")
+    predicted_class = result.get("predicted_class")
+    low_confidence = None
+    try:
+        low_confidence = confidence is not None and float(confidence) < LOW_CONF_THRESHOLD
+    except Exception:
+        low_confidence = None
+
+    logger.info(
+        "[prediction_event] model=%s predicted_class=%s confidence=%s low_confidence=%s threshold=%.2f class_probabilities=%s",
+        model_name,
+        predicted_class,
+        f"{confidence:.4f}" if confidence is not None else "n/a",
+        low_confidence,
+        LOW_CONF_THRESHOLD,
+        result.get("class_probabilities")
+    )
+
+    if low_confidence:
+        logger.warning(
+            "[low_confidence] model=%s predicted_class=%s confidence=%.4f threshold=%.2f",
+            model_name,
+            predicted_class,
+            confidence,
+            LOW_CONF_THRESHOLD
+        )
+
+
 def load_image_from_bytes(image_bytes: bytes) -> Image.Image:
     """Load PIL Image from bytes."""
     return Image.open(io.BytesIO(image_bytes))
@@ -229,6 +267,8 @@ async def predict_tb(
         
         # Predict
         result = predict_with_model(model, image_array, class_names)
+        # Log prediction event for monitoring
+        log_prediction_event("tb_CNN_ResNet18", result)
         
         # Generate GradCAM visualization
         try:
@@ -305,6 +345,8 @@ async def predict_lung_cancer(
         
         # Predict
         result = predict_with_model(model, image_array, class_names)
+        # Log prediction event for monitoring
+        log_prediction_event("lung_cancer_ct_scan", result)
         
         # Generate GradCAM visualization
         try:

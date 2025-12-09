@@ -181,6 +181,58 @@ resource "google_monitoring_alert_policy" "high_memory" {
   # depends_on removed - Terraform will infer dependencies
 }
 
+# Log-based metric for low-confidence predictions
+resource "google_logging_metric" "low_confidence_predictions" {
+  count       = var.enable_monitoring ? 1 : 0
+  name        = "low_confidence_predictions"
+  description = "Counts low-confidence predictions (confidence below threshold) emitted by app logs"
+
+  filter = join(" ", [
+    "resource.type=\"cloud_run_revision\"",
+    "resource.labels.service_name=\"${var.service_name}\"",
+    "textPayload:\"[low_confidence]\""
+  ])
+
+  label_extractors = {
+    "model"         = "REGEXP_EXTRACT(textPayload, \"model=([^ ]+)\")"
+    "predicted_class" = "REGEXP_EXTRACT(textPayload, \"predicted_class=([^ ]+)\")"
+  }
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+# Alert Policy: Consecutive low-confidence predictions (>=3 within 30s)
+resource "google_monitoring_alert_policy" "low_confidence_streak" {
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - Low Confidence Streak"
+  combiner     = "OR"
+  enabled      = true
+
+  conditions {
+    display_name = ">=3 low-confidence predictions in 30s"
+
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/low_confidence_predictions\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${var.service_name}\""
+      duration        = "30s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 2
+
+      aggregations {
+        alignment_period     = "30s"
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.label.service_name"]
+      }
+    }
+  }
+
+  notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
+}
+
 # Monitoring Dashboard
 resource "google_monitoring_dashboard" "vision_inference_dashboard" {
   count        = var.enable_monitoring ? 1 : 0
