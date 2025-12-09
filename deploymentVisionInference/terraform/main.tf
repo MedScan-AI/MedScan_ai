@@ -45,15 +45,8 @@ resource "google_project_service" "storage_api" {
   disable_on_destroy = false
 }
 
-# Artifact Registry repository for Docker images
-resource "google_artifact_registry_repository" "vision_inference" {
-  location      = var.region
-  repository_id = var.repository_name
-  description   = "Docker repository for Vision Inference API"
-  format        = "DOCKER"
-
-  # depends_on removed - Terraform will infer dependencies from resource references
-}
+# Artifact Registry repository is assumed to exist (created manually or via other means)
+# Terraform will not create or manage the repository
 
 # Get the Cloud Build service account
 data "google_project" "project" {}
@@ -160,9 +153,7 @@ resource "google_cloud_run_service" "vision_inference_api" {
     latest_revision = true
   }
 
-  depends_on = [
-    google_artifact_registry_repository.vision_inference
-  ]
+  # No dependencies - Artifact Registry repository is assumed to exist
 
   # Lifecycle to prevent destruction due to image changes
   lifecycle {
