@@ -38,6 +38,7 @@ jobs:
     env:
       PROJECT_ID: medscanai-476500
       REGION: us-central1
+      SERVICE_NAME: vision-inference-api
       TF_VAR_project_id: medscanai-476500
       TF_VAR_region: us-central1
       TERRAFORM_VERSION: 1.6.0
