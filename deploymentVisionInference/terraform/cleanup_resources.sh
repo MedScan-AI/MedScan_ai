@@ -92,11 +92,28 @@ if resource_exists "artifactregistry" "$REPO_NAME"; then
   echo "  ⚠️  Repository still exists - will delete manually"
   MANUAL_CLEANUP_NEEDED=true
   
-  echo "  Deleting Artifact Registry repository..."
-  gcloud artifacts repositories delete "$REPO_NAME" \
+  # List images if any
+  IMAGE_COUNT=$(gcloud artifacts docker images list \
+    "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}" \
+    --format="value(package)" 2>/dev/null | wc -l || echo "0")
+  
+  if [ "$IMAGE_COUNT" -gt 0 ]; then
+    echo "  📦 Repository contains ${IMAGE_COUNT} image(s) - will be deleted with repository"
+  fi
+  
+  echo "  Deleting Artifact Registry repository (force delete if needed)..."
+  if gcloud artifacts repositories delete "$REPO_NAME" \
     --location="$REGION" \
     --project="$PROJECT_ID" \
-    --quiet && echo "  ✅ Repository deleted" || echo "  ❌ Failed to delete repository"
+    --quiet 2>&1; then
+    echo "  ✅ Repository deleted"
+  else
+    echo "  ⚠️  Standard delete failed, trying alternative method..."
+    # Try with explicit project format
+    gcloud artifacts repositories delete \
+      "projects/${PROJECT_ID}/locations/${REGION}/repositories/${REPO_NAME}" \
+      --quiet 2>&1 && echo "  ✅ Repository deleted" || echo "  ❌ Failed to delete repository - check permissions"
+  fi
 else
   echo "  ✅ Repository does not exist (already deleted)"
 fi

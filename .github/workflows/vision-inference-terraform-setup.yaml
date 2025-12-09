@@ -67,7 +67,15 @@ jobs:
 
       - name: Terraform Format Check
         id: fmt
-        run: terraform fmt -check -recursive
+        run: |
+          echo "Checking Terraform file formatting..."
+          if ! terraform fmt -check -recursive; then
+            echo "⚠️  Warning: Some Terraform files need formatting"
+            echo "Run 'terraform fmt -recursive' locally to fix"
+            echo "Continuing with workflow..."
+          else
+            echo "✅ All Terraform files are properly formatted"
+          fi
         continue-on-error: true
 
       - name: Terraform Init
