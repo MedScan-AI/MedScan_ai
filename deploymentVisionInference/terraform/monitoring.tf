@@ -207,6 +207,11 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
   combiner     = "OR"
   enabled      = true
 
+  # Ensure log metric exists before creating the alert policy
+  depends_on = [
+    google_logging_metric.low_confidence_predictions
+  ]
+
   conditions {
     display_name = ">=3 low-confidence predictions in 30s"
 
