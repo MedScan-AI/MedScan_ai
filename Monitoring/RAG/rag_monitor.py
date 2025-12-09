@@ -372,6 +372,25 @@ class RAGMonitor:
         
         logger.info(f"🔄 Triggering {strategy.upper()} retraining: {reason}")
         
+        # Log retraining event to Cloud Logging for alerting
+        try:
+            logging_client = cloud_logging.Client(project=self.project_id)
+            logger_instance = logging_client.logger("rag_monitoring")
+            
+            payload = {
+                "retraining_event": {
+                    "triggered": True,
+                    "strategy": strategy,
+                    "reason": reason,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "project_id": self.project_id
+                }
+            }
+            logger_instance.log_struct(payload, severity="WARNING")
+            logger.info("Retraining event logged to Cloud Logging")
+        except Exception as e:
+            logger.error(f"Failed to log retraining event to Cloud Logging: {e}")
+        
         try:
             if strategy == 'full':
                 # Scenario 2: Full pipeline (data + model)
@@ -402,6 +421,23 @@ class RAGMonitor:
             
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to trigger: {e.stderr}")
+            # Log failed retraining attempt
+            try:
+                logging_client = cloud_logging.Client(project=self.project_id)
+                logger_instance = logging_client.logger("rag_monitoring")
+                payload = {
+                    "retraining_event": {
+                        "triggered": False,
+                        "strategy": strategy,
+                        "reason": reason,
+                        "error": str(e.stderr),
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "project_id": self.project_id
+                    }
+                }
+                logger_instance.log_struct(payload, severity="ERROR")
+            except:
+                pass
             return False
     
     def save_monitoring_report(self, metrics: Dict, drift: Dict, decision: Dict) -> Dict:
