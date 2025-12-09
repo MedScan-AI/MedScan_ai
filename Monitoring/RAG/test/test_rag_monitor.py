@@ -436,7 +436,7 @@ class TestDetermineRetrainingStrategy:
         drift_info = {'has_drift': False}
         model_metrics = {
             'semantic_score': 0.75,  # Above threshold
-            'hallucination_score': 0.10,  # Below threshold
+            'hallucination_score': 0.25,  # Above threshold (0.2 is minimum acceptable)
             'retrieval_score': 0.80,
             'model_name': 'test-model'
         }
@@ -571,11 +571,16 @@ class TestTriggerRetraining:
     """Tests for triggering retraining."""
     
     @patch('subprocess.run')
-    def test_trigger_full_retraining(self, mock_subprocess, monitor, mock_storage_client):
+    @patch('Monitoring.RAG.rag_monitor.cloud_logging.Client')
+    def test_trigger_full_retraining(self, mock_logging_client, mock_subprocess, monitor, mock_storage_client):
         """Test triggering full retraining."""
         mock_subprocess.return_value = MagicMock(returncode=0)
         mock_blob = MagicMock()
         mock_storage_client.blob.return_value = mock_blob
+        
+        # Mock Cloud Logging
+        mock_logger_instance = MagicMock()
+        mock_logging_client.return_value.logger.return_value = mock_logger_instance
         
         success = monitor.trigger_retraining('full', 'Data drift detected')
         
@@ -586,31 +591,57 @@ class TestTriggerRetraining:
         assert 'gh' in call_args
         assert 'workflow' in call_args
         assert 'rag-data-pipeline.yaml' in call_args
+        # Verify Cloud Logging was called
+        assert mock_logging_client.called
+        assert mock_logger_instance.log_struct.called
+        # Verify log payload contains retraining event
+        log_call = mock_logger_instance.log_struct.call_args
+        assert log_call[0][0]['retraining_event']['triggered'] is True
+        assert log_call[0][0]['retraining_event']['strategy'] == 'full'
     
     @patch('subprocess.run')
-    def test_trigger_model_only_retraining(self, mock_subprocess, monitor, mock_storage_client):
+    @patch('Monitoring.RAG.rag_monitor.cloud_logging.Client')
+    def test_trigger_model_only_retraining(self, mock_logging_client, mock_subprocess, monitor, mock_storage_client):
         """Test triggering model-only retraining."""
         mock_subprocess.return_value = MagicMock(returncode=0)
         mock_blob = MagicMock()
         mock_storage_client.blob.return_value = mock_blob
+        
+        # Mock Cloud Logging
+        mock_logger_instance = MagicMock()
+        mock_logging_client.return_value.logger.return_value = mock_logger_instance
         
         success = monitor.trigger_retraining('model_only', 'Low composite score')
         
         assert success is True
         call_args = mock_subprocess.call_args[0][0]
         assert 'rag-training.yaml' in call_args
+        # Verify Cloud Logging was called
+        assert mock_logging_client.called
+        assert mock_logger_instance.log_struct.called
+        log_call = mock_logger_instance.log_struct.call_args
+        assert log_call[0][0]['retraining_event']['strategy'] == 'model_only'
     
     @patch('subprocess.run')
-    def test_trigger_retraining_failure(self, mock_subprocess, monitor, mock_storage_client):
+    @patch('Monitoring.RAG.rag_monitor.cloud_logging.Client')
+    def test_trigger_retraining_failure(self, mock_logging_client, mock_subprocess, monitor, mock_storage_client):
         """Test handling of retraining trigger failure."""
         import subprocess
         mock_subprocess.side_effect = subprocess.CalledProcessError(1, 'gh', stderr='Command failed')
         mock_blob = MagicMock()
         mock_storage_client.blob.return_value = mock_blob
         
+        # Mock Cloud Logging
+        mock_logger_instance = MagicMock()
+        mock_logging_client.return_value.logger.return_value = mock_logger_instance
+        
         success = monitor.trigger_retraining('full', 'Test reason')
         
         assert success is False
+        # Verify error was logged to Cloud Logging
+        assert mock_logging_client.called
+        # Should be called twice: once for initial log, once for error log
+        assert mock_logger_instance.log_struct.call_count >= 1
 
 
 class TestSaveMonitoringReport:

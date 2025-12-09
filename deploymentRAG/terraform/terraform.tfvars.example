@@ -1,0 +1,15 @@
+# Example Terraform variables file for RAG Monitoring
+# Copy this file to terraform.tfvars and customize as needed
+
+project_id = "medscanai-476500"
+region     = "us-central1"
+service_name = "rag-service"
+
+# Monitoring configuration
+enable_monitoring = true
+monitoring_email  = ""  # Set your email address for alert notifications
+create_notification_channel = true
+
+# API enablement (set to false if APIs are already enabled)
+enable_apis = false
+
