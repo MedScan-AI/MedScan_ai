@@ -13,7 +13,9 @@ This document describes the automated deployment pipeline for the Vision Inferen
   
 - **`.github/workflows/vision-inference-deploy.yaml`**
   - Application deployment workflow
-  - **Automatic** trigger on changes to `ModelDevelopment/VisionInference/`
+  - **Automatic** trigger on changes to **`.py` files** in `ModelDevelopment/VisionInference/` **ONLY**
+  - Does NOT trigger on non-Python files (Dockerfile, requirements.txt, etc.)
+  - Does NOT trigger on changes to other directories
   - Automatically deploys to Cloud Run
 
 ### Documentation
@@ -27,6 +29,46 @@ This document describes the automated deployment pipeline for the Vision Inferen
   - Automated setup script
   - Creates service account
   - Grants necessary permissions
+
+## 🎯 What Triggers Deployment?
+
+### ✅ WILL Trigger Deployment (Automatic)
+Changes to **`.py` files ONLY** in `ModelDevelopment/VisionInference/`:
+- ✅ `app.py`
+- ✅ `model_loader.py`
+- ✅ `gradcam.py`
+- ✅ Any other `.py` file in this directory
+
+### ❌ WILL NOT Trigger Deployment
+**Non-Python files** in `ModelDevelopment/VisionInference/`:
+- ❌ `Dockerfile`
+- ❌ `requirements.txt`
+- ❌ `cloudbuild.yaml`
+- ❌ `README.md`
+- ❌ `.yaml`, `.txt`, `.md`, or any non-`.py` files
+
+**Files outside** `ModelDevelopment/VisionInference/`:
+- ❌ Other directories (e.g., `ModelDevelopment/Vision/`, `DataPipeline/`)
+- ❌ Documentation files
+- ❌ GitHub workflow files (`.github/workflows/`)
+- ❌ Terraform files (`deploymentVisionInference/terraform/`)
+- ❌ Any other directory in the repository
+
+### 🔧 Manual Deployment
+You can always manually trigger deployment from GitHub Actions UI, regardless of what changed.
+
+**When to use manual deployment:**
+- When you change `Dockerfile`, `requirements.txt`, or `cloudbuild.yaml`
+- When you want to force a redeployment without code changes
+- When you need to deploy after infrastructure changes
+
+**How to manually trigger:**
+1. Go to: **Actions → Vision Inference API - Deploy**
+2. Click: **Run workflow**
+3. Select branch: `main`
+4. Click: **Run workflow** button
+
+---
 
 ## 🚀 Quick Start
 
@@ -373,7 +415,7 @@ gcloud run services update-traffic vision-inference-api \
 | Workflow | Purpose | When to Run | Trigger | Frequency |
 |----------|---------|-------------|---------|-----------|
 | **vision-inference-terraform-setup.yaml** | Infrastructure provisioning | First-time setup, infrastructure changes | **Manual only** (GitHub UI) | Once / Rarely |
-| **vision-inference-deploy.yaml** | Application deployment | Code changes, model updates | **Automatic** (on push) | Every push to main |
+| **vision-inference-deploy.yaml** | Application deployment | Python code changes (`.py` files) | **Automatic** (on .py changes) | When .py files change |
 
 ### Typical Setup Sequence
 
@@ -388,10 +430,17 @@ gcloud run services update-traffic vision-inference-api \
    Push code changes or manually trigger
    Builds: Docker image, deploys to Cloud Run
 
-3. Code changes (automatic)
+3. Python code changes (automatic)
    ↓
+   Edit .py files (app.py, model_loader.py, gradcam.py)
    Push to main branch
    Triggers: Application Deploy workflow automatically
+
+4. Non-Python changes (manual deployment needed)
+   ↓
+   Edit Dockerfile, requirements.txt, etc.
+   Push to main branch (won't auto-deploy)
+   Manually trigger: Actions → Vision Inference API - Deploy
 ```
 
 ### Manual Workflow Triggers

@@ -1,16 +1,20 @@
 name: Vision Inference API - Deploy
 
+# This workflow ONLY runs when .py files change in ModelDevelopment/VisionInference/
+# Changes to non-Python files (Dockerfile, requirements.txt, etc.) will NOT trigger deployment
+
 on:
   push:
     branches: [main]
     paths:
-      - "ModelDevelopment/VisionInference/**"
-      - ".github/workflows/vision-inference-deploy.yaml"
+      - "ModelDevelopment/VisionInference/*.py"
+      - "ModelDevelopment/VisionInference/**/*.py"
 
   pull_request:
     branches: [main]
     paths:
-      - "ModelDevelopment/VisionInference/**"
+      - "ModelDevelopment/VisionInference/*.py"
+      - "ModelDevelopment/VisionInference/**/*.py"
 
   workflow_dispatch:
     inputs:
