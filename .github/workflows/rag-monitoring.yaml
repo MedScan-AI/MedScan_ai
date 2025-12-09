@@ -1,5 +1,11 @@
 name: RAG Monitoring
 
+# Runs monitoring checks (Python script) - does NOT set up monitoring infrastructure
+# For setting up monitoring infrastructure (dashboard, alerts, metrics), use: rag-complete-setup.yaml
+# Related workflows:
+# - rag-complete-setup.yaml: Sets up monitoring infrastructure (one-time)
+# - rag-deploy.yaml: Deploys Cloud Run service
+
 on:
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours

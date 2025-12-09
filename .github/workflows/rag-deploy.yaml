@@ -1,5 +1,11 @@
 name: RAG Deployment
 
+# Deploys Cloud Run service only (no monitoring infrastructure setup)
+# For complete setup including monitoring, use: rag-complete-setup.yaml
+# Related workflows:
+# - rag-complete-setup.yaml: One-stop deployment + monitoring infrastructure
+# - rag-monitoring.yaml: Runs monitoring checks (not infrastructure setup)
+
 on:
   workflow_run:
     workflows: ["RAG Model Deployment"]

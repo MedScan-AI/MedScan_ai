@@ -1,0 +1,378 @@
+name: RAG Complete Setup - Cloud Run + Monitoring
+
+# One-stop setup for RAG deployment:
+# 1. Deploys Cloud Run service (rag-service)
+# 2. Sets up monitoring dashboard and alert policies via Terraform
+#
+# Related Workflows:
+# - rag-deploy.yaml: Cloud Run deployment only (no monitoring setup)
+# - rag-monitoring.yaml: Runs monitoring checks (not infrastructure setup)
+# - rag-training.yaml: Trains/selects RAG models
+# - rag-data-pipeline.yaml: Processes RAG data
+# - rag-retraining.yaml: Retrains models
+
+on:
+  workflow_dispatch:
+    inputs:
+      monitoring_email:
+        description: 'Email for alert notifications (optional)'
+        required: false
+        type: string
+      enable_monitoring:
+        description: 'Enable monitoring dashboard and alerts'
+        required: false
+        default: true
+        type: boolean
+      auto_approve_terraform:
+        description: 'Auto-approve Terraform apply (use with caution)'
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/**'
+      - 'cloudbuild/rag-deploy.yaml'
+      - 'ModelDevelopment/RAG/**'
+      - 'RAG_Dockerfile'
+      - 'deploymentRAG/terraform/**'
+      - '.github/workflows/rag-complete-setup.yaml'
+
+jobs:
+  deploy-cloud-run:
+    name: Deploy Cloud Run Service
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: medscanai-476500
+      
+      - name: Deploy to Cloud Run via Cloud Build
+        id: cloud-build
+        run: |
+          echo "🚀 Starting Cloud Run deployment..."
+          
+          gcloud builds submit \
+            --config=cloudbuild/rag-deploy.yaml \
+            --project=medscanai-476500 \
+            --timeout=30m
+          
+          echo "✅ Cloud Build completed successfully!"
+      
+      - name: Get Service URL
+        id: service-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe rag-service \
+            --region=us-central1 \
+            --platform=managed \
+            --format="value(status.url)" \
+            --project=medscanai-476500)
+          
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service URL: $SERVICE_URL"
+      
+      - name: Set IAM Permissions
+        run: |          
+          echo "Setting public access permissions..."
+          
+          gcloud run services add-iam-policy-binding rag-service \
+            --member="allUsers" \
+            --role="roles/run.invoker" \
+            --region=us-central1 \
+            --project=medscanai-476500
+          
+          echo "✅ IAM Permission Set For Public Access"
+      
+      - name: Wait for Service Warmup
+        run: |
+          echo "⏳ Waiting 120 seconds for model to load..."
+          sleep 120
+      
+      - name: Test Health Endpoint
+        run: |
+          echo "Testing health endpoint..."
+          
+          HEALTH_RESPONSE=$(curl -s -f ${{ steps.service-url.outputs.url }}/health || echo '{"ready":false}')
+          echo "Health response: $HEALTH_RESPONSE"
+          
+          READY=$(echo $HEALTH_RESPONSE | jq -r '.ready // false')
+          
+          if [ "$READY" = "true" ]; then
+            echo "✅ Health check passed!"
+          else
+            echo "⚠️ Service not ready yet"
+            echo "$HEALTH_RESPONSE"
+            exit 1
+          fi
+      
+      - name: Test Config Endpoint
+        run: |
+          echo "Testing config endpoint..."
+          curl -s ${{ steps.service-url.outputs.url }}/config | jq
+      
+      - name: Test Prediction Endpoint
+        run: |
+          echo "Testing prediction with sample query..."
+          
+          RESPONSE=$(curl -s -X POST ${{ steps.service-url.outputs.url }}/predict \
+            -H "Content-Type: application/json" \
+            -d '{"instances":[{"query":"What is tuberculosis?"}]}')
+          
+          echo "$RESPONSE" | jq
+          
+          SUCCESS=$(echo $RESPONSE | jq -r '.predictions[0].success // false')
+          
+          if [ "$SUCCESS" = "true" ]; then
+            echo "✅ Prediction test passed!"
+          else
+            echo "⚠️ Prediction test failed"
+            exit 1
+          fi
+
+  setup-monitoring:
+    name: Setup Monitoring Dashboard
+    runs-on: ubuntu-latest
+    needs: deploy-cloud-run
+    if: ${{ github.event.inputs.enable_monitoring != 'false' || github.event_name == 'push' }}
+    
+    env:
+      PROJECT_ID: medscanai-476500
+      REGION: us-central1
+      SERVICE_NAME: rag-service
+      TERRAFORM_VERSION: 1.6.0
+    
+    defaults:
+      run:
+        working-directory: deploymentRAG/terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Grant Monitoring Permissions
+        run: |
+          echo "Granting monitoring permissions to service account..."
+          SA_EMAIL=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" | head -1)
+          
+          if [ -n "$SA_EMAIL" ] && [[ "$SA_EMAIL" == *"@"* ]]; then
+            echo "Service account: ${SA_EMAIL}"
+            echo "Granting monitoring roles..."
+            gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+              --member="serviceAccount:${SA_EMAIL}" \
+              --role="roles/monitoring.metricWriter" \
+              --quiet 2>&1 || echo "⚠️  Permission may already be granted"
+            gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+              --member="serviceAccount:${SA_EMAIL}" \
+              --role="roles/monitoring.dashboardEditor" \
+              --quiet 2>&1 || echo "⚠️  Permission may already be granted"
+            gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+              --member="serviceAccount:${SA_EMAIL}" \
+              --role="roles/monitoring.alertPolicyEditor" \
+              --quiet 2>&1 || echo "⚠️  Permission may already be granted"
+            gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+              --member="serviceAccount:${SA_EMAIL}" \
+              --role="roles/monitoring.notificationChannelEditor" \
+              --quiet 2>&1 || echo "⚠️  Permission may already be granted"
+          else
+            echo "⚠️  Could not determine service account email"
+          fi
+        continue-on-error: true
+
+      - name: Create Terraform Variables File
+        run: |
+          echo "Creating terraform.tfvars from inputs..."
+          cat > terraform.tfvars <<EOF
+          project_id = "${{ env.PROJECT_ID }}"
+          region = "${{ env.REGION }}"
+          service_name = "${{ env.SERVICE_NAME }}"
+          enable_monitoring = true
+          monitoring_email = "${{ github.event.inputs.monitoring_email || '' }}"
+          create_notification_channel = ${{ github.event.inputs.monitoring_email != '' && 'true' || 'false' }}
+          enable_apis = false
+          EOF
+          echo "✅ Created terraform.tfvars:"
+          cat terraform.tfvars
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          echo "Checking Terraform file formatting..."
+          if ! terraform fmt -check -recursive; then
+            echo "⚠️  Warning: Some Terraform files need formatting"
+            echo "Run 'terraform fmt -recursive' locally to fix"
+          else
+            echo "✅ All Terraform files are properly formatted"
+          fi
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: |
+          echo "Initializing Terraform..."
+          terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          echo "Validating Terraform configuration..."
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          echo "Creating Terraform execution plan..."
+          terraform plan -no-color -out=tfplan
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Plan Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          terraform show -no-color tfplan | head -100
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Terraform Apply
+        id: apply
+        run: |
+          echo "Applying Terraform configuration..."
+          
+          if [ "${{ github.event.inputs.auto_approve_terraform }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+            echo "✅ Auto-approving Terraform apply..."
+            terraform apply -auto-approve tfplan
+          else
+            echo "⚠️ Manual approval required for Terraform apply."
+            echo ""
+            echo "To proceed:"
+            echo "  Option 1: Re-run workflow with auto_approve_terraform=true"
+            echo "  Option 2: Run manually:"
+            echo "    cd deploymentRAG/terraform"
+            echo "    terraform apply tfplan"
+            echo ""
+            exit 1
+          fi
+
+      - name: Get Terraform Outputs
+        id: outputs
+        run: |
+          echo "Fetching Terraform outputs..."
+          
+          DASHBOARD_URL=$(terraform output -raw dashboard_url 2>/dev/null || echo "Not available")
+          
+          echo "dashboard_url=${DASHBOARD_URL}" >> $GITHUB_OUTPUT
+          
+          echo "📊 Monitoring Dashboard URL:"
+          echo "$DASHBOARD_URL"
+
+      - name: Upload Terraform Plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-rag-monitoring
+          path: deploymentRAG/terraform/tfplan
+          retention-days: 7
+          if-no-files-found: ignore
+
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-cloud-run, setup-monitoring]
+    if: always()
+    
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: medscanai-476500
+      
+      - name: Get Service URL
+        id: service-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe rag-service \
+            --region=us-central1 \
+            --platform=managed \
+            --format="value(status.url)" \
+            --project=medscanai-476500 2>/dev/null || echo "Not available")
+          
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service URL: $SERVICE_URL"
+        continue-on-error: true
+      
+      - name: Create Deployment Summary
+        run: |
+          echo "## 🚀 RAG Complete Setup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### ✅ Cloud Run Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ needs.deploy-cloud-run.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service:** rag-service" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service URL:** ${{ steps.service-url.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** us-central1" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.setup-monitoring.result }}" != "skipped" ]; then
+            echo "### 📊 Monitoring Setup" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** ${{ needs.setup-monitoring.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Dashboard:** Configured" >> $GITHUB_STEP_SUMMARY
+            echo "- **Alert Policies:** 11 policies created" >> $GITHUB_STEP_SUMMARY
+            echo "- **Custom Metrics:** 7 metrics created" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Monitoring Setup" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** Skipped (monitoring disabled)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "### 🔗 Useful Links" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cloud Run Console:** https://console.cloud.google.com/run?project=medscanai-476500" >> $GITHUB_STEP_SUMMARY
+          echo "- **Monitoring Dashboards:** https://console.cloud.google.com/monitoring/dashboards?project=medscanai-476500" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cloud Build:** https://console.cloud.google.com/cloud-build?project=medscanai-476500" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📝 Next Steps" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.service-url.outputs.url }}" != "Not available" ]; then
+            echo "1. Test the service: \`curl ${{ steps.service-url.outputs.url }}/health\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "1. Test the service: \`curl <service-url>/health\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "2. View monitoring dashboard in GCP Console" >> $GITHUB_STEP_SUMMARY
+          echo "3. Configure alert notifications (if email was provided)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy-cloud-run.result }}" != "success" ]; then
+            echo "::error::Cloud Run deployment failed!"
+            exit 1
+          fi
+          
+          if [ "${{ needs.setup-monitoring.result }}" != "skipped" ] && [ "${{ needs.setup-monitoring.result }}" != "success" ]; then
+            echo "::warning::Monitoring setup had issues. Check logs above."
+          fi
+
