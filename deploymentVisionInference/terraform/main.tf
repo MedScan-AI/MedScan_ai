@@ -56,7 +56,7 @@ data "google_project" "project" {}
 
 locals {
   cloudbuild_sa = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
-  image_url     = var.container_image != "" ? var.container_image : "${var.region}-docker.pkg.dev/${var.project_id}/${var.repository_name}/vision-inference:latest"
+  image_url = var.container_image != "" ? var.container_image : "${var.region}-docker.pkg.dev/${var.project_id}/${var.repository_name}/vision-inference:latest"
 }
 
 # Grant Cloud Build service account permissions to deploy to Cloud Run
@@ -144,8 +144,8 @@ resource "google_cloud_run_service" "vision_inference_api" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale" = tostring(var.min_instances)
-        "autoscaling.knative.dev/maxScale" = tostring(var.max_instances)
+        "autoscaling.knative.dev/minScale"     = tostring(var.min_instances)
+        "autoscaling.knative.dev/maxScale"     = tostring(var.max_instances)
         "run.googleapis.com/startup-cpu-boost" = "true"
       }
     }
