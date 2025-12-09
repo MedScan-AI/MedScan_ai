@@ -82,3 +82,16 @@ variable "enable_apis" {
   type        = bool
   default     = false
 }
+
+# Monitoring configuration
+variable "enable_monitoring" {
+  description = "Enable Google Cloud Monitoring (alerts and dashboards)"
+  type        = bool
+  default     = true
+}
+
+variable "monitoring_email" {
+  description = "Email address for monitoring alerts (leave empty to disable email notifications)"
+  type        = string
+  default     = "sriharsha.py@gmail.com"
+}

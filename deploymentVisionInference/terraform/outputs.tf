@@ -42,3 +42,20 @@ output "cloudbuild_service_account" {
   description = "Cloud Build service account email"
   value       = local.cloudbuild_sa
 }
+
+# Monitoring outputs
+output "monitoring_dashboard_url" {
+  description = "URL to the monitoring dashboard"
+  value       = var.enable_monitoring ? "https://console.cloud.google.com/monitoring/dashboards/custom/${google_monitoring_dashboard.vision_inference_dashboard[0].id}?project=${var.project_id}" : "Monitoring disabled"
+}
+
+output "monitoring_alerts" {
+  description = "List of monitoring alert policies"
+  value = var.enable_monitoring ? [
+    google_monitoring_alert_policy.high_error_rate[0].display_name,
+    google_monitoring_alert_policy.high_latency[0].display_name,
+    google_monitoring_alert_policy.service_unavailable[0].display_name,
+    google_monitoring_alert_policy.high_cpu[0].display_name,
+    google_monitoring_alert_policy.high_memory[0].display_name
+  ] : []
+}
