@@ -52,7 +52,7 @@ resource "google_artifact_registry_repository" "vision_inference" {
   description   = "Docker repository for Vision Inference API"
   format        = "DOCKER"
 
-  depends_on = var.enable_apis ? [google_project_service.artifact_registry_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies from resource references
 }
 
 # Get the Cloud Build service account
@@ -69,7 +69,7 @@ resource "google_project_iam_member" "cloudbuild_run_admin" {
   role    = "roles/run.admin"
   member  = "serviceAccount:${local.cloudbuild_sa}"
 
-  depends_on = var.enable_apis ? [google_project_service.cloudbuild_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Grant Cloud Build service account permissions to act as service accounts
@@ -78,7 +78,7 @@ resource "google_project_iam_member" "cloudbuild_sa_user" {
   role    = "roles/iam.serviceAccountUser"
   member  = "serviceAccount:${local.cloudbuild_sa}"
 
-  depends_on = var.enable_apis ? [google_project_service.cloudbuild_api[0]] : []
+  # depends_on removed - Terraform will infer dependencies
 }
 
 # Grant Cloud Build service account permissions to read from GCS
@@ -160,10 +160,9 @@ resource "google_cloud_run_service" "vision_inference_api" {
     latest_revision = true
   }
 
-  depends_on = concat(
-    var.enable_apis ? [google_project_service.run_api[0]] : [],
-    [google_artifact_registry_repository.vision_inference]
-  )
+  depends_on = [
+    google_artifact_registry_repository.vision_inference
+  ]
 
   # Lifecycle to prevent destruction due to image changes
   lifecycle {
