@@ -183,7 +183,7 @@ resource "google_monitoring_alert_policy" "high_memory" {
 
 # Log-based metric for low-confidence predictions
 resource "google_logging_metric" "low_confidence_predictions" {
-  count       = var.enable_monitoring ? 1 : 0
+  count       = (var.enable_monitoring && var.create_low_conf_metric) ? 1 : 0
   name        = "low_confidence_predictions"
   description = "Counts low-confidence predictions (confidence below threshold) emitted by app logs"
 
@@ -206,11 +206,6 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
   display_name = "Vision Inference API - Low Confidence Streak"
   combiner     = "OR"
   enabled      = true
-
-  # Ensure log metric exists before creating the alert policy
-  depends_on = [
-    google_logging_metric.low_confidence_predictions
-  ]
 
   conditions {
     display_name = ">=3 low-confidence predictions in 30s"

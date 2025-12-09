@@ -101,3 +101,10 @@ variable "create_notification_channel" {
   type        = bool
   default     = true
 }
+
+# Create the low-confidence log-based metric (set to false if it already exists)
+variable "create_low_conf_metric" {
+  description = "Create the low-confidence log-based metric; set to false if the metric already exists"
+  type        = bool
+  default     = false
+}

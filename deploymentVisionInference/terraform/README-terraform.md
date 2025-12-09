@@ -98,6 +98,8 @@ auto_approve: true
 - Deploying infrastructure changes
 - Scaling resources
 
+> Note: The log-based metric `low_confidence_predictions` already exists in this project. By default `create_low_conf_metric=false` to avoid a 409 conflict. If you ever need Terraform to create it (only when it does not already exist), set `create_low_conf_metric=true` in `terraform.tfvars`.
+
 ### Destroy
 ```yaml
 action: destroy
