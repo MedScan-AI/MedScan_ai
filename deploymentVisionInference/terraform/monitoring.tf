@@ -193,11 +193,6 @@ resource "google_logging_metric" "low_confidence_predictions" {
     "textPayload:\"[low_confidence]\""
   ])
 
-  label_extractors = {
-    "model"         = "REGEXP_EXTRACT(textPayload, \"model=([^ ]+)\")"
-    "predicted_class" = "REGEXP_EXTRACT(textPayload, \"predicted_class=([^ ]+)\")"
-  }
-
   metric_descriptor {
     metric_kind = "DELTA"
     value_type  = "INT64"
