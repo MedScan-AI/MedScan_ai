@@ -110,23 +110,78 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
           
-          # Check if Cloud Run service exists
-          if gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --project=${{ env.PROJECT_ID }} \
-            --format="value(metadata.name)" 2>/dev/null | grep -q "${{ env.SERVICE_NAME }}"; then
-            
-            echo "✅ Found existing Cloud Run service: ${{ env.SERVICE_NAME }}"
-            echo "Importing into Terraform state..."
-            
-            terraform import google_cloud_run_service.vision_inference_api \
-              "locations/${{ env.REGION }}/namespaces/${{ env.PROJECT_ID }}/services/${{ env.SERVICE_NAME }}" 2>/dev/null && \
-              echo "✅ Cloud Run service imported successfully" || \
-              echo "⚠️  Service may already be in state or import failed (continuing...)"
-          else
-            echo "ℹ️  Cloud Run service does not exist (will be created)"
+          SERVICE_NAME="${{ env.SERVICE_NAME }}"
+          REGION="${{ env.REGION }}"
+          PROJECT_ID="${{ env.PROJECT_ID }}"
+          
+          echo "Searching for service: ${SERVICE_NAME}"
+          echo "Region: ${REGION}"
+          echo "Project: ${PROJECT_ID}"
+          echo ""
+          
+          # Check current Terraform state
+          echo "Current Terraform state:"
+          terraform state list 2>/dev/null || echo "  (no state yet)"
+          echo ""
+          
+          # List all Cloud Run services to see what exists
+          echo "Listing all Cloud Run services in region ${REGION}..."
+          gcloud run services list \
+            --region=${REGION} \
+            --project=${PROJECT_ID} \
+            --format="table(metadata.name,status.url)" || echo "  (failed to list services)"
+          echo ""
+          
+          # Try to describe the service (more reliable check)
+          echo "Checking if service '${SERVICE_NAME}' exists..."
+          SERVICE_EXISTS=false
+          
+          # Method 1: Try describe command
+          if gcloud run services describe "${SERVICE_NAME}" \
+            --region="${REGION}" \
+            --project="${PROJECT_ID}" \
+            --format="value(metadata.name)" 2>/dev/null | grep -q "${SERVICE_NAME}"; then
+            SERVICE_EXISTS=true
           fi
           
+          # Method 2: Check in list output
+          if [ "$SERVICE_EXISTS" = false ]; then
+            if gcloud run services list \
+              --region="${REGION}" \
+              --project="${PROJECT_ID}" \
+              --format="value(metadata.name)" 2>/dev/null | grep -q "^${SERVICE_NAME}$"; then
+              SERVICE_EXISTS=true
+            fi
+          fi
+          
+          if [ "$SERVICE_EXISTS" = true ]; then
+            echo "✅ Found existing Cloud Run service: ${SERVICE_NAME}"
+            
+            # Check if already in state
+            if terraform state show google_cloud_run_service.vision_inference_api >/dev/null 2>&1; then
+              echo "ℹ️  Service already in Terraform state (skipping import)"
+            else
+              echo "Importing into Terraform state..."
+              IMPORT_RESOURCE="locations/${REGION}/namespaces/${PROJECT_ID}/services/${SERVICE_NAME}"
+              echo "Import command: terraform import google_cloud_run_service.vision_inference_api ${IMPORT_RESOURCE}"
+              
+              terraform import google_cloud_run_service.vision_inference_api "${IMPORT_RESOURCE}"
+              
+              if [ $? -eq 0 ]; then
+                echo "✅ Cloud Run service imported successfully"
+              else
+                echo "❌ Import failed - check error above"
+                echo "⚠️  Continuing anyway - Terraform will try to create (may fail if exists)"
+              fi
+            fi
+          else
+            echo "ℹ️  Cloud Run service '${SERVICE_NAME}' not found in GCP"
+            echo "   Will be created by Terraform"
+          fi
+          
+          echo ""
+          echo "Final Terraform state:"
+          terraform state list 2>/dev/null || echo "  (no state)"
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         continue-on-error: true
@@ -142,6 +197,22 @@ jobs:
         run: |
           echo "Creating Terraform execution plan..."
           terraform plan -no-color -out=tfplan
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Plan Summary Check"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Check if plan is trying to create Cloud Run service (shouldn't if imported)
+          if terraform show tfplan 2>/dev/null | grep -q 'google_cloud_run_service.vision_inference_api.*will be created'; then
+            echo "⚠️  WARNING: Plan shows Cloud Run service will be CREATED"
+            echo "   This means the service wasn't imported or doesn't exist"
+            echo "   If service exists, check import step above for errors"
+          else
+            echo "✅ Cloud Run service is not being created (already exists or will be updated)"
+          fi
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         continue-on-error: false
 
       - name: Show Terraform Plan
