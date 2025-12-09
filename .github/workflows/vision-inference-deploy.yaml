@@ -272,7 +272,7 @@ jobs:
 
       - name: Upload deployment info
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: vision-inference-deployment-info
           path: deployment-info/vision-inference-deployment.json
