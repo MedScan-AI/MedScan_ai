@@ -374,7 +374,7 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
                     filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${var.service_name}\" AND metric.type=\"run.googleapis.com/container/cpu/utilizations\""
                     aggregation = {
                       alignmentPeriod     = "60s"
-                      perSeriesAligner    = "ALIGN_MEAN"
+                      perSeriesAligner    = "ALIGN_PERCENTILE_50"
                       crossSeriesReducer  = "REDUCE_MEAN"
                     }
                   }
@@ -403,7 +403,7 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
                     filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${var.service_name}\" AND metric.type=\"run.googleapis.com/container/memory/utilizations\""
                     aggregation = {
                       alignmentPeriod     = "60s"
-                      perSeriesAligner    = "ALIGN_MEAN"
+                      perSeriesAligner    = "ALIGN_PERCENTILE_50"
                       crossSeriesReducer  = "REDUCE_MEAN"
                     }
                   }
