@@ -94,24 +94,24 @@ resource "google_monitoring_alert_policy" "high_latency" {
 # Alert Policy: Service Unavailable (No requests in 5 minutes)
 resource "google_monitoring_alert_policy" "service_unavailable" {
   count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - Service Unavailable"
+  display_name = "Vision Inference API - Service Unavailable (5h window)"
   combiner     = "OR"
   enabled      = true
 
   conditions {
-    display_name = "No requests in 5 minutes (service may be down)"
+    display_name = "No requests in 5 hours (service may be down)"
 
     condition_threshold {
       filter          = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${var.service_name}\" AND metric.type=\"run.googleapis.com/request_count\""
-      duration        = "300s"
+      duration        = "18000s" # 5 hours
       comparison      = "COMPARISON_LT"
       threshold_value = 1
 
       aggregations {
-        alignment_period   = "300s"
-        per_series_aligner = "ALIGN_RATE"
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
         cross_series_reducer = "REDUCE_SUM"
-        group_by_fields    = ["resource.label.service_name"]
+        group_by_fields      = ["resource.label.service_name"]
       }
     }
   }
@@ -217,12 +217,12 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
 
     condition_threshold {
       filter          = "metric.type=\"logging.googleapis.com/user/low_confidence_predictions\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${var.service_name}\""
-      duration        = "30s"
+      duration        = "60s"
       comparison      = "COMPARISON_GT"
       threshold_value = 2
 
       aggregations {
-        alignment_period     = "30s"
+        alignment_period     = "60s"
         per_series_aligner   = "ALIGN_DELTA"
         cross_series_reducer = "REDUCE_SUM"
         group_by_fields      = ["resource.label.service_name"]
