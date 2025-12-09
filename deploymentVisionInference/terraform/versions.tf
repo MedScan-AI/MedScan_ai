@@ -7,6 +7,12 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Remote state backend (uncomment to use persistent state in GCS)
+  # backend "gcs" {
+  #   bucket = "medscan-pipeline-medscanai-476500"
+  #   prefix = "terraform/vision-inference/state"
+  # }
 }
 
 provider "google" {

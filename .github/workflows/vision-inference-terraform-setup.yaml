@@ -102,6 +102,35 @@ jobs:
           echo "Initializing Terraform..."
           terraform init
 
+      - name: Auto-Import Existing Resources
+        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'plan')
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Checking for existing resources to import..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          
+          # Check if Cloud Run service exists
+          if gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format="value(metadata.name)" 2>/dev/null | grep -q "${{ env.SERVICE_NAME }}"; then
+            
+            echo "✅ Found existing Cloud Run service: ${{ env.SERVICE_NAME }}"
+            echo "Importing into Terraform state..."
+            
+            terraform import google_cloud_run_service.vision_inference_api \
+              "locations/${{ env.REGION }}/namespaces/${{ env.PROJECT_ID }}/services/${{ env.SERVICE_NAME }}" 2>/dev/null && \
+              echo "✅ Cloud Run service imported successfully" || \
+              echo "⚠️  Service may already be in state or import failed (continuing...)"
+          else
+            echo "ℹ️  Cloud Run service does not exist (will be created)"
+          fi
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        continue-on-error: true
+
       - name: Terraform Validate
         id: validate
         run: |
