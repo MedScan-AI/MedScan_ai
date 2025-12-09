@@ -1,5 +1,11 @@
 name: Vision Inference - Terraform Setup
 
+# ⚠️ MANUAL TRIGGER ONLY - This workflow must be run manually from GitHub Actions UI
+# It provisions infrastructure using Terraform and should be run:
+#   1. First time setup (action=apply)
+#   2. Infrastructure changes (action=plan then apply)
+#   3. Infrastructure teardown (action=destroy)
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,11 +24,12 @@ on:
         default: false
         type: boolean
 
-  push:
-    branches: [main]
-    paths:
-      - "deploymentVisionInference/terraform/**"
-      - ".github/workflows/vision-inference-terraform-setup.yaml"
+  # Automatic trigger disabled - run manually only via GitHub Actions UI
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "deploymentVisionInference/terraform/**"
+  #     - ".github/workflows/vision-inference-terraform-setup.yaml"
 
 jobs:
   terraform:
@@ -117,13 +124,11 @@ jobs:
             })
 
       - name: Terraform Apply
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
         run: |
           echo "Applying Terraform configuration..."
           
-          if [ "${{ github.event.inputs.auto_approve }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
             terraform apply -auto-approve tfplan
           else
             echo "⚠️ Manual approval required. Set auto_approve=true to apply automatically."
@@ -207,9 +212,7 @@ jobs:
           fi
 
       - name: Get Terraform Outputs
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
         id: outputs
         run: |
           echo "Fetching Terraform outputs..."
@@ -223,9 +226,7 @@ jobs:
           echo "api_docs=${API_DOCS}" >> $GITHUB_OUTPUT
 
       - name: Test Deployed Infrastructure
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
         run: |
           SERVICE_URL="${{ steps.outputs.outputs.service_url }}"
           
@@ -265,7 +266,7 @@ jobs:
           echo "  • Cloud Build: https://console.cloud.google.com/cloud-build?project=${{ env.PROJECT_ID }}"
           echo ""
           
-          if [ "${{ github.event.inputs.action }}" = "apply" ] || [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ github.event.inputs.action }}" = "apply" ]; then
             echo "🚀 Next Steps:"
             echo "  1. Deploy the application using: vision-inference-deploy.yaml workflow"
             echo "  2. Or manually run: gcloud builds submit --config=ModelDevelopment/VisionInference/cloudbuild.yaml"
@@ -281,9 +282,7 @@ jobs:
           retention-days: 7
 
       - name: Save Terraform State Info
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
         run: |
           mkdir -p ../../../terraform-state-info
           
@@ -303,9 +302,7 @@ jobs:
           cat ../../../terraform-state-info/infrastructure-state.json
 
       - name: Upload Infrastructure State
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
         uses: actions/upload-artifact@v4
         with:
           name: infrastructure-state-info
@@ -319,7 +316,7 @@ jobs:
           echo "Check the logs above for errors."
           echo ""
           echo "To fix manually:"
-          echo "  1. cd ModelDevelopment/VisionInference/terraform"
+          echo "  1. cd deploymentVisionInference/terraform"
           echo "  2. terraform init"
           echo "  3. terraform plan"
           echo "  4. Review and fix issues"

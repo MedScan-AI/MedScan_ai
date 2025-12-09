@@ -7,12 +7,13 @@ This document describes the automated deployment pipeline for the Vision Inferen
 ### GitHub Actions Workflows
 - **`.github/workflows/vision-inference-terraform-setup.yaml`**
   - Infrastructure provisioning workflow (Terraform)
-  - One-time setup or manual trigger
+  - **Manual trigger only** (workflow_dispatch)
   - Creates Cloud Run, Artifact Registry, IAM permissions
+  - Run from: Actions → Vision Inference - Terraform Setup
   
 - **`.github/workflows/vision-inference-deploy.yaml`**
   - Application deployment workflow
-  - Triggers on changes to `ModelDevelopment/VisionInference/`
+  - **Automatic** trigger on changes to `ModelDevelopment/VisionInference/`
   - Automatically deploys to Cloud Run
 
 ### Documentation
@@ -33,20 +34,14 @@ This document describes the automated deployment pipeline for the Vision Inferen
 
 If infrastructure doesn't exist yet, run the Terraform workflow:
 
-**Via GitHub Actions UI:**
+**Via GitHub Actions UI (Manual Only):**
 1. Go to: **Actions → Vision Inference - Terraform Setup**
 2. Click: **Run workflow**
 3. Select:
    - Action: `plan` (to preview changes)
    - Then run again with: `apply` + auto_approve=true
 
-**Or push changes to:**
-```bash
-git add deploymentVisionInference/terraform/
-git commit -m "Update Terraform config"
-git push origin main
-# This will run `terraform plan` only
-```
+**Note:** This workflow does NOT run automatically on push. You must trigger it manually from GitHub Actions UI.
 
 **What it creates:**
 - ✅ Artifact Registry repository
@@ -375,25 +370,28 @@ gcloud run services update-traffic vision-inference-api \
 
 ### When to Use Which Workflow?
 
-| Workflow | Purpose | When to Run | Frequency |
-|----------|---------|-------------|-----------|
-| **vision-inference-terraform-setup.yaml** | Infrastructure provisioning | First-time setup, infrastructure changes | Once / Rarely |
-| **vision-inference-deploy.yaml** | Application deployment | Code changes, model updates | Every push to main |
+| Workflow | Purpose | When to Run | Trigger | Frequency |
+|----------|---------|-------------|---------|-----------|
+| **vision-inference-terraform-setup.yaml** | Infrastructure provisioning | First-time setup, infrastructure changes | **Manual only** (GitHub UI) | Once / Rarely |
+| **vision-inference-deploy.yaml** | Application deployment | Code changes, model updates | **Automatic** (on push) | Every push to main |
 
 ### Typical Setup Sequence
 
 ```
-1. Run Terraform Setup (once)
+1. Run Terraform Setup (manual - once)
    ↓
+   Go to: Actions → Vision Inference - Terraform Setup → Run workflow
    Creates: Cloud Run, Artifact Registry, IAM
 
 2. Run Application Deploy (automatic)
    ↓
+   Push code changes or manually trigger
    Builds: Docker image, deploys to Cloud Run
 
 3. Code changes (automatic)
    ↓
-   Triggers: Application Deploy workflow
+   Push to main branch
+   Triggers: Application Deploy workflow automatically
 ```
 
 ### Manual Workflow Triggers
