@@ -9,50 +9,37 @@ resource "google_project_service" "monitoring_api" {
   disable_on_destroy = false
 }
 
-# Alert policy names reused for lookups and creation
-locals {
-  alert_policy_display_names = {
-    high_error_rate        = "Vision Inference API - High Error Rate"
-    high_latency           = "Vision Inference API - High Latency (P95 > 5s)"
-    service_unavailable    = "Vision Inference API - Service Unavailable (5h window)"
-    high_cpu               = "Vision Inference API - High CPU Usage"
-    high_memory            = "Vision Inference API - High Memory Usage"
-    low_confidence_streak  = "Vision Inference API - Low Confidence Streak"
-  }
-  dashboard_display_name = "Vision Inference API - Monitoring Dashboard"
-}
-
-# Discover existing alerting policies by display name so we don't recreate them
-data "google_monitoring_alert_policy" "existing_alert_policies" {
-  for_each = var.enable_monitoring ? local.alert_policy_display_names : {}
-  project  = var.project_id
-  filter   = "display_name = \"${each.value}\""
-}
-
-# Discover existing dashboard by display name so we don't recreate it
-data "google_monitoring_dashboard" "existing_dashboard" {
-  count   = var.enable_monitoring ? 1 : 0
-  project = var.project_id
-  filter  = "display_name = \"${local.dashboard_display_name}\""
-}
-
-# Helper flag to decide whether to create each policy (skip if it already exists)
-locals {
-  should_create_alert_policy = {
-    for key, value in local.alert_policy_display_names :
-    key => try(length(data.google_monitoring_alert_policy.existing_alert_policies[key].alert_policies), 0) == 0
-  }
-  should_create_dashboard = var.enable_monitoring ? try(length(data.google_monitoring_dashboard.existing_dashboard[0].dashboards), 0) == 0 : false
-  monitoring_dashboard_id = var.enable_monitoring ? try(
-    google_monitoring_dashboard.vision_inference_dashboard[0].id,
-    replace(
-      data.google_monitoring_dashboard.existing_dashboard[0].dashboards[0].name,
-      "projects/${var.project_id}/dashboards/",
-      ""
-    ),
-    ""
-  ) : ""
-}
+################################################################################
+# IMPORTANT: Preventing Recreation of Existing Monitoring Resources
+################################################################################
+#
+# If alert policies or dashboards already exist, you MUST import them into
+# Terraform state to prevent recreation. All monitoring resources have
+# lifecycle { prevent_destroy = true } to protect against accidental deletion.
+#
+# To import existing monitoring resources:
+#
+# 1. Find existing alert policy IDs:
+#    gcloud alpha monitoring policies list --project=YOUR_PROJECT_ID --format="table(name,displayName)"
+#
+# 2. Import each alert policy (replace POLICY_ID with actual ID):
+#    terraform import 'google_monitoring_alert_policy.high_error_rate[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#    terraform import 'google_monitoring_alert_policy.high_latency[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#    terraform import 'google_monitoring_alert_policy.service_unavailable[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#    terraform import 'google_monitoring_alert_policy.high_cpu[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#    terraform import 'google_monitoring_alert_policy.high_memory[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#    terraform import 'google_monitoring_alert_policy.low_confidence_streak[0]' projects/PROJECT_ID/alertPolicies/POLICY_ID
+#
+# 3. Find existing dashboard ID:
+#    gcloud monitoring dashboards list --project=YOUR_PROJECT_ID --format="table(name,displayName)"
+#
+# 4. Import the dashboard (replace DASHBOARD_ID with actual ID):
+#    terraform import 'google_monitoring_dashboard.vision_inference_dashboard[0]' projects/PROJECT_ID/dashboards/DASHBOARD_ID
+#
+# After importing, run 'terraform plan' - it should show no changes if the
+# configuration matches your existing resources.
+#
+################################################################################
 
 # Notification channel for alerts (email)
 # Note: Requires roles/monitoring.notificationChannelEditor permission
@@ -70,8 +57,8 @@ resource "google_monitoring_notification_channel" "email" {
 
 # Alert Policy: High Error Rate
 resource "google_monitoring_alert_policy" "high_error_rate" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.high_error_rate ? 1 : 0
-  display_name = local.alert_policy_display_names.high_error_rate
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - High Error Rate"
   combiner     = "OR"
   enabled      = true
 
@@ -103,13 +90,19 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      # Ignore changes to enabled state in case it's toggled manually
+      enabled
+    ]
+  }
 }
 
 # Alert Policy: High Latency (P95 > 5 seconds)
 resource "google_monitoring_alert_policy" "high_latency" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.high_latency ? 1 : 0
-  display_name = local.alert_policy_display_names.high_latency
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - High Latency (P95 > 5s)"
   combiner     = "OR"
   enabled      = true
 
@@ -133,13 +126,16 @@ resource "google_monitoring_alert_policy" "high_latency" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [enabled]
+  }
 }
 
 # Alert Policy: Service Unavailable (No requests in 5 minutes)
 resource "google_monitoring_alert_policy" "service_unavailable" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.service_unavailable ? 1 : 0
-  display_name = local.alert_policy_display_names.service_unavailable
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - Service Unavailable (5h window)"
   combiner     = "OR"
   enabled      = true
 
@@ -163,13 +159,16 @@ resource "google_monitoring_alert_policy" "service_unavailable" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [enabled]
+  }
 }
 
 # Alert Policy: High CPU Usage
 resource "google_monitoring_alert_policy" "high_cpu" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.high_cpu ? 1 : 0
-  display_name = local.alert_policy_display_names.high_cpu
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - High CPU Usage"
   combiner     = "OR"
   enabled      = true
 
@@ -193,13 +192,16 @@ resource "google_monitoring_alert_policy" "high_cpu" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [enabled]
+  }
 }
 
 # Alert Policy: High Memory Usage
 resource "google_monitoring_alert_policy" "high_memory" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.high_memory ? 1 : 0
-  display_name = local.alert_policy_display_names.high_memory
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - High Memory Usage"
   combiner     = "OR"
   enabled      = true
 
@@ -223,7 +225,10 @@ resource "google_monitoring_alert_policy" "high_memory" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [enabled]
+  }
 }
 
 # Log-based metric for low-confidence predictions
@@ -247,8 +252,8 @@ resource "google_logging_metric" "low_confidence_predictions" {
 
 # Alert Policy: Consecutive low-confidence predictions (>=3 within 30s)
 resource "google_monitoring_alert_policy" "low_confidence_streak" {
-  count        = var.enable_monitoring && local.should_create_alert_policy.low_confidence_streak ? 1 : 0
-  display_name = local.alert_policy_display_names.low_confidence_streak
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Vision Inference API - Low Confidence Streak"
   combiner     = "OR"
   enabled      = true
 
@@ -271,13 +276,18 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
   }
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [enabled]
+  }
 }
 
 # Monitoring Dashboard
 resource "google_monitoring_dashboard" "vision_inference_dashboard" {
-  count        = var.enable_monitoring && local.should_create_dashboard ? 1 : 0
+  count        = var.enable_monitoring ? 1 : 0
   dashboard_json = jsonencode({
-    displayName = local.dashboard_display_name
+    displayName = "Vision Inference API - Monitoring Dashboard"
     mosaicLayout = {
       columns = 12
       tiles = [
@@ -491,5 +501,7 @@ resource "google_monitoring_dashboard" "vision_inference_dashboard" {
     }
   })
 
-  # depends_on removed - Terraform will infer dependencies
+  lifecycle {
+    prevent_destroy = true
+  }
 }
