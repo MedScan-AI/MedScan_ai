@@ -46,13 +46,9 @@ output "cloudbuild_service_account" {
 # Monitoring outputs
 output "monitoring_dashboard_url" {
   description = "URL to the monitoring dashboard"
-  value = var.enable_monitoring && local.monitoring_dashboard_id != "" ?
-    format(
-      "https://console.cloud.google.com/monitoring/dashboards/custom/%s?project=%s",
-      local.monitoring_dashboard_id,
-      var.project_id
-    ) :
-    "Monitoring disabled"
+  value = (var.enable_monitoring && local.monitoring_dashboard_id != "")
+    ? format("https://console.cloud.google.com/monitoring/dashboards/custom/%s?project=%s", local.monitoring_dashboard_id, var.project_id)
+    : "Monitoring disabled"
 }
 
 output "monitoring_alerts" {
