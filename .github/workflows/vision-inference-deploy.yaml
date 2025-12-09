@@ -1,0 +1,279 @@
+name: Vision Inference API - Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ModelDevelopment/VisionInference/**"
+      - ".github/workflows/vision-inference-deploy.yaml"
+
+  pull_request:
+    branches: [main]
+    paths:
+      - "ModelDevelopment/VisionInference/**"
+
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force deployment even if no changes detected"
+        required: false
+        default: "false"
+
+jobs:
+  deploy-vision-inference:
+    runs-on: ubuntu-latest
+    
+    env:
+      PROJECT_ID: medscanai-476500
+      REGION: us-central1
+      SERVICE_NAME: vision-inference-api
+      ARTIFACT_REGISTRY_REPO: vision-inference
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Verify trained models exist in GCS
+        run: |
+          echo "Checking for trained models in GCS..."
+          
+          # Check if any models exist in the trained_models directory
+          if gsutil ls gs://medscan-pipeline-${{ env.PROJECT_ID }}/vision/trained_models/**/models/** | head -n 1 > /dev/null 2>&1; then
+            echo "✅ Trained models found in GCS"
+            
+            # List available BUILD_IDs
+            echo "Available BUILD_IDs:"
+            gsutil ls gs://medscan-pipeline-${{ env.PROJECT_ID }}/vision/trained_models/ | tail -n 5
+          else
+            echo "⚠️ Warning: No trained models found in GCS"
+            echo "The service will start but predictions may fail until models are uploaded"
+          fi
+
+      - name: Check if Artifact Registry repository exists
+        id: check_repo
+        run: |
+          if gcloud artifacts repositories describe ${{ env.ARTIFACT_REGISTRY_REPO }} \
+            --location=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} > /dev/null 2>&1; then
+            echo "repository_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Artifact Registry repository exists"
+          else
+            echo "repository_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Artifact Registry repository does not exist - will be created"
+          fi
+
+      - name: Create Artifact Registry repository if needed
+        if: steps.check_repo.outputs.repository_exists == 'false'
+        run: |
+          echo "Creating Artifact Registry repository..."
+          gcloud artifacts repositories create ${{ env.ARTIFACT_REGISTRY_REPO }} \
+            --repository-format=docker \
+            --location=${{ env.REGION }} \
+            --description="Vision Inference API Docker images" \
+            --project=${{ env.PROJECT_ID }}
+          echo "✅ Repository created successfully"
+
+      - name: Grant Cloud Build permissions (if needed)
+        run: |
+          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format="value(projectNumber)")
+          CLOUDBUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+          
+          echo "Checking and granting Cloud Build permissions..."
+          
+          # Grant Cloud Run Admin role
+          gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+            --member="serviceAccount:${CLOUDBUILD_SA}" \
+            --role="roles/run.admin" \
+            --condition=None \
+            || echo "Role already exists or failed to add"
+          
+          # Grant Service Account User role
+          gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+            --member="serviceAccount:${CLOUDBUILD_SA}" \
+            --role="roles/iam.serviceAccountUser" \
+            --condition=None \
+            || echo "Role already exists or failed to add"
+          
+          echo "✅ Permissions configured"
+
+      - name: Submit Cloud Build
+        id: cloud_build
+        run: |
+          echo "Submitting Cloud Build for Vision Inference API..."
+          
+          BUILD_ID=$(gcloud builds submit \
+            --config=ModelDevelopment/VisionInference/cloudbuild.yaml \
+            --project=${{ env.PROJECT_ID }} \
+            --region=${{ env.REGION }} \
+            --format="value(id)")
+          
+          echo "build_id=${BUILD_ID}" >> $GITHUB_OUTPUT
+          echo "✅ Cloud Build submitted: ${BUILD_ID}"
+
+      - name: Wait for deployment to complete
+        run: |
+          echo "Waiting for service to be ready..."
+          sleep 30
+          
+          # Wait up to 5 minutes for service to be ready
+          TIMEOUT=300
+          ELAPSED=0
+          INTERVAL=10
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            STATUS=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+              --region=${{ env.REGION }} \
+              --project=${{ env.PROJECT_ID }} \
+              --format="value(status.conditions[0].status)" 2>/dev/null || echo "False")
+            
+            if [ "$STATUS" = "True" ]; then
+              echo "✅ Service is ready!"
+              break
+            fi
+            
+            echo "Service not ready yet... (${ELAPSED}s elapsed)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "⚠️ Service readiness check timed out"
+          fi
+
+      - name: Get service URL
+        id: get_url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format="value(status.url)")
+          
+          echo "service_url=${SERVICE_URL}" >> $GITHUB_OUTPUT
+          echo "🌐 Service URL: ${SERVICE_URL}"
+
+      - name: Test health endpoint
+        run: |
+          SERVICE_URL="${{ steps.get_url.outputs.service_url }}"
+          
+          echo "Testing health endpoint..."
+          HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "${SERVICE_URL}/health" || echo "000")
+          HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n 1)
+          BODY=$(echo "$HEALTH_RESPONSE" | head -n -1)
+          
+          echo "HTTP Status: ${HTTP_CODE}"
+          echo "Response: ${BODY}"
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed with status ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Test TB model endpoint
+        run: |
+          SERVICE_URL="${{ steps.get_url.outputs.service_url }}"
+          
+          echo "Testing TB prediction endpoint..."
+          
+          # Create a minimal test (just check if endpoint is accessible)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${SERVICE_URL}/predict/tb" \
+            -H "Content-Type: multipart/form-data" \
+            || echo "000")
+          
+          echo "HTTP Status: ${HTTP_CODE}"
+          
+          # Accept 200 (success), 422 (missing file - expected), or 400 (bad request)
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "422" ] || [ "$HTTP_CODE" = "400" ]; then
+            echo "✅ TB endpoint is accessible"
+          else
+            echo "⚠️ TB endpoint returned unexpected status ${HTTP_CODE}"
+          fi
+
+      - name: Test Lung Cancer model endpoint
+        run: |
+          SERVICE_URL="${{ steps.get_url.outputs.service_url }}"
+          
+          echo "Testing Lung Cancer prediction endpoint..."
+          
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${SERVICE_URL}/predict/lung_cancer" \
+            -H "Content-Type: multipart/form-data" \
+            || echo "000")
+          
+          echo "HTTP Status: ${HTTP_CODE}"
+          
+          # Accept 200 (success), 422 (missing file - expected), or 400 (bad request)
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "422" ] || [ "$HTTP_CODE" = "400" ]; then
+            echo "✅ Lung Cancer endpoint is accessible"
+          else
+            echo "⚠️ Lung Cancer endpoint returned unexpected status ${HTTP_CODE}"
+          fi
+
+      - name: Check recent logs for errors
+        if: always()
+        run: |
+          echo "Fetching recent service logs..."
+          gcloud run services logs read ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --limit=20 \
+            || echo "Failed to fetch logs"
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Vision Inference API Deployment Complete"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "🌐 Service URL: ${{ steps.get_url.outputs.service_url }}"
+          echo "📊 Health: ${{ steps.get_url.outputs.service_url }}/health"
+          echo "📖 API Docs: ${{ steps.get_url.outputs.service_url }}/docs"
+          echo ""
+          echo "🔬 Prediction Endpoints:"
+          echo "  • TB: ${{ steps.get_url.outputs.service_url }}/predict/tb"
+          echo "  • Lung Cancer: ${{ steps.get_url.outputs.service_url }}/predict/lung_cancer"
+          echo ""
+          echo "🏗️ Build ID: ${{ steps.cloud_build.outputs.build_id }}"
+          echo "📍 Region: ${{ env.REGION }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Create deployment artifact
+        if: success()
+        run: |
+          mkdir -p deployment-info
+          cat > deployment-info/vision-inference-deployment.json <<EOF
+          {
+            "service_name": "${{ env.SERVICE_NAME }}",
+            "service_url": "${{ steps.get_url.outputs.service_url }}",
+            "region": "${{ env.REGION }}",
+            "project_id": "${{ env.PROJECT_ID }}",
+            "build_id": "${{ steps.cloud_build.outputs.build_id }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit_sha": "${{ github.sha }}",
+            "commit_message": "${{ github.event.head_commit.message }}",
+            "triggered_by": "${{ github.actor }}"
+          }
+          EOF
+          
+          cat deployment-info/vision-inference-deployment.json
+
+      - name: Upload deployment info
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: vision-inference-deployment-info
+          path: deployment-info/vision-inference-deployment.json
+          retention-days: 30

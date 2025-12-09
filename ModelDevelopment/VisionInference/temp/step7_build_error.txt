@@ -1,3 +1,0 @@
-ERROR: (gcloud.run.deploy) Invalid resource name [vision-inference-api _REGION=us-central1]. The name must use only lowercase alphanumeric characters and dashes, cannot begin or end with a dash, and cannot be longer than 63 characters.
-
-Issue: The substitutions are not being parsed correctly in the cloudbuild.yaml

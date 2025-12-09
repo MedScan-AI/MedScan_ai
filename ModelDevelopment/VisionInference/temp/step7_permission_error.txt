@@ -1,3 +1,0 @@
-ERROR: (gcloud.run.deploy) [246542889931-compute@developer.gserviceaccount.com] does not have permission to access namespaces instance [medscanai-476500] (or it may not exist): Permission 'iam.serviceaccounts.actAs' denied on service account medscanai-476500@appspot.gserviceaccount.com (or it may not exist).
-
-Issue: Cloud Build service account lacks permission to deploy to Cloud Run

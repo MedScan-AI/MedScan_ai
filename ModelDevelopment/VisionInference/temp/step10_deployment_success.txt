@@ -1,6 +1,0 @@
-SUCCESS! Deployment completed successfully.
-
-Service [vision-inference-api] revision [vision-inference-api-00001-kxz] has been deployed and is serving 100 percent of traffic.
-
-Service URL: https://vision-inference-api-246542889931.us-central1.run.app
-

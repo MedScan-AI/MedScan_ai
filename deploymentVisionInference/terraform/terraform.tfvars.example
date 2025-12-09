@@ -1,0 +1,21 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and customize as needed
+
+project_id         = "medscanai-476500"
+region             = "us-central1"
+service_name       = "vision-inference-api"
+repository_name    = "vision-inference"
+gcs_bucket_name    = "medscan-pipeline-medscanai-476500"
+gcs_models_prefix  = "vision/trained_models"
+
+# Cloud Run configuration
+memory                 = "2Gi"
+cpu                    = "1"
+min_instances          = 0
+max_instances          = 3
+timeout                = 300
+allow_unauthenticated  = true
+
+# Optional: Specify a specific container image
+# Leave empty to use latest from Artifact Registry
+# container_image = "us-central1-docker.pkg.dev/medscanai-476500/vision-inference/vision-inference:latest"
