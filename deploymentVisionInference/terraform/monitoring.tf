@@ -9,6 +9,51 @@ resource "google_project_service" "monitoring_api" {
   disable_on_destroy = false
 }
 
+# Alert policy names reused for lookups and creation
+locals {
+  alert_policy_display_names = {
+    high_error_rate        = "Vision Inference API - High Error Rate"
+    high_latency           = "Vision Inference API - High Latency (P95 > 5s)"
+    service_unavailable    = "Vision Inference API - Service Unavailable (5h window)"
+    high_cpu               = "Vision Inference API - High CPU Usage"
+    high_memory            = "Vision Inference API - High Memory Usage"
+    low_confidence_streak  = "Vision Inference API - Low Confidence Streak"
+  }
+  dashboard_display_name = "Vision Inference API - Monitoring Dashboard"
+}
+
+# Discover existing alerting policies by display name so we don't recreate them
+data "google_monitoring_alert_policy" "existing_alert_policies" {
+  for_each = var.enable_monitoring ? local.alert_policy_display_names : {}
+  project  = var.project_id
+  filter   = "display_name = \"${each.value}\""
+}
+
+# Discover existing dashboard by display name so we don't recreate it
+data "google_monitoring_dashboard" "existing_dashboard" {
+  count   = var.enable_monitoring ? 1 : 0
+  project = var.project_id
+  filter  = "display_name = \"${local.dashboard_display_name}\""
+}
+
+# Helper flag to decide whether to create each policy (skip if it already exists)
+locals {
+  should_create_alert_policy = {
+    for key, value in local.alert_policy_display_names :
+    key => try(length(data.google_monitoring_alert_policy.existing_alert_policies[key].alert_policies), 0) == 0
+  }
+  should_create_dashboard = var.enable_monitoring ? try(length(data.google_monitoring_dashboard.existing_dashboard[0].dashboards), 0) == 0 : false
+  monitoring_dashboard_id = var.enable_monitoring ? try(
+    google_monitoring_dashboard.vision_inference_dashboard[0].id,
+    replace(
+      data.google_monitoring_dashboard.existing_dashboard[0].dashboards[0].name,
+      "projects/${var.project_id}/dashboards/",
+      ""
+    ),
+    ""
+  ) : ""
+}
+
 # Notification channel for alerts (email)
 # Note: Requires roles/monitoring.notificationChannelEditor permission
 resource "google_monitoring_notification_channel" "email" {
@@ -25,8 +70,8 @@ resource "google_monitoring_notification_channel" "email" {
 
 # Alert Policy: High Error Rate
 resource "google_monitoring_alert_policy" "high_error_rate" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - High Error Rate"
+  count        = var.enable_monitoring && local.should_create_alert_policy.high_error_rate ? 1 : 0
+  display_name = local.alert_policy_display_names.high_error_rate
   combiner     = "OR"
   enabled      = true
 
@@ -63,8 +108,8 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
 
 # Alert Policy: High Latency (P95 > 5 seconds)
 resource "google_monitoring_alert_policy" "high_latency" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - High Latency (P95 > 5s)"
+  count        = var.enable_monitoring && local.should_create_alert_policy.high_latency ? 1 : 0
+  display_name = local.alert_policy_display_names.high_latency
   combiner     = "OR"
   enabled      = true
 
@@ -93,8 +138,8 @@ resource "google_monitoring_alert_policy" "high_latency" {
 
 # Alert Policy: Service Unavailable (No requests in 5 minutes)
 resource "google_monitoring_alert_policy" "service_unavailable" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - Service Unavailable (5h window)"
+  count        = var.enable_monitoring && local.should_create_alert_policy.service_unavailable ? 1 : 0
+  display_name = local.alert_policy_display_names.service_unavailable
   combiner     = "OR"
   enabled      = true
 
@@ -123,8 +168,8 @@ resource "google_monitoring_alert_policy" "service_unavailable" {
 
 # Alert Policy: High CPU Usage
 resource "google_monitoring_alert_policy" "high_cpu" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - High CPU Usage"
+  count        = var.enable_monitoring && local.should_create_alert_policy.high_cpu ? 1 : 0
+  display_name = local.alert_policy_display_names.high_cpu
   combiner     = "OR"
   enabled      = true
 
@@ -153,8 +198,8 @@ resource "google_monitoring_alert_policy" "high_cpu" {
 
 # Alert Policy: High Memory Usage
 resource "google_monitoring_alert_policy" "high_memory" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - High Memory Usage"
+  count        = var.enable_monitoring && local.should_create_alert_policy.high_memory ? 1 : 0
+  display_name = local.alert_policy_display_names.high_memory
   combiner     = "OR"
   enabled      = true
 
@@ -202,8 +247,8 @@ resource "google_logging_metric" "low_confidence_predictions" {
 
 # Alert Policy: Consecutive low-confidence predictions (>=3 within 30s)
 resource "google_monitoring_alert_policy" "low_confidence_streak" {
-  count        = var.enable_monitoring ? 1 : 0
-  display_name = "Vision Inference API - Low Confidence Streak"
+  count        = var.enable_monitoring && local.should_create_alert_policy.low_confidence_streak ? 1 : 0
+  display_name = local.alert_policy_display_names.low_confidence_streak
   combiner     = "OR"
   enabled      = true
 
@@ -230,9 +275,9 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
 
 # Monitoring Dashboard
 resource "google_monitoring_dashboard" "vision_inference_dashboard" {
-  count        = var.enable_monitoring ? 1 : 0
+  count        = var.enable_monitoring && local.should_create_dashboard ? 1 : 0
   dashboard_json = jsonencode({
-    displayName = "Vision Inference API - Monitoring Dashboard"
+    displayName = local.dashboard_display_name
     mosaicLayout = {
       columns = 12
       tiles = [
