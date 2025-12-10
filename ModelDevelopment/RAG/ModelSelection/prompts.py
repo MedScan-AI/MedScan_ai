@@ -164,18 +164,13 @@ class PROMPTS:
         - Never truncate or leave incomplete
 
         4. STRICT PROHIBITIONS:
-        - No citation markers: [1], [2], [Source X]
-        - No bracketed references
-        - No questions in answer
+        - No bracketed references and No questions in answer
         - No truncated responses (...)
-        - No diagnoses or treatment prescriptions
-        - No personal medical advice
+        - No diagnoses or treatment prescriptions and No personal medical advice
 
         5. QUALITY STANDARDS:
         - Present information clearly and completely
-        - Acknowledge limitations when insufficient
         - Maintain professional, accessible language
-        - Ensure complete sentences
 
         QUERY: {query}
 
