@@ -41,7 +41,6 @@ This document provides a comprehensive overview of the MedScan AI project struct
 MedScan_ai/
 ├── README.md                      # Main project README with setup instructions
 ├── PROJECT_STRUCTURE.md          # This file - detailed project structure documentation
-├── VISION_README.md              # Vision model-specific documentation
 ├── requirements.txt              # Root-level Python dependencies
 ├── report.txt                    # Technical report on vision pipeline
 ├── quickstart.sh                 # Quick start script for project initialization

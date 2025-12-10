@@ -1,56 +1,209 @@
 # MedScan AI
 
-AI-powered radiological assistant for CT scan analysis with explainable AI and patient engagement RAG to answer questions about their report's content.
+AI-powered radiological assistant for CT scan analysis with explainable AI and patient engagement RAG (Retrieval-Augmented Generation) to answer questions about medical report content.
 
-Note: This project is in the development phase. Repository structure, naming conventions, technology choices, and implementation details are subject to change based on ongoing technical discussions and requirements refinement.
+## Table of Contents
+
+- [About MedScan AI](#about-medscan-ai)
+- [Features](#features)
+- [Project Stages](#project-stages)
+- [Architecture](#architecture)
+- [Setup Instructions](#setup-instructions)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Manual Execution](#manual-execution)
+- [Monitoring & Alerts](#monitoring--alerts)
+- [Documentation](#documentation)
+
+---
 
 ## About MedScan AI
 
-Scope - Click [here](docs/Scoping.pdf) 
+MedScan AI is an end-to-end MLOps platform for medical image analysis and patient engagement. It combines:
 
-### High Level Architecture
+- **Vision Models**: Deep learning models for medical image classification (Tuberculosis detection, Lung Cancer detection)
+- **RAG System**: Retrieval-Augmented Generation for answering patient questions about medical reports
+- **Data Pipeline**: Automated data acquisition, preprocessing, validation, and bias detection
+- **Model Training**: Automated model selection, hyperparameter optimization, and deployment
+- **Monitoring**: Real-time performance monitoring with automated retraining triggers
 
-![Architecture](assets/high_level_architecture.png)
+**Project Scope**: See [docs/Scoping.pdf](docs/Scoping.pdf)
 
-## Getting Started
+---
+
+## Features
+
+### Data Pipeline Capabilities
+
+- ✅ **Automated Data Acquisition**: Fetches datasets from Kaggle with date partitioning
+- ✅ **Image Preprocessing**: Standardizes images to 224x224 JPEG format
+- ✅ **Synthetic Metadata Generation**: Creates realistic patient demographics using Faker
+- ✅ **Comprehensive Validation**: Schema validation, drift detection, anomaly detection
+- ✅ **Bias Detection & Mitigation**: Advanced fairness analysis using Fairlearn, SliceFinder, TFMA
+- ✅ **Data Versioning**: DVC integration with GCS for reproducibility
+- ✅ **RAG Knowledge Base**: Medical article scraping, chunking, embedding, and FAISS indexing
+- ✅ **Email Alerts**: Automated notifications for anomalies, drift, and bias
+
+### Model Training & Deployment
+
+- ✅ **Automated Model Training**: Cloud Build pipelines for Vision and RAG models
+- ✅ **Model Selection**: Hyperparameter optimization (Optuna) and multi-architecture comparison
+- ✅ **Model Validation**: Performance threshold checks before deployment
+- ✅ **Bias Detection**: Comprehensive bias checks during model training
+- ✅ **Endpoint Deployment**: Automatic deployment to Vertex AI endpoints (Vision) and Cloud Run (RAG)
+- ✅ **MLflow Tracking**: Experiment tracking and model versioning
+- ✅ **Email Notifications**: Training completion, validation failures, bias violations
+
+### Monitoring & Observability
+
+- ✅ **Real-time Monitoring**: Performance metrics, latency tracking, quality scores
+- ✅ **Automated Retraining**: Intelligent retraining triggers based on performance degradation
+- ✅ **Monitoring Dashboards**: GCP Monitoring dashboards with custom metrics
+- ✅ **Alert Policies**: 11 alert policies for production and quality issues
+- ✅ **Custom Metrics**: 7 log-based metrics for RAG quality tracking
+
+---
+
+## Project Stages
+
+The MedScan AI pipeline consists of **5 main stages**:
+
+### Stage 1: Data Pipeline
+
+**Purpose**: Acquire, preprocess, validate, and prepare data for training
+
+**Components**:
+- **Vision Pipeline**: Medical image data (TB X-rays, Lung Cancer CT scans)
+- **RAG Pipeline**: Medical knowledge base (scraped articles, research papers)
+
+**Outputs**:
+- Preprocessed images (224x224 JPEG)
+- Synthetic patient metadata
+- Validated datasets with bias mitigation
+- RAG knowledge base (embeddings, FAISS index)
+
+**Location**: `DataPipeline/`
+
+### Stage 2: Model Training
+
+**Purpose**: Train and select best models for Vision and RAG
+
+**Components**:
+- **Vision Training**: ResNet, ViT, Custom CNN architectures
+- **RAG Training**: Model selection with 7 LLM models, 4 retrieval strategies
+
+**Outputs**:
+- Trained models in Vertex AI Model Registry
+- Model performance metrics
+- Bias detection reports
+- MLflow experiment tracking
+
+**Location**: `ModelDevelopment/`
+
+### Stage 3: Model Deployment
+
+**Purpose**: Deploy models to production endpoints
+
+**Components**:
+- **Vision Inference**: Vertex AI endpoint deployment
+- **RAG Service**: Cloud Run service with GPU support
+
+**Outputs**:
+- Production endpoints (Vertex AI, Cloud Run)
+- Service URLs and health checks
+- Deployment configurations
+
+**Location**: `deployment/`, `deploymentVisionInference/`, `deploymentRAG/`
+
+### Stage 4: Monitoring Setup
+
+**Purpose**: Set up monitoring infrastructure and dashboards
+
+**Components**:
+- Custom log-based metrics
+- Monitoring dashboards
+- Alert policies
+- Notification channels
+
+**Outputs**:
+- GCP Monitoring dashboard
+- 11 alert policies
+- 7 custom metrics
+
+**Location**: `deploymentRAG/terraform/`, `Monitoring/`
+
+### Stage 5: Continuous Monitoring
+
+**Purpose**: Monitor production models and trigger retraining
+
+**Components**:
+- Performance metric collection
+- Drift detection
+- Quality score tracking
+- Automated retraining triggers
+
+**Outputs**:
+- Monitoring reports
+- Retraining decisions
+- Performance analytics
+
+**Location**: `Monitoring/RAG/`
+
+---
+
+## Architecture
+
+![High-Level Architecture](assets/high_level_architecture.png)
+
+### Key Components
+
+1. **Data Pipeline** (Airflow): Automated data processing and validation
+2. **Model Training** (Cloud Build): Automated model training and selection
+3. **Model Deployment** (Vertex AI, Cloud Run): Production inference endpoints
+4. **Monitoring** (GCP Monitoring): Real-time performance tracking
+5. **CI/CD** (GitHub Actions): Automated workflows for training and deployment
+
+---
+
+## Setup Instructions
+
+> **Note**: Naming conventions (project IDs, bucket names, service names, etc.) can be configured at the time of setup. Throughout this documentation, placeholders like `<YOUR-GCP_PROJECT_ID>` indicate values that should be customized for your environment.
 
 ### Prerequisites
 
-- **Python 3.10**
+- **Python 3.10+**
 - **Docker Desktop**
 - **Google Cloud Platform Account**
 - **Kaggle Account** (for dataset access)
 - **Git**
+- **HF token with access to the models**
 
-### Installation
+**Note**: Naming conventions (project IDs, bucket names, service names) can be configured at the time of setup. See configuration sections below for details.
 
-#### 1. Clone the Repository
+### 1. Clone Repository
 
 ```bash
-git clone https://github.com/rjaditya-2702/MedScan_ai.git
+git clone https://github.com/MedScan-AI/MedScan_ai.git
 cd MedScan_ai
 ```
 
-#### 2. Setup GCP Credentials
+### 2. Setup GCP Credentials
 
-Download your service account JSON key from GCP Console:
-
-1. Go to **IAM & Admin → Service Accounts**
-2. Select your service account
+1. Go to **IAM & Admin → Service Accounts** in GCP Console
+2. Select your service account (or create one)
 3. Click **Keys → Add Key → Create New Key → JSON**
 4. Save the file as `~/gcp-service-account.json`
 
-```bash
-# Verify credentials file
-ls -la ~/gcp-service-account.json
-```
-
-Required GCP Permissions:
-
+**Required GCP Permissions**:
 - Storage Admin
 - Storage Object Admin
+- Vertex AI User
+- Cloud Run Admin
+- Monitoring Admin
+- Secret Manager Secret Accessor
 
-#### 3. Setup Kaggle Credentials
+**Note**: Naming conventions (project IDs, bucket names, service names) can be configured at the time of setup. Default values in this documentation use placeholders like `<YOUR-GCP_PROJECT_ID>` - replace these with your actual values.
+
+### 3. Setup Kaggle Credentials
 
 ```bash
 # Create Kaggle directory
@@ -62,60 +215,23 @@ cp ~/Downloads/kaggle.json ~/.kaggle/
 chmod 600 ~/.kaggle/kaggle.json
 ```
 
-#### 4. Install Dependencies
+### 4. Configure GitHub Secrets
+
+Go to **GitHub Repository → Settings → Secrets and variables → Actions** and add:
+
+- `GCP_SA_KEY`: Service account JSON key (for GitHub Actions)
+- `SMTP_USER`: Email for notifications (optional)
+- `SMTP_PASSWORD`: Email app password (optional)
+
+### 5. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-#### 5. Configure Environment Variables
+### 6. Configure Environment Variables
 
-**Environment Variable Management:**
-
-The project uses **two `.env` files** for different purposes:
-
-1. **Root `.env`** (optional for local ModelDevelopment): For running ModelDevelopment scripts locally
-2. **`airflow/.env`** (required for Airflow): For Docker Compose and Airflow execution
-
-**Option 1: Single Root `.env` (Recommended for Local Development)**
-
-Create a `.env` file at the project root:
-```bash
-# Copy the template
-cp .env.example .env
-
-# Edit and fill in your values
-nano .env
-```
-
-**Option 2: System Environment Variables**
-
-Set environment variables in your shell:
-```bash
-# Add to ~/.zshrc or ~/.bashrc
-export GCP_PROJECT_ID="your-gcp-project-id"
-export GCS_BUCKET_NAME="your-gcs-bucket-name"
-```
-
-**Required Environment Variables:**
-```bash
-GCP_PROJECT_ID=your-gcp-project-id
-GCS_BUCKET_NAME=your-gcs-bucket-name
-```
-
-**Where Environment Variables Are Used:**
-
-| Context | Source | Notes |
-|---------|--------|-------|
-| **Local ModelDevelopment** | System env vars or root `.env` | Scripts use `os.getenv()` directly |
-| **Airflow/Docker** | `airflow/.env` | Loaded by Docker Compose |
-| **Cloud Build** | Substitution variables | Set in Cloud Build config |
-
-**Note:** If environment variables are not set, some scripts may fall back to default values (for backward compatibility), but this is **not recommended for production use**.
-
-**Create `airflow/.env` file (for Docker/Airflow):**
-
-The `airflow/.env` file is specifically for Airflow Docker Compose. It should include both Airflow-specific settings AND the shared GCP configuration.
+Create `airflow/.env` file:
 
 ```bash
 cd airflow
@@ -129,25 +245,15 @@ cat > .env << 'EOF'
 AIRFLOW__CORE__FERNET_KEY=<your-generated-fernet-key>
 AIRFLOW__WEBSERVER__SECRET_KEY=<random-secret-key>
 AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-
-# Airflow User
-AIRFLOW__CORE__FERNET_KEY=your-existing-fernet-key
-AIRFLOW__WEBSERVER__SECRET_KEY=your-existing-secret-key
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-
 AIRFLOW_UID=50000
 AIRFLOW_GID=0
 AIRFLOW_USERNAME=airflow
 AIRFLOW_PASSWORD=airflow123
-AIRFLOW_FIRSTNAME=Admin
-AIRFLOW_LASTNAME=User
-AIRFLOW_EMAIL=admin@example.com
 
-# GCP Configuration (REQUIRED - Set these values)
-GCP_PROJECT_ID=medscanai-476203
-GCS_BUCKET_NAME=medscan-data
-# Note: All Python scripts and components now use these environment variables
-# instead of hardcoded values. Make sure these match your actual GCP project.
+# GCP Configuration
+# Note: Naming conventions can be configured at setup time
+GCP_PROJECT_ID=<YOUR-GCP_PROJECT_ID>
+GCS_BUCKET_NAME=medscan-pipeline-<YOUR-GCP_PROJECT_ID>  # Can be customized
 GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp-service-account.json
 
 # Email Alerts (optional)
@@ -155,450 +261,542 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
-SMTP_MAIL_FROM=your-email@gmail.com
-ALERTS_ENABLED=true
-ALERT_EMAIL_RECIPIENTS=harshitha8.shekar@gmail.com,kothari.sau@northeastern.edu
-
-VISION_MAX_ANOMALY_PCT=25.0
-VISION_MAX_ANOMALIES=10
-VISION_MAX_DRIFT_FEATURES=3
-VISION_MIN_COMPLETENESS=0.95
-VISION_EXPECTED_TB_IMAGES=700
-VISION_EXPECTED_LC_IMAGES=1000
-VISION_VARIANCE_TOLERANCE=0.1
-VISION_MIN_IMAGE_COUNT=500
-VISION_PREPROCESS_MIN_SUCCESS=0.95
-VISION_BIAS_MAX_VARIANCE=0.3
-VISION_BIAS_MIN_REPRESENTATION=0.05
-
-RAG_SCRAPING_MIN_SUCCESS=0.7
-RAG_MAX_ANOMALY_PCT=25.0
-RAG_MAX_DRIFT_FEATURES=3
-RAG_EMBEDDING_MIN_SUCCESS=0.95
-RAG_MIN_VECTORS=100
-
-AIRFLOW_URL=http://localhost:8080
-MLFLOW_URL=http://localhost:5000
-SKIP_CONFIG_VALIDATION=false
-DEBUG=false
+ALERT_EMAIL_RECIPIENTS=your-email@example.com
 EOF
 ```
 
-#### 6. Initialize Docker Environment
+### 7. Initialize Docker Environment
 
 ```bash
 # Make scripts executable
 chmod +x quickstart.sh
-chmod +x DataPipeline/scripts/common/complete_init.sh
 
 # Run quickstart (builds images and initializes everything)
 ./quickstart.sh
 ```
 
-**OR manually:**
+**OR manually**:
 
 ```bash
 cd airflow
-
-# Build Docker images
 docker-compose build
-
-# Start services
 docker-compose up -d
-
-# Monitor initialization
 docker-compose logs -f airflow-init
 ```
 
-**Expected initialization output:**
-
-```
-✓ PostgreSQL ready
-✓ Airflow database initialized
-✓ Admin user created
-✓ MLflow directories ready
-✓ GCS bucket created/verified
-✓ Folder structure created
-✓ URLs file uploaded
-✓ Git initialized
-✓ DVC initialized
-✓ DVC remotes configured
-```
-
-#### 7. Verify Setup
+### 8. Verify Setup
 
 ```bash
 # Check containers are running
 docker-compose ps
 
 # Verify GCS bucket
-gsutil ls gs://medscan-data/
-
-# Verify DVC
-docker-compose exec webserver bash
-cd /opt/airflow/DataPipeline
-dvc remote list
-# Should show:
-# vision	gs://medscan-data/dvc-storage/vision
-# rag	gs://medscan-data/dvc-storage/rag
-exit
+gsutil ls gs://medscan-pipeline-<YOUR-GCP_PROJECT_ID>/
 
 # Access Airflow UI
 open http://localhost:8080
 # Login: airflow / airflow123
 ```
-## Usage
 
-### Running Pipelines
+---
 
-#### **Vision Pipeline** (Medical Image Processing)
+## CI/CD Pipeline
 
-**Via Airflow UI:**
+The project uses **GitHub Actions** for automated CI/CD. All workflows are located in `.github/workflows/`.
 
+### Automated Workflows
+
+#### 1. **RAG Data Pipeline** (`rag-data-pipeline.yaml`)
+
+**Triggers**:
+- Manual dispatch
+- Push to `main` (when `DataPipeline/scripts/RAG/**` changes)
+
+**What it does**:
+- Processes RAG data (scraping, chunking, embedding, indexing)
+- Validates data quality
+- Uploads to GCS
+
+**Status**: ✅ Automated
+
+#### 2. **RAG Model Training** (`rag-training.yaml`)
+
+**Triggers**:
+- Push to `main` (when `ModelDevelopment/RAG/**` or `cloudbuild/rag-training.yaml` changes)
+- Pull requests (validation only)
+- Manual dispatch
+
+**What it does**:
+- Verifies RAG data exists in GCS
+- Triggers Cloud Build for model selection
+- Runs hyperparameter optimization
+- Selects best model
+- Sends email notifications
+
+**Status**: ✅ Automated
+
+#### 3. **RAG Complete Setup** (`rag-complete-setup.yaml`)
+
+**Triggers**:
+- Manual dispatch (recommended)
+- Push to `main` (when deployment files change)
+
+**What it does**:
+- Deploys Cloud Run service (`rag-service`)
+- Sets up monitoring infrastructure (dashboard, alerts, metrics)
+- Tests service endpoints
+
+**Status**: ✅ Automated (one-time setup)
+
+#### 4. **RAG Deployment** (`rag-deploy.yaml`)
+
+**Triggers**:
+- After `rag-training.yaml` completes successfully
+- Manual dispatch
+- Push to `rag_deployment_monitoring` branch
+
+**What it does**:
+- Deploys/updates Cloud Run service
+- Tests health, config, and prediction endpoints
+- Sets IAM permissions
+
+**Status**: ✅ Automated
+
+#### 5. **RAG Monitoring** (`rag-monitoring.yaml`)
+
+**Triggers**:
+- Scheduled (every 6 hours)
+- Manual dispatch
+
+**What it does**:
+- Runs monitoring checks (Python script)
+- Collects metrics from Cloud Logging
+- Analyzes performance and quality
+- Optionally triggers retraining
+
+**Status**: ✅ Automated (scheduled)
+
+#### 6. **RAG Retraining** (`rag-retraining.yaml`)
+
+**Triggers**:
+- After `rag-data-pipeline.yaml` completes
+- Manual dispatch
+
+**What it does**:
+- Retrains RAG models
+- Can use existing data or trigger data pipeline first
+
+**Status**: ✅ Automated
+
+#### 7. **Vision Model Training** (`vision-training.yaml`)
+
+**Triggers**:
+- Push to `main` (when `ModelDevelopment/Vision/**` or `cloudbuild/vision-training.yaml` changes)
+- Pull requests (validation only)
+- Manual dispatch
+
+**What it does**:
+- Triggers Cloud Build for vision model training
+- Trains multiple architectures (ResNet, ViT, Custom CNN)
+- Runs hyperparameter optimization
+- Deploys to Vertex AI
+- Sends email notifications
+
+**Status**: ✅ Automated
+
+#### 8. **Vision Inference Deployment** (`vision-inference-deploy.yaml`)
+
+**Triggers**:
+- After `vision-training.yaml` completes successfully
+- Manual dispatch
+
+**What it does**:
+- Deploys vision inference API to Cloud Run
+- Tests endpoints
+
+**Status**: ✅ Automated
+
+#### 9. **Vision Inference Terraform Setup** (`vision-inference-terraform-setup.yaml`)
+
+**Triggers**:
+- Manual dispatch only
+
+**What it does**:
+- Sets up infrastructure via Terraform
+- Creates Cloud Run service, Artifact Registry, IAM bindings
+
+**Status**: ⚠️ Manual (one-time setup)
+
+### Workflow Dependencies
+
+```
+Data Pipeline → Model Training → Deployment → Monitoring
+     ↓              ↓                ↓            ↓
+rag-data-pipeline  rag-training  rag-deploy  rag-monitoring
+     ↓              ↓                ↓            ↓
+rag-retraining  (auto-triggers)  (auto-triggers)  (scheduled)
+```
+
+### Workflow Alerts
+
+All workflows send email notifications for:
+- ✅ **Success**: Training/deployment completed successfully
+- ❌ **Failure**: Pipeline failures, validation errors
+- ⚠️ **Warnings**: Bias violations, performance degradation
+
+**Email Recipients**: Configured in GitHub Secrets (`SMTP_USER`, `SMTP_PASSWORD`)
+
+---
+
+## Manual Execution
+
+If you need to run stages manually (bypassing CI/CD), follow these instructions:
+
+### Stage 1: Data Pipeline
+
+#### Vision Data Pipeline
+
+**Via Airflow UI**:
 1. Navigate to http://localhost:8080
 2. Find DAG: `medscan_vision_pipeline_dvc`
 3. Toggle **ON**
 4. Click **Trigger DAG**
 
-**Via CLI:**
-
+**Via CLI**:
 ```bash
 docker-compose exec webserver airflow dags trigger medscan_vision_pipeline_dvc
 ```
 
-**What it does:**
+**Manual Script Execution**:
+```bash
+cd DataPipeline
 
-1. Downloads TB and Lung Cancer datasets from Kaggle
-2. Preprocesses images (resize to 224x224, JPEG standardization)
-3. Generates synthetic patient metadata using Faker
-4. Runs comprehensive validation (schema, drift, bias detection)
-5. Applies bias mitigation strategies
-6. Tracks all data with DVC
-7. Uploads validation reports to GCS
-8. Sends email alerts if issues detected
+# 1. Download data
+python scripts/data_acquisition/fetch_data.py --config config/vision_pipeline.yml
 
-**Pipeline Tasks:**
+# 2. Preprocess images
+python scripts/data_preprocessing/process_tb.py --config config/vision_pipeline.yml
+python scripts/data_preprocessing/process_lungcancer.py --config config/vision_pipeline.yml
 
-```
-download_kaggle_data → preprocess_images → generate_metadata →
-validate_and_upload_reports → track_all_with_dvc →
-check_validation_results → check_drift_results → check_bias_results →
-send_alerts (if needed) → cleanup
+# 3. Generate synthetic metadata
+python scripts/data_preprocessing/baseline_synthetic_data_generator.py --config config/synthetic_data.yml
+
+# 4. Validate data
+python scripts/data_preprocessing/schema_statistics.py --config config/metadata.yml
 ```
 
-#### **RAG Pipeline** (Medical Knowledge Base)
+#### RAG Data Pipeline
 
-**Via Airflow UI:**
-
+**Via Airflow UI**:
 1. Navigate to http://localhost:8080
 2. Find DAG: `rag_data_pipeline_dvc`
 3. Toggle **ON**
 4. Click **Trigger DAG**
 
-**Via CLI:**
-
+**Via CLI**:
 ```bash
 docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc
 ```
 
-**What it does:**
-
-1. Scrapes 40+ medical URLs (CDC, WHO, Mayo Clinic, research papers)
-2. Creates baseline or validates against existing baseline
-3. Chunks documents for optimal retrieval
-4. Generates embeddings using llm-embedder
-5. Builds FAISS vector index
-6. Tracks all data with DVC
-7. Uploads validation reports to GCS
-
-**Pipeline Tasks:**
-
-```
-scrape_data → check_baseline → [create_baseline OR validate_data] →
-chunk_data → generate_embeddings → create_index → track_all_with_dvc
-```
-
-### Model Training & Deployment
-
-Both Vision and RAG models are trained and deployed via **Cloud Build** pipelines that automatically handle model selection, validation, bias checks, and deployment to **Vertex AI Model Registry**.
-
-**CI/CD Pipeline:**
-
-The project uses **GitHub Actions** for automated CI/CD:
-- **Automatic Triggers**: When code is pushed to `main` branch (for specific paths), GitHub Actions automatically triggers Cloud Build pipelines
-- **Manual Triggers**: Workflows can be manually triggered from GitHub Actions UI with custom parameters
-- **Pull Request Checks**: Workflows run on pull requests to validate changes
-
-**GitHub Actions Workflows:**
-- **RAG Training** (`.github/workflows/rag-training.yaml`): Triggers on changes to `ModelDevelopment/RAG/**` or `cloudbuild/rag-training.yaml`
-- **Vision Training** (`.github/workflows/vision-training.yaml`): Triggers on changes to `ModelDevelopment/Vision/**` or `cloudbuild/vision-training.yaml`
-
-**Workflow:**
-```
-Push to main → GitHub Actions → Cloud Build → Vertex AI
-```
-
-**Note:** You can also run Cloud Build pipelines manually via `gcloud builds submit` (see commands below).
-
-#### Prerequisites for Model Training
-
-- **GCP Project**: `medscanai-476500` (or your project ID)
-- **Region**: `us-central1`
-- **GCS Bucket**: `gs://medscan-pipeline-medscanai-476500` (or your bucket)
-- **APIs Enabled**: Cloud Build, Vertex AI, Cloud Storage, Secret Manager
-- **Service Account Permissions**: 
-  - Cloud Build service account needs `Vertex AI User`, `Storage Admin`, and `Secret Manager Secret Accessor` roles
-- **Data Pipeline Completed**: Run the respective data pipeline first (Vision or RAG)
-
-#### **Vision Model Training** (Cloud Build)
-
-**Quick Start:**
-
+**Manual Script Execution**:
 ```bash
-# Full training run - Tuberculosis dataset
+cd DataPipeline
+python scripts/RAG/main.py
+```
+
+### Stage 2: Model Training
+
+#### Vision Model Training
+
+**Via Cloud Build**:
+```bash
+# Full training run - Tuberculosis
 gcloud builds submit \
   --config=cloudbuild/vision-training.yaml \
   --substitutions=_DATASET=tb,_EPOCHS=50 \
-  --project=medscanai-476500 \
+  --project=<YOUR-GCP_PROJECT_ID> \
   --region=us-central1
 
-# Full training run - Lung Cancer CT Scan dataset
+# Full training run - Lung Cancer
 gcloud builds submit \
   --config=cloudbuild/vision-training.yaml \
   --substitutions=_DATASET=lung_cancer_ct_scan,_EPOCHS=50 \
-  --project=medscanai-476500 \
-  --region=us-central1
-
-# Quick test (2 epochs) - Tuberculosis
-gcloud builds submit \
-  --config=cloudbuild/vision-training.yaml \
-  --substitutions=_DATASET=tb,_EPOCHS=2 \
-  --project=medscanai-476500 \
-  --region=us-central1
-
-# Quick test (2 epochs) - Lung Cancer
-gcloud builds submit \
-  --config=cloudbuild/vision-training.yaml \
-  --substitutions=_DATASET=lung_cancer_ct_scan,_EPOCHS=2 \
-  --project=medscanai-476500 \
+  --project=<YOUR-GCP_PROJECT_ID> \
   --region=us-central1
 ```
 
-**What it does:**
-
-1. Pulls preprocessed data from DVC (GCS remote)
-2. Trains multiple model architectures (ResNet, ViT, Custom CNN)
-3. Runs hyperparameter optimization (Optuna)
-4. Validates model performance
-5. Runs bias detection checks
-6. Deploys best model to Vertex AI endpoint
-7. Sends email notifications (completion, validation failures, bias violations)
-
-**Pipeline Steps:**
-
-```
-install-deps → pull-dvc-data → train-models → validate-model → 
-check-bias → deploy-vision-model → send-completion-email
-```
-
-**Artifacts:**
-
-- Trained models: `gs://medscan-pipeline-medscanai-476500/vision/trained_models/${BUILD_ID}/`
-- Validation results: `gs://medscan-pipeline-medscanai-476500/vision/validation/${BUILD_ID}/`
-- Vertex AI Model Registry: https://console.cloud.google.com/vertex-ai/models?project=medscanai-476500
-- Vertex AI Endpoints: https://console.cloud.google.com/vertex-ai/endpoints?project=medscanai-476500
-
-**Substitution Variables:**
-
-- `_DATASET`: Dataset to train on - **`tb`** (Tuberculosis) or **`lung_cancer_ct_scan`** (Lung Cancer CT Scan) (default: `tb`)
-- `_EPOCHS`: Number of training epochs (default: 50)
-
-#### **RAG Model Training** (Cloud Build)
-
-**Quick Start:**
-
+**Local Training**:
 ```bash
-# Full training run (includes experiments, ~20-25 minutes)
+cd ModelDevelopment/Vision
+
+# Train ResNet
+python train_resnet.py --config ../config/vision_training.yml
+
+# Train ViT
+python train_vit.py --config ../config/vision_training.yml
+
+# Train Custom CNN
+python train_custom_cnn.py --config ../config/vision_training.yml
+```
+
+#### RAG Model Training
+
+**Via Cloud Build**:
+```bash
 gcloud builds submit \
   --config=cloudbuild/rag-training.yaml \
-  --project=medscanai-476500 \
+  --project=<YOUR-GCP_PROJECT_ID> \
   --region=us-central1
-
-
-**What it does:**
-
-1. Verifies RAG data exists in GCS (`index_latest.bin`, `embeddings_latest.json`)
-2. Runs model selection experiments (tests multiple embedding models)
-3. Selects best model based on composite score
-4. Validates model performance (threshold: 0.2)
-5. Runs bias detection checks
-6. Registers model in Vertex AI Model Registry
-7. Sends email notifications (completion, validation failures, bias violations, pipeline failures)
-
-**Pipeline Steps:**
-
-```
-install-deps → verify-gcs-data → run-experiments → select-best-model → 
-validate-model → extract-bias-results → deploy-rag → send-completion-email
 ```
 
-**Artifacts:**
-
-- MLflow experiments: `gs://medscan-pipeline-medscanai-476500/RAG/experiments/${BUILD_ID}/`
-- Model config: `gs://medscan-pipeline-medscanai-476500/RAG/models/${BUILD_ID}/config.json`
-- Deployment info: `gs://medscan-pipeline-medscanai-476500/RAG/deployments/latest/deployment_info.json`
-- Vertex AI Model Registry: https://console.cloud.google.com/vertex-ai/models?project=medscanai-476500
-
-
-#### Email Notifications
-
-The training pipelines send email notifications for:
-
--  **Training Completion**: Model successfully trained, validated, and deployed
--  **Validation Failure**: Model performance below threshold (composite score < 0.2 for RAG)
--  **Bias Detection**: Bias violations detected in model
--  **Pipeline Failure**: Critical step failed (data verification, training, deployment)
-
-
-
-#### Monitoring Builds
-
-**Via Console:**
-- Cloud Build → History → Select build → View logs
-
-**Via CLI:**
+**Local Training**:
 ```bash
-# List recent builds
-gcloud builds list --project=medscanai-476500 --region=us-central1 --limit=5
+cd ModelDevelopment/RAG
 
-# Stream logs for a build
-gcloud builds log BUILD_ID --stream --project=medscanai-476500
+# Run experiments
+python ModelSelection/experiment.py
 
-# Get build status
-gcloud builds describe BUILD_ID --project=medscanai-476500 --format="value(status)"
+# Select best model
+python ModelSelection/select_best_model.py
 ```
 
-### Running Tests
+### Stage 3: Model Deployment
+
+#### RAG Service Deployment
+
+**One-Stop Setup** (Recommended):
+```bash
+# Via GitHub Actions UI:
+# 1. Go to Actions → "RAG Complete Setup - Cloud Run + Monitoring"
+# 2. Click "Run workflow"
+# 3. Configure inputs (monitoring_email, auto_approve_terraform)
+# 4. Click "Run workflow"
+```
+
+**Manual Deployment**:
+```bash
+# Deploy Cloud Run service
+gcloud builds submit \
+  --config=cloudbuild/rag-deploy.yaml \
+  --project=<<YOUR-GCP_PROJECT_ID>>
+
+# Setup monitoring (Terraform)
+cd deploymentRAG/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your settings
+terraform init
+terraform plan
+terraform apply
+```
+
+#### Vision Inference Deployment
+
+**Via GitHub Actions**:
+1. Go to Actions → "Vision Inference - Terraform Setup"
+2. Click "Run workflow" → action: `apply` → auto_approve: `true`
+3. Then run "Vision Inference Deployment" workflow
+
+**Manual Deployment**:
+```bash
+# Setup infrastructure
+cd deploymentVisionInference/terraform
+terraform init
+terraform apply
+
+# Deploy service
+gcloud builds submit \
+  --config=ModelDevelopment/VisionInference/cloudbuild.yaml \
+  --project=<YOUR-GCP_PROJECT_ID>
+```
+
+### Stage 4: Monitoring Setup
+
+**Automated** (via `rag-complete-setup.yaml`):
+- Creates monitoring dashboard
+- Sets up 11 alert policies
+- Creates 7 custom metrics
+- Configures email notifications
+
+**Manual Setup**:
+```bash
+cd deploymentRAG/terraform
+terraform init
+terraform apply
+```
+
+### Stage 5: Continuous Monitoring
+
+**Automated** (scheduled every 6 hours):
+- Runs via `rag-monitoring.yaml` workflow
+- Collects metrics from Cloud Logging
+- Analyzes performance
+- Triggers retraining if needed
+
+**Manual Execution**:
+```bash
+cd Monitoring/RAG
+python run_monitoring.py --hours=24
+
+# With retraining trigger
+python run_monitoring.py --hours=24 --trigger-retrain
+```
+
+---
+
+## Monitoring & Alerts
+
+### Monitoring Dashboard
+
+**Location**: GCP Console → Monitoring → Dashboards → "RAG Service - Monitoring Dashboard"
+
+**URL**: https://console.cloud.google.com/monitoring/dashboards?project=<YOUR-GCP_PROJECT_ID>
+
+**Widgets**:
+- Request Rate, Error Rate, Latency (P50/P95/P99)
+- CPU/Memory Utilization, Instance Count
+- Composite Score Distribution
+- Answer Groundedness Trend
+- Retrieval Score Trend
+- Low Quality Predictions Count
+- Tokens Usage
+
+### Alert Policies
+
+**11 Alert Policies** configured:
+
+**Production Alerts (5)**:
+1. High Error Rate (>15% for 5 min)
+2. High Latency (P95 >10s for 5 min)
+3. Service Unavailable (no requests in 5h)
+4. High CPU (>80% for 5 min)
+5. High Memory (>85% for 5 min)
+
+**Quality Alerts (5)**:
+6. Low Composite Score (avg <0.3 for 15 min)
+7. Critical Composite Score (min <0.25 for 5 min)
+8. Low Hallucination Score (avg <0.2 for 15 min)
+9. Low Retrieval Quality (avg <0.6 for 15 min)
+10. Low Quality Prediction Spike (>10 in 5 min)
+
+**Retraining Alert (1)**:
+11. Retraining Triggered (immediate notification)
+
+### Custom Metrics
+
+**7 Custom Log-Based Metrics**:
+1. `rag_composite_score` - Composite quality score (0-1)
+2. `rag_hallucination_score` - Hallucination score (0-1, higher is better)
+3. `rag_retrieval_score` - Average retrieval score (0-1)
+4. `rag_low_composite_score` - Count of low-quality predictions
+5. `rag_tokens_used` - Total tokens consumed
+6. `rag_docs_retrieved` - Number of documents retrieved
+7. `rag_retraining_triggered` - Retraining event count
+
+### Email Notifications
+
+Alerts are sent to email addresses configured in:
+- **Terraform**: `deploymentRAG/terraform/terraform.tfvars` → `monitoring_email`
+- **GitHub Actions**: Workflow inputs → `monitoring_email`
+
+**Alert Types**:
+- Data pipeline failures
+- Validation issues (anomalies, drift, bias)
+- Model training completion/failures
+- Deployment status
+- Monitoring alerts (error rate, latency, quality degradation)
+- Retraining triggers
+
+---
+
+## Documentation
+
+All detailed documentation is located in the `docs/` folder:
+
+- **[Project Structure](docs/PROJECT_STRUCTURE.md)**: Detailed project structure and file organization
+- **[Model Monitoring Audit](docs/MODEL_MONITORING_AUDIT_REPORT.md)**: Monitoring and retraining readiness audit
+- **[DVC Documentation](docs/DVC.md)**: Data versioning with DVC
+- **[Run Pipeline Guide](docs/RUN_PIPELINE.md)**: Step-by-step pipeline execution guide
+- **[Vision Inference README](docs/README-vision-inference.md)**: Vision inference deployment guide
+- **[Testing Guide](docs/TESTING-GUIDE.md)**: Testing guide for RAG complete setup
+- **[GCP Setup Steps](docs/verify_gcp_setup_STEPS.md)**: GCP setup verification steps
+- **[Scoping Document](docs/Scoping.pdf)**: Project scoping and requirements
+
+### Component-Specific Documentation
+
+- **Data Pipeline**: `DataPipeline/README.md`
+- **RAG Model Development**: `ModelDevelopment/RAG/README.md`
+- **Vision Model Development**: `ModelDevelopment/Vision/README.md`
+- **Airflow Setup**: `airflow/README.md`
+- **RAG Terraform**: `deploymentRAG/terraform/README.md`
+- **Vision Terraform**: `deploymentVisionInference/terraform/README.md`
+
+---
+
+## Quick Reference
+
+### Key URLs
+
+- **Airflow UI**: http://localhost:8080 (local) or GCP Composer (production)
+- **MLflow UI**: http://localhost:5000 (local)
+- **GCP Console**: https://console.cloud.google.com/?project=<YOUR-GCP_PROJECT_ID>
+- **Monitoring Dashboard**: https://console.cloud.google.com/monitoring/dashboards?project=<YOUR-GCP_PROJECT_ID>
+- **Cloud Build**: https://console.cloud.google.com/cloud-build?project=<YOUR-GCP_PROJECT_ID>
+- **Vertex AI Models**: https://console.cloud.google.com/vertex-ai/models?project=<YOUR-GCP_PROJECT_ID>
+- **Cloud Run**: https://console.cloud.google.com/run?project=<YOUR-GCP_PROJECT_ID>
+
+### Key Commands
 
 ```bash
-# Run all tests
-pytest
+# Start Airflow
+cd airflow && docker-compose up -d
 
-# Run with coverage
-pytest --cov=src tests/
+# Trigger Vision Pipeline
+docker-compose exec webserver airflow dags trigger medscan_vision_pipeline_dvc
+
+# Trigger RAG Pipeline
+docker-compose exec webserver airflow dags trigger rag_data_pipeline_dvc
+
+# Test RAG Deployment
+./scripts/test-rag-deployment.sh
+
+# Run Monitoring
+cd Monitoring/RAG && python run_monitoring.py --hours=24
 ```
 
-## Dataset Information
+### Project Structure
 
-### **Medical Image Datasets**
-
-**Time Period**: Public datasets updated through 2024
-
-**Size**:
-
-- Tuberculosis X-rays: ~700 images
-- Lung Cancer CT scans: ~1,000 images
-
-#### **Data Types**
-
-**Vision Pipeline (Medical Images)**:
-
-- **Images**: Chest X-rays (TB), CT scans (Lung Cancer)
-- **Metadata**: Patient demographics, symptoms, medical history
-- **Numerical**: Age, weight, height
-- **Categorical**: Gender, diagnosis class, urgency level
-- **Text**: Presenting symptoms, medications, surgical history
-
-**RAG Pipeline (Medical Knowledge)**:
-
-- **Text**: Medical articles, research papers, treatment guidelines
-- **Metadata**: Authors, publication dates, source types
-- **Topics**: Treatment methods, disease information, clinical guidelines
-
-### **Data Sources**
-
-1. **Medical Images**: Kaggle public datasets
-
-   - [Tuberculosis Chest X-ray Dataset](https://www.kaggle.com/datasets/tawsifurrahman/tuberculosis-tb-chest-xray-dataset)
-   - [Lung Cancer CT Scan Dataset](https://www.kaggle.com/datasets/dishantrathi20/ct-scan-images-for-lung-cancer)
-
-2. **Medical Knowledge**: Trusted medical sources
-
-## Key Features
-
-### Data Pipeline Capabilities
-
--  **Automated Data Acquisition**: Fetches datasets from Kaggle with partitioning
--  **Image Preprocessing**: Standardizes images to 224x224 JPEG format
--  **Synthetic Metadata Generation**: Creates realistic patient demographics using Faker
--  **Comprehensive Validation**: Schema validation, drift detection, anomaly detection
--  **Bias Detection & Mitigation**: Advanced fairness analysis using Fairlearn, SliceFinder, TFMA
--  **Data Versioning**: DVC integration with GCS for reproducibility
--  **RAG Knowledge Base**: Medical article scraping, chunking, embedding, and FAISS indexing
--  **Email Alerts**: Automated notifications for anomalies, drift, and bias
-
-### Model Training & Deployment Capabilities
-
--  **Automated Model Training**: Cloud Build pipelines for Vision and RAG models
--  **Model Selection**: Hyperparameter optimization (Optuna) and multi-architecture comparison
--  **Model Validation**: Performance threshold checks before deployment
--  **Bias Detection**: Comprehensive bias checks during model training
--  **Vertex AI Integration**: Automatic model registration in Vertex AI Model Registry
--  **Endpoint Deployment**: Automatic deployment to Vertex AI endpoints (Vision models)
--  **MLflow Tracking**: Experiment tracking and model versioning
--  **Email Notifications**: Training completion, validation failures, bias violations, pipeline failures
-
-### Advanced Quality Checks
-
-**Validation Framework**:
-
-- Schema consistency validation
-- Statistical drift detection (Kolmogorov-Smirnov, Chi-square tests)
-- Bias detection across demographic slices
-- Exploratory Data Analysis (EDA) with outlier detection
-- Fairness metrics (demographic parity, equalized odds)
-
-**Bias Mitigation Strategies**:
-
-- Resampling underrepresented groups
-- Class weight computation
-- Stratified split recommendations
-- Fairlearn post-processing techniques
-
-**For more information on bias detection and feature sensitivity analysis, refer to the respective READMEs:**
-
-- **RAG Model Bias Detection**: See [ModelDevelopment/RAG/README.md](ModelDevelopment/RAG/README.md) for bias detection in RAG model selection, including Fairlearn-powered fairness analysis and bias mitigation.
-- **Vision Model Training**: See [ModelDevelopment/Vision/README.md](ModelDevelopment/Vision/README.md) for Vision model training details and validation.
-
-### Data Versioning with DVC
-
-#### Check DVC Status
-
-```bash
-docker-compose exec webserver bash
-cd /opt/airflow/DataPipeline
-
-# Overall status
-dvc status
-
-# Remote status
-dvc status -r vision
-dvc status -r rag
 ```
-### Alerts
+MedScan_ai/
+├── README.md                    # This file
+├── DataPipeline/               # Data processing and validation
+├── ModelDevelopment/           # Model training and selection
+├── deployment/                  # Deployment configurations
+├── deploymentRAG/               # RAG deployment (Terraform)
+├── deploymentVisionInference/  # Vision deployment (Terraform)
+├── Monitoring/                  # Monitoring scripts
+├── airflow/                     # Airflow orchestration
+├── cloudbuild/                  # Cloud Build configurations
+├── scripts/                     # Utility scripts
+└── docs/                        # Documentation files
+```
 
-Email alerts are configured for:
+---
 
-**Data Pipeline Alerts:**
-- **Data Acquisition Failures**: Kaggle download errors
-- **Preprocessing Failures**: Image processing errors
-- **Validation Issues**: Anomalies exceed threshold (>25%)
-- **Drift Detection**: More than 3 features show drift
-- **Bias Detection**: Fairness violations detected
-- **DVC Operations**: Push/pull failures
+## Support
 
-**Model Training Alerts:**
-- **Training Completion**: Model successfully trained and deployed
-- **Validation Failures**: Model performance below threshold
-- **Bias Violations**: Bias detected in trained model
-- **Pipeline Failures**: Critical training/deployment step failed
+For issues or questions:
+1. Check component-specific README files
+2. Review documentation in `docs/` folder
+3. Check GitHub Actions workflow logs
+4. Review GCP Console logs and monitoring
+
+---
+
+## License
+
+TBD
+
+---
+
+**Last Updated**: December 2024  
+**Maintained By**: MedScan AI Development Team
