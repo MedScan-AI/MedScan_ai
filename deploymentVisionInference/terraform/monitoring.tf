@@ -251,8 +251,10 @@ resource "google_logging_metric" "low_confidence_predictions" {
 }
 
 # Alert Policy: Consecutive low-confidence predictions (>=3 within 30s)
+# NOTE: This alert policy requires the low_confidence_predictions metric to exist.
+# Only created if both enable_monitoring=true AND create_low_conf_metric=true
 resource "google_monitoring_alert_policy" "low_confidence_streak" {
-  count        = var.enable_monitoring ? 1 : 0
+  count        = (var.enable_monitoring && var.create_low_conf_metric) ? 1 : 0
   display_name = "Vision Inference API - Low Confidence Streak"
   combiner     = "OR"
   enabled      = true
@@ -276,6 +278,10 @@ resource "google_monitoring_alert_policy" "low_confidence_streak" {
   }
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
+
+  depends_on = [
+    google_logging_metric.low_confidence_predictions
+  ]
 
   lifecycle {
     prevent_destroy = true
