@@ -49,7 +49,7 @@ MedScan AI is an end-to-end MLOps platform for medical image analysis and patien
 - ✅ **Model Selection**: Hyperparameter optimization (Optuna) and multi-architecture comparison
 - ✅ **Model Validation**: Performance threshold checks before deployment
 - ✅ **Bias Detection**: Comprehensive bias checks during model training
-- ✅ **Endpoint Deployment**: Automatic deployment to Vertex AI endpoints (Vision) and Cloud Run (RAG)
+- ✅ **Endpoint Deployment**: Automatic deployment to Cloud Run (both Vision and RAG). Vision models are registered in Vertex AI Model Registry for versioning.
 - ✅ **MLflow Tracking**: Experiment tracking and model versioning
 - ✅ **Email Notifications**: Training completion, validation failures, bias violations
 
@@ -104,11 +104,11 @@ The MedScan AI pipeline consists of **5 main stages**:
 **Purpose**: Deploy models to production endpoints
 
 **Components**:
-- **Vision Inference**: Vertex AI endpoint deployment
+- **Vision Inference**: Cloud Run deployment (models registered in Vertex AI Model Registry)
 - **RAG Service**: Cloud Run service with GPU support
 
 **Outputs**:
-- Production endpoints (Vertex AI, Cloud Run)
+- Production endpoints (Cloud Run for both Vision and RAG)
 - Service URLs and health checks
 - Deployment configurations
 
@@ -158,7 +158,7 @@ The MedScan AI pipeline consists of **5 main stages**:
 
 1. **Data Pipeline** (Airflow): Automated data processing and validation
 2. **Model Training** (Cloud Build): Automated model training and selection
-3. **Model Deployment** (Vertex AI, Cloud Run): Production inference endpoints
+3. **Model Deployment** (Cloud Run): Production inference endpoints. Vision models registered in Vertex AI Model Registry.
 4. **Monitoring** (GCP Monitoring): Real-time performance tracking
 5. **CI/CD** (GitHub Actions): Automated workflows for training and deployment
 
@@ -399,7 +399,7 @@ The project uses **GitHub Actions** for automated CI/CD. All workflows are locat
 - Triggers Cloud Build for vision model training
 - Trains multiple architectures (ResNet, ViT, Custom CNN)
 - Runs hyperparameter optimization
-- Deploys to Vertex AI
+- Registers models in Vertex AI Model Registry (for versioning)
 - Sends email notifications
 
 **Status**: ✅ Automated

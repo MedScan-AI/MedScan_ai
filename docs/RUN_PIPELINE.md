@@ -314,9 +314,10 @@ gcloud builds log <BUILD_ID> --project=<YOUR-GCP_PROJECT_ID> --region=us-central
 **Validation results**:
 - Location: `gs://medscan-pipeline-<YOUR-GCP_PROJECT_ID>/vision/validation/${BUILD_ID}/validation_results.json`
 
-**Vertex AI Model Registry**:
+**Vertex AI Model Registry** (for model versioning):
 - Models: https://console.cloud.google.com/vertex-ai/models?project=<YOUR-GCP_PROJECT_ID>
-- Endpoints: https://console.cloud.google.com/vertex-ai/endpoints?project=<YOUR-GCP_PROJECT_ID>
+
+**Note**: Vision inference API runs on Cloud Run, not Vertex AI endpoints. Models are registered in Vertex AI Model Registry for versioning and tracking only.
 
 ---
 
@@ -1018,17 +1019,9 @@ cd deploymentVisionInference/terraform
 terraform destroy
 ```
 
-**Delete Vertex AI Endpoints**:
-```bash
-# List endpoints
-gcloud ai endpoints list --project=<YOUR-GCP_PROJECT_ID> --region=us-central1
+**Note**: Vision inference runs on Cloud Run, not Vertex AI endpoints. No Vertex AI endpoints to delete.
 
-# Delete endpoint
-gcloud ai endpoints delete <ENDPOINT_ID> \
-  --project=<YOUR-GCP_PROJECT_ID> --region=us-central1
-```
-
-**Delete Vertex AI Models**:
+**Delete Vertex AI Models** (from Model Registry):
 ```bash
 # List models
 gcloud ai models list --project=<YOUR-GCP_PROJECT_ID> --region=us-central1
