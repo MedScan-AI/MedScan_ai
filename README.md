@@ -710,25 +710,56 @@ Alerts are sent to email addresses configured in:
 
 ## Documentation
 
-All detailed documentation is located in the `docs/` folder:
+Comprehensive documentation is available in the `docs/` folder. Here's what you'll find:
 
-- **[Project Structure](docs/PROJECT_STRUCTURE.md)**: Detailed project structure and file organization
-- **[Model Monitoring Audit](docs/MODEL_MONITORING_AUDIT_REPORT.md)**: Monitoring and retraining readiness audit
-- **[DVC Documentation](docs/DVC.md)**: Data versioning with DVC
-- **[Run Pipeline Guide](docs/RUN_PIPELINE.md)**: Step-by-step pipeline execution guide
-- **[Vision Inference README](docs/README-vision-inference.md)**: Vision inference deployment guide
-- **[Testing Guide](docs/TESTING-GUIDE.md)**: Testing guide for RAG complete setup
-- **[GCP Setup Steps](docs/verify_gcp_setup_STEPS.md)**: GCP setup verification steps
-- **[Scoping Document](docs/Scoping.pdf)**: Project scoping and requirements
+### 📚 Getting Started & Setup
+
+- **[Run Pipeline Guide](docs/RUN_PIPELINE.md)**: Complete guide for running all pipeline stages (Vision and RAG) - data pipeline, training, deployment, and monitoring. Includes both automated (GitHub Actions) and manual execution methods.
+
+- **[GCP Setup Steps](docs/verify_gcp_setup_STEPS.md)**: Step-by-step GCP setup verification and configuration guide. Ensures all required APIs, permissions, and resources are properly configured.
+
+- **[Testing Guide](docs/TESTING-GUIDE.md)**: Comprehensive testing guide for both Vision and RAG components, including deployment workflows, monitoring infrastructure testing, and verification checklists.
+
+### 🏗️ Architecture & Structure
+
+- **[Project Structure](docs/PROJECT_STRUCTURE.md)**: Detailed project structure, file organization, and directory descriptions. Helps navigate the codebase and understand component relationships.
+
+- **[Scoping Document](docs/Scoping.pdf)**: Project scoping, requirements, and specifications. Defines project goals, deliverables, and technical requirements.
+
+### 🔍 Monitoring & Operations
+
+- **[Model Monitoring Implementation Status](docs/MODEL_MONITORING_AUDIT_REPORT.md)**: Complete overview of implemented monitoring infrastructure for both Vision and RAG components, including alert policies, dashboards, custom metrics, and retraining triggers.
+
+### 🚀 Deployment & CI/CD
+
+- **[Vision Inference README](docs/README-vision-inference.md)**: Vision inference API deployment workflow and CI/CD guide. Covers Cloud Run deployment, Terraform infrastructure setup, and monitoring configuration.
+
+### 📦 Data Management
+
+- **[DVC Documentation](docs/DVC.md)**: Data versioning with DVC, including setup, usage, and best practices. Covers data pipeline integration, GCS remote storage, and version control workflows.
 
 ### Component-Specific Documentation
 
-- **Data Pipeline**: `DataPipeline/README.md`
-- **RAG Model Development**: `ModelDevelopment/RAG/README.md`
-- **Vision Model Development**: `ModelDevelopment/Vision/README.md`
-- **Airflow Setup**: `airflow/README.md`
-- **RAG Terraform**: `deploymentRAG/terraform/README.md`
-- **Vision Terraform**: `deploymentVisionInference/terraform/README.md`
+For detailed component documentation, see:
+
+- **Data Pipeline**: `DataPipeline/README.md` - Data acquisition, preprocessing, validation, and bias detection workflows
+- **RAG Model Development**: `ModelDevelopment/RAG/README.md` - RAG model training, selection, hyperparameter optimization, and deployment
+- **Vision Model Development**: `ModelDevelopment/Vision/README.md` - Vision model training, architecture selection, bias detection, and interpretability
+- **Airflow Setup**: `airflow/README.md` - Airflow orchestration setup, DAG configuration, and pipeline scheduling
+- **RAG Terraform**: `deploymentRAG/terraform/README.md` - RAG monitoring infrastructure setup (7 custom metrics, 11 alert policies, monitoring dashboard)
+- **Vision Terraform**: `deploymentVisionInference/terraform/README.md` - Vision infrastructure and monitoring setup (6 alert policies, 1 custom metric, monitoring dashboard)
+
+### 📖 Quick Links by Topic
+
+**Want to...**
+
+- **Run pipelines manually?** → [Run Pipeline Guide](docs/RUN_PIPELINE.md)
+- **Test deployments?** → [Testing Guide](docs/TESTING-GUIDE.md)
+- **Understand monitoring?** → [Model Monitoring Report](docs/MODEL_MONITORING_AUDIT_REPORT.md)
+- **Set up GCP?** → [GCP Setup Steps](docs/verify_gcp_setup_STEPS.md)
+- **Understand project structure?** → [Project Structure](docs/PROJECT_STRUCTURE.md)
+- **Version data?** → [DVC Documentation](docs/DVC.md)
+- **Deploy Vision API?** → [Vision Inference README](docs/README-vision-inference.md)
 
 ---
 
@@ -798,5 +829,5 @@ TBD
 
 ---
 
-**Last Updated**: December 2024  
+**Last Updated**: December 2025  
 **Maintained By**: MedScan AI Development Team

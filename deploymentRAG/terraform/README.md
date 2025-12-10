@@ -6,9 +6,9 @@ This Terraform configuration sets up comprehensive monitoring for the RAG servic
 
 This configuration creates:
 
-- **6 Custom Log-Based Metrics**: Track RAG-specific quality metrics from prediction logs
-- **Monitoring Dashboard**: 12 widgets showing Cloud Run production metrics + RAG quality metrics
-- **10 Alert Policies**: 5 for Cloud Run production issues + 5 for RAG quality degradation
+- **7 Custom Log-Based Metrics**: Track RAG-specific quality metrics from prediction logs
+- **Monitoring Dashboard**: 11 widgets showing Cloud Run production metrics + RAG quality metrics
+- **11 Alert Policies**: 5 for Cloud Run production issues + 5 for RAG quality degradation + 1 for retraining
 - **Email Notification Channel**: For alert notifications
 
 ## Prerequisites
@@ -177,11 +177,13 @@ Thresholds match `Monitoring/RAG/rag_monitor.py`:
 
 ### Lifecycle Protection
 
-All monitoring resources have `prevent_destroy = true` to protect against accidental deletion. To destroy resources, you must:
+The configuration uses a `null_resource` with a destroy provisioner to ensure proper cleanup order. When resources are destroyed, the `null_resource.delete_alert_policies_before_metrics` resource ensures alert policies are deleted before custom metrics to prevent dependency issues.
 
-1. Remove `prevent_destroy` from the resource
-2. Run `terraform apply`
-3. Then run `terraform destroy`
+To destroy resources:
+
+1. Run `terraform destroy`
+2. The destroy provisioner will automatically handle cleanup order
+3. Alert policies will be deleted before metrics to avoid dependency errors
 
 ### Importing Existing Resources
 

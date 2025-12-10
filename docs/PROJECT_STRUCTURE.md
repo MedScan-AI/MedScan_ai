@@ -11,6 +11,8 @@ This document provides a comprehensive overview of the MedScan AI project struct
    - [ModelDevelopment/](#modeldevelopment)
    - [airflow/](#airflow)
    - [deployment/](#deployment)
+   - [deploymentRAG/](#deploymentrag)
+   - [deploymentVisionInference/](#deploymentvisioninference)
    - [cloudbuild/](#cloudbuild)
    - [scripts/](#scripts)
    - [docs/](#docs)
@@ -48,7 +50,9 @@ MedScan_ai/
 ├── DataPipeline/                 # Data acquisition, preprocessing, and validation
 ├── ModelDevelopment/             # Model training and inference code
 ├── airflow/                      # Apache Airflow orchestration setup
-├── deployment/                   # Deployment and monitoring configurations
+├── deployment/                   # Shared deployment configurations
+├── deploymentRAG/               # RAG service deployment and monitoring (Terraform)
+├── deploymentVisionInference/    # Vision inference deployment and monitoring (Terraform)
 ├── cloudbuild/                   # Google Cloud Build configurations
 ├── scripts/                      # Utility scripts
 ├── docs/                         # Documentation files
@@ -288,12 +292,89 @@ airflow/
 
 ### deployment/
 
-**Purpose**: Deployment and monitoring configurations.
+**Purpose**: Shared deployment configurations and utilities.
 
 ```
 deployment/
-└── monitoring_config.yaml      # Model monitoring configuration
+├── monitoring_config.yaml      # Model monitoring configuration
+├── RAG_serve.py                # RAG service deployment script
+└── requirements-extra.txt      # Additional deployment dependencies
 ```
+
+---
+
+### deploymentRAG/
+
+**Purpose**: RAG service deployment and monitoring infrastructure using Terraform.
+
+```
+deploymentRAG/
+└── terraform/                  # Terraform configuration for RAG monitoring
+    ├── README.md               # RAG monitoring setup documentation
+    ├── main.tf                 # Main Terraform configuration
+    ├── monitoring.tf            # Monitoring resources (7 metrics, 11 alerts, dashboard)
+    ├── variables.tf             # Input variables
+    ├── outputs.tf               # Output values
+    ├── versions.tf              # Provider version constraints
+    ├── terraform.tfvars.example # Example configuration
+    └── delete-alert-policies.sh # Cleanup script for alert policies
+```
+
+#### Key Files in deploymentRAG/
+
+- **`terraform/monitoring.tf`**: Creates comprehensive monitoring infrastructure:
+  - 7 custom log-based metrics (composite score, hallucination score, retrieval score, etc.)
+  - 11 alert policies (5 production + 5 quality + 1 retraining)
+  - Monitoring dashboard with 11 widgets
+  - Email notification channel
+
+- **`terraform/main.tf`**: Core infrastructure setup and provider configuration
+
+- **`terraform/README.md`**: Complete guide for setting up RAG monitoring infrastructure
+
+---
+
+### deploymentVisionInference/
+
+**Purpose**: Vision inference API deployment and monitoring infrastructure using Terraform.
+
+```
+deploymentVisionInference/
+└── terraform/                  # Terraform configuration for Vision infrastructure
+    ├── README.md               # Main Terraform documentation
+    ├── README-terraform.md     # Terraform-specific guide
+    ├── README-monitoring-setup.md  # Monitoring setup guide
+    ├── README-CLEANUP.md       # Cleanup procedures
+    ├── main.tf                 # Main Terraform configuration
+    ├── monitoring.tf            # Monitoring resources (1 metric, 6 alerts, dashboard)
+    ├── variables.tf             # Input variables
+    ├── outputs.tf               # Output values
+    ├── versions.tf              # Provider version constraints
+    ├── terraform.tfvars.example # Example configuration
+    ├── Makefile                 # Build automation
+    ├── cleanup_resources.sh     # Resource cleanup script
+    ├── delete_artifact_registry.sh  # Artifact Registry cleanup
+    ├── import_existing.sh       # Import existing resources
+    └── manual_delete.sh         # Manual deletion script
+```
+
+#### Key Files in deploymentVisionInference/
+
+- **`terraform/monitoring.tf`**: Creates monitoring infrastructure:
+  - 1 custom log-based metric (`low_confidence_predictions`)
+  - 6 alert policies (error rate, latency, service unavailable, CPU, memory, low confidence streak)
+  - Monitoring dashboard with 6 widgets
+  - Email notification channel
+
+- **`terraform/main.tf`**: Core infrastructure setup including:
+  - Cloud Run service configuration
+  - Artifact Registry setup
+  - IAM bindings
+  - Service account configuration
+
+- **`terraform/README.md`**: Complete deployment and monitoring guide
+
+- **`terraform/README-CLEANUP.md`**: Detailed cleanup procedures for all resources
 
 ---
 
