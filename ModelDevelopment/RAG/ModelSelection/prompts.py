@@ -115,8 +115,8 @@ MEDICAL DISCLAIMER: This information is for educational purposes only. AI system
 
 ### Bad Response (DO NOT DO THIS):
 "[1] Studies show that [2] treatment involves [3]..."
-❌ Contains citation markers
-❌ Incomplete sentences
+Contains citation markers
+Incomplete sentences
 
 ## Input Format
 CONTEXT: {context}
