@@ -65,85 +65,51 @@ jobs:
           echo "Querying low confidence predictions metric..."
           
           # First check if the metric exists
+          METRIC_EXISTS=false
           if gcloud logging metrics describe low_confidence_predictions --project=$PROJECT_ID &>/dev/null; then
             echo "✓ Metric 'low_confidence_predictions' exists"
-            
-            # Query the metric using gcloud monitoring time-series list
-            METRIC_FILTER='metric.type="logging.googleapis.com/user/low_confidence_predictions" AND resource.type="cloud_run_revision" AND resource.labels.service_name="'$SERVICE_NAME'"'
-            
-            echo "Fetching time series data..."
-            TIMESERIES_JSON=$(gcloud monitoring time-series list \
-              --project=$PROJECT_ID \
-              --filter="$METRIC_FILTER" \
-              --format=json \
-              --start-time="$START_TIME" \
-              --end-time="$END_TIME" 2>&1)
-            
-            if [ $? -eq 0 ]; then
-              echo "$TIMESERIES_JSON" > /tmp/timeseries.json
-              
-              # Sum up all the point values
-              LOW_CONF_COUNT=$(echo "$TIMESERIES_JSON" | jq '[.[] | .points[] | .value.int64Value // .value.doubleValue // 0 | tonumber] | add // 0')
-              
-              echo ""
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "Results:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "Low confidence predictions in last ${HOURS_LOOKBACK}h: $LOW_CONF_COUNT"
-              echo "Threshold: $LOW_CONF_THRESHOLD"
-              echo ""
-              
-              if [ $(echo "$LOW_CONF_COUNT >= $LOW_CONF_THRESHOLD" | bc) -eq 1 ]; then
-                echo "⚠️  THRESHOLD EXCEEDED! Retraining recommended."
-                echo "threshold_exceeded=true" >> $GITHUB_OUTPUT
-                echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
-              else
-                echo "✓ Threshold not exceeded. No retraining needed."
-                echo "threshold_exceeded=false" >> $GITHUB_OUTPUT
-                echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
-              fi
-            else
-              echo "⚠️  Error querying metric data: $TIMESERIES_JSON"
-              echo "threshold_exceeded=error" >> $GITHUB_OUTPUT
-              echo "low_conf_count=0" >> $GITHUB_OUTPUT
-            fi
+            METRIC_EXISTS=true
           else
-            echo "⚠️  Metric 'low_confidence_predictions' does not exist yet."
-            echo "This is normal if:"
-            echo "  1. The metric hasn't been created by Terraform (set create_low_conf_metric=true)"
-            echo "  2. No low-confidence predictions have been logged yet"
-            echo ""
-            echo "Falling back to direct log query..."
-            
-            # Fallback: Query logs directly for [low_confidence] entries
-            LOG_FILTER='resource.type="cloud_run_revision"
-              resource.labels.service_name="'$SERVICE_NAME'"
-              textPayload:"[low_confidence]"
-              timestamp>="'$START_TIME'"
-              timestamp<="'$END_TIME'"'
-            
-            LOW_CONF_COUNT=$(gcloud logging read "$LOG_FILTER" \
-              --project=$PROJECT_ID \
-              --limit=1000 \
-              --format="value(timestamp)" 2>/dev/null | wc -l)
-            
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Results (from logs):"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Low confidence predictions in last ${HOURS_LOOKBACK}h: $LOW_CONF_COUNT"
-            echo "Threshold: $LOW_CONF_THRESHOLD"
-            echo ""
-            
-            if [ $LOW_CONF_COUNT -ge $LOW_CONF_THRESHOLD ]; then
-              echo "⚠️  THRESHOLD EXCEEDED! Retraining recommended."
-              echo "threshold_exceeded=true" >> $GITHUB_OUTPUT
-              echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
-            else
-              echo "✓ Threshold not exceeded. No retraining needed."
-              echo "threshold_exceeded=false" >> $GITHUB_OUTPUT
-              echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
-            fi
+            echo "⚠️  Metric 'low_confidence_predictions' does not exist"
+          fi
+          
+          # Always use direct log query as primary method (more reliable)
+          echo ""
+          echo "Querying Cloud Logging for [low_confidence] entries..."
+          
+          # Query logs directly for [low_confidence] entries
+          LOG_FILTER='resource.type="cloud_run_revision"
+            resource.labels.service_name="'$SERVICE_NAME'"
+            textPayload:"[low_confidence]"
+            timestamp>="'$START_TIME'"
+            timestamp<="'$END_TIME'"'
+          
+          echo "Filter: $LOG_FILTER"
+          echo ""
+          
+          # Count log entries
+          LOW_CONF_COUNT=$(gcloud logging read "$LOG_FILTER" \
+            --project=$PROJECT_ID \
+            --limit=10000 \
+            --format="value(timestamp)" 2>/dev/null | wc -l)
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Results:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Low confidence predictions in last ${HOURS_LOOKBACK}h: $LOW_CONF_COUNT"
+          echo "Threshold: $LOW_CONF_THRESHOLD"
+          echo "Metric exists in monitoring: $METRIC_EXISTS"
+          echo ""
+          
+          if [ $LOW_CONF_COUNT -ge $LOW_CONF_THRESHOLD ]; then
+            echo "⚠️  THRESHOLD EXCEEDED! Retraining recommended."
+            echo "threshold_exceeded=true" >> $GITHUB_OUTPUT
+            echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "✓ Threshold not exceeded. No retraining needed."
+            echo "threshold_exceeded=false" >> $GITHUB_OUTPUT
+            echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
           fi
           
           echo ""
