@@ -41,6 +41,7 @@ jobs:
       SERVICE_NAME: vision-inference-api
       TF_VAR_project_id: medscanai-476500
       TF_VAR_region: us-central1
+      TF_VAR_create_low_conf_metric: true
       TERRAFORM_VERSION: 1.6.0
 
     defaults:
@@ -97,6 +98,24 @@ jobs:
           echo "Terraform will skip API enablement by default (enable_apis=false)"
           echo "If you need to enable APIs, set enable_apis=true in terraform.tfvars"
         continue-on-error: true
+      
+      - name: Show Monitoring Configuration
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Monitoring Configuration"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "✅ Low Confidence Metric: ENABLED"
+          echo "   TF_VAR_create_low_conf_metric = $TF_VAR_create_low_conf_metric"
+          echo ""
+          echo "This will create:"
+          echo "  • Log-based metric: low_confidence_predictions"
+          echo "  • Alert policy: Vision Inference API - Low Confidence Streak"
+          echo "  • Triggers when: ≥3 low confidence predictions in 60 seconds"
+          echo ""
+          echo "Note: After first creation, wait ~10 minutes for metric to be active"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
