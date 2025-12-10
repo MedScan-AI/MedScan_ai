@@ -6,7 +6,6 @@
 #
 # If alert policies or dashboards already exist, you MUST import them into
 # Terraform state to prevent recreation. All monitoring resources have
-# lifecycle { prevent_destroy = true } to protect against accidental deletion.
 #
 # To import existing monitoring resources:
 #
@@ -23,6 +22,30 @@
 #    terraform import 'google_monitoring_dashboard.rag_dashboard[0]' projects/PROJECT_ID/dashboards/DASHBOARD_ID
 #
 ################################################################################
+
+# Pre-destroy hook: Delete alert policies before metrics
+# This ensures alert policies are removed even if not in Terraform state
+# Metrics depend on this resource, so it's destroyed first, which runs the
+# destroy provisioner to delete alert policies before metrics are destroyed
+resource "null_resource" "delete_alert_policies_before_metrics" {
+  count = var.enable_monitoring ? 1 : 0
+
+  # Store project ID as a trigger so it's available during destroy
+  triggers = {
+    project_id = var.project_id
+  }
+
+  # Delete any remaining alert policies that might not be in Terraform state
+  # This runs when null_resource is destroyed, which happens before metrics
+  provisioner "local-exec" {
+    when    = destroy
+    command = "TF_VAR_project_id=${self.triggers.project_id} bash ${path.module}/delete-alert-policies.sh"
+  }
+
+  lifecycle {
+    create_before_destroy = false
+  }
+}
 
 # Notification channel for alerts (email)
 resource "google_monitoring_notification_channel" "email" {
@@ -66,6 +89,14 @@ resource "google_logging_metric" "rag_composite_score" {
       offset             = 0.0
     }
   }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Metric 2: RAG Hallucination Score (DISTRIBUTION for numeric extraction)
@@ -96,6 +127,14 @@ resource "google_logging_metric" "rag_hallucination_score" {
       offset             = 0.0
     }
   }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Metric 3: RAG Retrieval Score (DISTRIBUTION for numeric extraction)
@@ -125,6 +164,14 @@ resource "google_logging_metric" "rag_retrieval_score" {
       offset             = 0.0
     }
   }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Metric 4: RAG Low Composite Score (DELTA - count)
@@ -143,6 +190,14 @@ resource "google_logging_metric" "rag_low_composite_score" {
     metric_kind = "DELTA"
     value_type  = "INT64"
     unit        = "1"
+  }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -173,6 +228,14 @@ resource "google_logging_metric" "rag_tokens_used" {
       scale              = 1.0
     }
   }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Metric 6: RAG Documents Retrieved (DISTRIBUTION for numeric extraction)
@@ -202,6 +265,14 @@ resource "google_logging_metric" "rag_docs_retrieved" {
       offset             = 0.0
     }
   }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Metric 7: RAG Retraining Triggered (DELTA - count)
@@ -219,6 +290,14 @@ resource "google_logging_metric" "rag_retraining_triggered" {
     metric_kind = "DELTA"
     value_type  = "INT64"
     unit        = "1"
+  }
+
+  depends_on = [
+    null_resource.delete_alert_policies_before_metrics
+  ]
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -262,7 +341,6 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   lifecycle {
-    prevent_destroy = true
     ignore_changes  = [enabled]
   }
 }
@@ -295,7 +373,7 @@ resource "google_monitoring_alert_policy" "high_latency" {
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -328,7 +406,7 @@ resource "google_monitoring_alert_policy" "service_unavailable" {
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -361,7 +439,7 @@ resource "google_monitoring_alert_policy" "high_cpu" {
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -394,7 +472,7 @@ resource "google_monitoring_alert_policy" "high_memory" {
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -430,8 +508,12 @@ resource "google_monitoring_alert_policy" "low_composite_score" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
+  depends_on = [
+    google_logging_metric.rag_composite_score[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -463,8 +545,12 @@ resource "google_monitoring_alert_policy" "critical_composite_score" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
+  depends_on = [
+    google_logging_metric.rag_composite_score[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -496,8 +582,12 @@ resource "google_monitoring_alert_policy" "low_hallucination_score" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
+  depends_on = [
+    google_logging_metric.rag_hallucination_score[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -529,8 +619,12 @@ resource "google_monitoring_alert_policy" "low_retrieval_quality" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
+  depends_on = [
+    google_logging_metric.rag_retrieval_score[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -562,8 +656,12 @@ resource "google_monitoring_alert_policy" "low_quality_spike" {
 
   notification_channels = (var.monitoring_email != "" && var.create_notification_channel) ? [google_monitoring_notification_channel.email[0].id] : []
 
+  depends_on = [
+    google_logging_metric.rag_low_composite_score[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -599,8 +697,12 @@ resource "google_monitoring_alert_policy" "retraining_triggered" {
     mime_type = "text/markdown"
   }
 
+  depends_on = [
+    google_logging_metric.rag_retraining_triggered[0]
+  ]
+
   lifecycle {
-    prevent_destroy = true
+    
     ignore_changes  = [enabled]
   }
 }
@@ -1036,9 +1138,5 @@ resource "google_monitoring_dashboard" "rag_dashboard" {
       ]
     }
   })
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
