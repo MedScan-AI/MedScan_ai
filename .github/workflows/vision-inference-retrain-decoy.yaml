@@ -1,0 +1,248 @@
+name: Vision Inference Retraining Threshold Monitor
+
+on:
+  schedule:
+    # Run every 24 hours at 9:00 AM UTC (1:00 AM PST)
+    - cron: '0 9 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: 'Low confidence threshold count (default: 50)'
+        type: number
+        default: 50
+      hours_lookback:
+        description: 'Hours to look back (default: 24)'
+        type: number
+        default: 24
+
+env:
+  PROJECT_ID: medscanai-476500
+  SERVICE_NAME: vision-inference-api
+  # Threshold: if we get more than this many low-confidence predictions in 24h, trigger retraining alert
+  LOW_CONF_THRESHOLD: ${{ github.event.inputs.threshold || 50 }}
+  HOURS_LOOKBACK: ${{ github.event.inputs.hours_lookback || 24 }}
+
+jobs:
+  check-low-confidence-threshold:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Query low confidence predictions
+        id: check_metrics
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Checking Low Confidence Predictions"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Project: $PROJECT_ID"
+          echo "Service: $SERVICE_NAME"
+          echo "Threshold: $LOW_CONF_THRESHOLD predictions in ${HOURS_LOOKBACK}h"
+          echo ""
+          
+          # Calculate timestamps
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          START_TIME=$(date -u -d "${HOURS_LOOKBACK} hours ago" +"%Y-%m-%dT%H:%M:%SZ")
+          
+          echo "Time range: $START_TIME to $END_TIME"
+          echo ""
+          
+          # Query the low_confidence_predictions metric
+          # Note: The metric might not exist if it hasn't been created yet
+          echo "Querying low confidence predictions metric..."
+          
+          # First check if the metric exists
+          if gcloud logging metrics describe low_confidence_predictions --project=$PROJECT_ID &>/dev/null; then
+            echo "✓ Metric 'low_confidence_predictions' exists"
+            
+            # Query the metric using gcloud monitoring time-series list
+            METRIC_FILTER='metric.type="logging.googleapis.com/user/low_confidence_predictions" AND resource.type="cloud_run_revision" AND resource.labels.service_name="'$SERVICE_NAME'"'
+            
+            echo "Fetching time series data..."
+            TIMESERIES_JSON=$(gcloud monitoring time-series list \
+              --project=$PROJECT_ID \
+              --filter="$METRIC_FILTER" \
+              --format=json \
+              --start-time="$START_TIME" \
+              --end-time="$END_TIME" 2>&1)
+            
+            if [ $? -eq 0 ]; then
+              echo "$TIMESERIES_JSON" > /tmp/timeseries.json
+              
+              # Sum up all the point values
+              LOW_CONF_COUNT=$(echo "$TIMESERIES_JSON" | jq '[.[] | .points[] | .value.int64Value // .value.doubleValue // 0 | tonumber] | add // 0')
+              
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "Results:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "Low confidence predictions in last ${HOURS_LOOKBACK}h: $LOW_CONF_COUNT"
+              echo "Threshold: $LOW_CONF_THRESHOLD"
+              echo ""
+              
+              if [ $(echo "$LOW_CONF_COUNT >= $LOW_CONF_THRESHOLD" | bc) -eq 1 ]; then
+                echo "⚠️  THRESHOLD EXCEEDED! Retraining recommended."
+                echo "threshold_exceeded=true" >> $GITHUB_OUTPUT
+                echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
+              else
+                echo "✓ Threshold not exceeded. No retraining needed."
+                echo "threshold_exceeded=false" >> $GITHUB_OUTPUT
+                echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "⚠️  Error querying metric data: $TIMESERIES_JSON"
+              echo "threshold_exceeded=error" >> $GITHUB_OUTPUT
+              echo "low_conf_count=0" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️  Metric 'low_confidence_predictions' does not exist yet."
+            echo "This is normal if:"
+            echo "  1. The metric hasn't been created by Terraform (set create_low_conf_metric=true)"
+            echo "  2. No low-confidence predictions have been logged yet"
+            echo ""
+            echo "Falling back to direct log query..."
+            
+            # Fallback: Query logs directly for [low_confidence] entries
+            LOG_FILTER='resource.type="cloud_run_revision"
+              resource.labels.service_name="'$SERVICE_NAME'"
+              textPayload:"[low_confidence]"
+              timestamp>="'$START_TIME'"
+              timestamp<="'$END_TIME'"'
+            
+            LOW_CONF_COUNT=$(gcloud logging read "$LOG_FILTER" \
+              --project=$PROJECT_ID \
+              --limit=1000 \
+              --format="value(timestamp)" 2>/dev/null | wc -l)
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Results (from logs):"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Low confidence predictions in last ${HOURS_LOOKBACK}h: $LOW_CONF_COUNT"
+            echo "Threshold: $LOW_CONF_THRESHOLD"
+            echo ""
+            
+            if [ $LOW_CONF_COUNT -ge $LOW_CONF_THRESHOLD ]; then
+              echo "⚠️  THRESHOLD EXCEEDED! Retraining recommended."
+              echo "threshold_exceeded=true" >> $GITHUB_OUTPUT
+              echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
+            else
+              echo "✓ Threshold not exceeded. No retraining needed."
+              echo "threshold_exceeded=false" >> $GITHUB_OUTPUT
+              echo "low_conf_count=$LOW_CONF_COUNT" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      
+      - name: Send retraining notification email
+        if: steps.check_metrics.outputs.threshold_exceeded == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🔄 Vision Model Retraining Recommended - Low Confidence Threshold Exceeded"
+          to: sriharsha.py@gmail.com
+          from: MedScan AI <${{ secrets.SMTP_USER }}>
+          body: |
+            Vision Inference Model Retraining Alert
+            ========================================
+            
+            The low confidence prediction threshold has been exceeded and model retraining is recommended.
+            
+            Details:
+            --------
+            • Service: ${{ env.SERVICE_NAME }}
+            • Time Period: Last ${{ env.HOURS_LOOKBACK }} hours
+            • Low Confidence Predictions: ${{ steps.check_metrics.outputs.low_conf_count }}
+            • Threshold: ${{ env.LOW_CONF_THRESHOLD }}
+            • Status: ⚠️  THRESHOLD EXCEEDED
+            
+            Next Steps:
+            -----------
+            1. Review recent predictions in Cloud Logging:
+               https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22vision-inference-api%22%0AtextPayload%3A%22%5Blow_confidence%5D%22?project=${{ env.PROJECT_ID }}
+            
+            2. Check the monitoring dashboard:
+               https://console.cloud.google.com/monitoring/dashboards?project=${{ env.PROJECT_ID }}
+            
+            3. Consider retraining the vision models:
+               • TB Detection Model
+               • Lung Cancer Detection Model
+            
+            4. Trigger retraining workflow (if available):
+               https://github.com/${{ github.repository }}/actions/workflows/vision-training.yaml
+            
+            Time: ${{ github.event.repository.updated_at }}
+            Workflow Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ---
+            This is an automated notification from MedScan AI Vision Inference Monitoring.
+      
+      - name: Send error notification
+        if: steps.check_metrics.outputs.threshold_exceeded == 'error'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "❌ Vision Model Monitoring - Error Checking Metrics"
+          to: sriharsha.py@gmail.com
+          from: MedScan AI <${{ secrets.SMTP_USER }}>
+          body: |
+            Vision Inference Model Monitoring Error
+            ========================================
+            
+            An error occurred while checking the low confidence prediction metrics.
+            
+            Details:
+            --------
+            • Service: ${{ env.SERVICE_NAME }}
+            • Error: Failed to query monitoring metrics
+            
+            Please check:
+            1. The low_confidence_predictions metric exists
+            2. Proper IAM permissions are set
+            3. Cloud Logging is working correctly
+            
+            Workflow Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ---
+            This is an automated notification from MedScan AI Vision Inference Monitoring.
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Vision Inference Retraining Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time Period:** Last $HOURS_LOOKBACK hours" >> $GITHUB_STEP_SUMMARY
+          echo "- **Low Confidence Count:** ${{ steps.check_metrics.outputs.low_conf_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Threshold:** $LOW_CONF_THRESHOLD" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ steps.check_metrics.outputs.threshold_exceeded }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check_metrics.outputs.threshold_exceeded }}" == "true" ]; then
+            echo "⚠️ **Action Required:** Retraining recommended" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.check_metrics.outputs.threshold_exceeded }}" == "false" ]; then
+            echo "✅ **No Action Required:** Threshold not exceeded" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Error:** Failed to check metrics" >> $GITHUB_STEP_SUMMARY
+          fi
+
