@@ -49,8 +49,8 @@ steps:
         --execution-environment=gen2 \
         --timeout=600 \
         --max-instances=3 \
-        --min-instances=0 \
-        --concurrency=1 \
+        --min-instances=1 \
+        --concurrency=3 \
         --set-env-vars="GCS_BUCKET=medscan-pipeline-medscanai-476500,GCS_BUCKET_NAME=medscan-pipeline-medscanai-476500,GCP_PROJECT_ID=medscanai-476500,HF_TOKEN=$$TOKEN"
         
         echo "Deployment complete!"

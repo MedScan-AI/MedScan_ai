@@ -28,15 +28,6 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    branches: [main]
-    paths:
-      - 'deployment/**'
-      - 'cloudbuild/rag-deploy.yaml'
-      - 'ModelDevelopment/RAG/**'
-      - 'RAG_Dockerfile'
-      - 'deploymentRAG/terraform/**'
-      - '.github/workflows/rag-complete-setup.yaml'
 
 jobs:
   deploy-cloud-run:

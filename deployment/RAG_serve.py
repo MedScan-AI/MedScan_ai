@@ -207,7 +207,10 @@ async def startup():
         logger.info("Loading embedding model...")
         from sentence_transformers import SentenceTransformer
         embedding_model_name = _rag_config.get('embedding_model', 'BAAI/llm-embedder')
-        _embedding_model = SentenceTransformer(embedding_model_name, device='cpu')
+        _embedding_model = SentenceTransformer(
+            embedding_model_name, 
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
         logger.info(f"Embedding model loaded: {embedding_model_name}")
         
         # Pre-load LLM model

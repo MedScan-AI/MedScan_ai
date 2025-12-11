@@ -153,6 +153,7 @@ The MedScan AI pipeline consists of **5 main stages**:
 ## Architecture
 
 ![High-Level Architecture](assets/high_level_architecture.png)
+![Flow Diagram](assets/Flow%20Diagram.png)
 
 ### Key Components
 
