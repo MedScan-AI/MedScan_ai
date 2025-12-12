@@ -12,7 +12,7 @@ from fastapi import FastAPI, BackgroundTasks
 import uvicorn
 import torch
 import numpy as np
-# from google.cloud import logging as cloud_logging
+from google.cloud import logging as cloud_logging
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/app/ModelDevelopment/RAG')
@@ -680,8 +680,10 @@ def _log_prediction_metrics(
     """
     try:
         project_id = os.getenv('GCP_PROJECT_ID', 'medscanai-476500')
-        # logging_client = cloud_logging.Client(project=project_id)
-        # logger_instance = logging_client.logger("rag_predictions")
+        logger.info(f"Initializing Cloud Logging client for project: {project_id}")
+        logging_client = cloud_logging.Client(project=project_id)
+        logger_instance = logging_client.logger("rag_predictions")
+        logger.info(f"Cloud Logging logger instance created: rag_predictions")
         
         # Build metrics payload (NO query/response text)
         payload = {
@@ -732,14 +734,27 @@ def _log_prediction_metrics(
             payload["prediction_result"]["error"] = error
         
         # Log to Cloud Logging
-        # logger_instance.log_struct(payload)
+        try:
+            logger.info(f"Attempting to log to Cloud Logging with payload keys: {list(payload.keys())}")
+            logger_instance.log_struct(payload, severity="INFO")
+            logger.info(f"✅ log_struct() call completed successfully")
+        except Exception as log_error:
+            logger.error(f"❌ log_struct() failed: {log_error}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise  # Re-raise to be caught by outer exception handler
+        
         if success:
-            logger.info(f"Logged prediction metrics: success={success}, composite_score={composite_score if composite_score else 'N/A'}, latency={response_time:.3f}s")
+            logger.info(f"✅ Logged prediction metrics to Cloud Logging: success={success}, composite_score={composite_score if composite_score else 'N/A'}, latency={response_time:.3f}s")
         else:
-            logger.error(f"Logged prediction metrics: success={success}, error={error}, latency={response_time:.3f}s, composite_score={composite_score if composite_score else 'N/A'}")
+            logger.error(f"✅ Logged prediction metrics to Cloud Logging: success={success}, error={error}, latency={response_time:.3f}s")
     except Exception as e:
-        # Don't fail the request if logging fails
-        logger.warning(f"Failed to log prediction metrics to Cloud Logging: {e}")
+        # Don't fail the request if logging fails, but log the error with full details
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"❌ Failed to log prediction metrics to Cloud Logging: {e}")
+        logger.error(f"Error details: {error_details}")
+        logger.error(f"Payload that failed to log: {json.dumps(payload, default=str)}")
 
 
 if __name__ == "__main__":

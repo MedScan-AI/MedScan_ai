@@ -55,9 +55,10 @@ class RAGMonitor:
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(hours=hours)
         
+        # Logs are written to custom log name "rag_predictions" via log_struct()
+        # They don't have resource.type, so we filter by logName instead
         filter_str = f"""
-        resource.type="cloud_run_revision"
-        resource.labels.service_name="rag-service"
+        logName="projects/{self.project_id}/logs/rag_predictions"
         timestamp >= "{start_time.isoformat()}Z"
         jsonPayload.prediction_result:*
         """
