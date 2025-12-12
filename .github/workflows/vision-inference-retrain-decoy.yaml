@@ -10,11 +10,11 @@ on:
       threshold:
         description: 'Low confidence threshold count (default: 50)'
         type: number
-        default: 50
+        default: 5
       hours_lookback:
         description: 'Hours to look back (default: 24)'
         type: number
-        default: 24
+        default: 48
 
 env:
   PROJECT_ID: medscanai-476500
