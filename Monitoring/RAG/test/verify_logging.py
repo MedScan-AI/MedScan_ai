@@ -21,7 +21,8 @@ def check_cloud_logging(project_id: str, hours: int = 1):
     start_time = end_time - timedelta(hours=hours)
     
     filter_str = f"""
-    resource.type="aiplatform.googleapis.com/Endpoint"
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="rag-service"
     timestamp >= "{start_time.isoformat()}Z"
     jsonPayload.prediction_result:*
     """
