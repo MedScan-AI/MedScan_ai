@@ -2,8 +2,9 @@ name: Vision Inference Retraining Threshold Monitor
 
 on:
   schedule:
-    # Run every 1 minute (for testing - change back to '0 9 * * *' for daily)
-    - cron: '* * * * *'
+    # Run every 5 minutes (for testing - change back to '0 9 * * *' for daily)
+    # Note: GitHub Actions scheduled workflows can be delayed 5-15+ minutes
+    - cron: '*/5 * * * *'
   
   workflow_dispatch:
     inputs:
