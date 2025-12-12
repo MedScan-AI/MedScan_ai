@@ -2,8 +2,8 @@ name: Vision Inference Retraining Threshold Monitor
 
 on:
   schedule:
-    # Run every 24 hours at 9:00 AM UTC (1:00 AM PST)
-    - cron: '0 9 * * *'
+    # Run every 1 minute (for testing - change back to '0 9 * * *' for daily)
+    - cron: '* * * * *'
   
   workflow_dispatch:
     inputs:
@@ -124,7 +124,7 @@ jobs:
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: "🔄 Vision Model Retraining Recommended - Low Confidence Threshold Exceeded"
-          to: sriharsha.py@gmail.com,harshitha8.shekar@gmail.com
+          to: sriharsha.py@gmail.com,harshitha8.shekar@gmail.com,saumya08gupta@gmail.com,skothari855@gmail.com
           from: MedScan AI <${{ secrets.SMTP_USER }}>
           body: |
             Vision Inference Model Retraining Alert
