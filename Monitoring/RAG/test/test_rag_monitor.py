@@ -586,11 +586,21 @@ class TestTriggerRetraining:
         
         assert success is True
         assert mock_subprocess.called
-        # Check that gh workflow was called
-        call_args = mock_subprocess.call_args[0][0]
-        assert 'gh' in call_args
-        assert 'workflow' in call_args
-        assert 'rag-data-pipeline.yaml' in call_args
+        # Check that subprocess was called twice (data pipeline + training)
+        assert mock_subprocess.call_count == 2
+        
+        # Check first call: data pipeline
+        first_call_args = mock_subprocess.call_args_list[0][0][0]
+        assert 'gh' in first_call_args
+        assert 'workflow' in first_call_args
+        assert 'rag-data-pipeline.yaml' in first_call_args
+        
+        # Check second call: model training
+        second_call_args = mock_subprocess.call_args_list[1][0][0]
+        assert 'gh' in second_call_args
+        assert 'workflow' in second_call_args
+        assert 'rag-training.yaml' in second_call_args
+        
         # Verify Cloud Logging was called
         assert mock_logging_client.called
         assert mock_logger_instance.log_struct.called

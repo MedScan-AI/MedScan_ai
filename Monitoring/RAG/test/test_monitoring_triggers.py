@@ -185,7 +185,7 @@ def cancel_workflows(runs: List[Dict]):
                 subprocess.run(["gh", "run", "cancel", str(run_id)], capture_output=True)
 
 
-def test_component(service_url: str, component: str, project_id: str, bucket: str):
+def run_component_test(service_url: str, component: str, project_id: str, bucket: str):
     """Test a specific monitoring component."""
     print(f"\n{'='*70}")
     print(f"Testing Component: {component.upper()}")
@@ -280,7 +280,7 @@ def main():
     
     args = parser.parse_args()
     
-    test_component(
+    run_component_test(
         args.service_url,
         args.component,
         args.project_id,
