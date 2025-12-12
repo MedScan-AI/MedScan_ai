@@ -18,7 +18,6 @@ from pydantic import BaseModel
 
 from model_loader import ModelLoader
 from gradcam import GradCAM
-from retraining_trigger import trigger_vision_retraining, trigger_via_github_api
 
 # Configure logging
 logging.basicConfig(
@@ -92,15 +91,6 @@ class ErrorResponse(BaseModel):
     """Response model for errors."""
     error: str
     status: str
-
-
-class RetrainingTriggerResponse(BaseModel):
-    """Response model for retraining trigger."""
-    success: bool
-    message: Optional[str] = None
-    error: Optional[str] = None
-    reason: Optional[str] = None
-    timestamp: Optional[str] = None
 
 
 def preprocess_image(image: Image.Image, target_size: tuple = (224, 224)) -> np.ndarray:
@@ -397,63 +387,6 @@ async def predict_lung_cancer(
         )
 
 
-@app.post("/trigger-retraining", response_model=RetrainingTriggerResponse)
-async def trigger_retraining(
-    reason: str,
-    override_count: Optional[int] = None,
-    threshold: Optional[int] = None
-):
-    """
-    Trigger Vision model retraining.
-    
-    This endpoint can be called by the web portal when override threshold is exceeded.
-    
-    Args:
-        reason: Reason for retraining (e.g., "Override threshold exceeded")
-        override_count: Number of overrides detected (optional, for logging)
-        threshold: Threshold that was exceeded (optional, for logging)
-    
-    Returns:
-        JSON response with success status
-    """
-    try:
-        # Build reason message
-        if override_count is not None and threshold is not None:
-            reason_msg = f"{reason}: {override_count} overrides (threshold: {threshold})"
-        else:
-            reason_msg = reason
-        
-        # Try GitHub CLI first, fallback to API
-        result = trigger_vision_retraining(reason_msg)
-        
-        if not result['success'] and 'gh' in result.get('error', '').lower():
-            # Fallback to GitHub API if CLI not available
-            logger.info("GitHub CLI not available, trying GitHub API...")
-            result = trigger_via_github_api(reason_msg)
-        
-        if result['success']:
-            return RetrainingTriggerResponse(
-                success=True,
-                message=result.get('message', 'Retraining triggered'),
-                reason=result.get('reason'),
-                timestamp=result.get('timestamp')
-            )
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=result.get('error', 'Failed to trigger retraining')
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in retraining trigger: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error triggering retraining: {str(e)}"
-        )
-
-
 if __name__ == '__main__':
     import uvicorn
     
@@ -467,6 +400,5 @@ if __name__ == '__main__':
     logger.info(f"  - GET  /health")
     logger.info(f"  - POST /predict/tb")
     logger.info(f"  - POST /predict/lung_cancer")
-    logger.info(f"  - POST /trigger-retraining")
     
     uvicorn.run(app, host=host, port=port)
