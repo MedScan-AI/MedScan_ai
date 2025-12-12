@@ -20,7 +20,7 @@ env:
   PROJECT_ID: medscanai-476500
   SERVICE_NAME: vision-inference-api
   # Threshold: if we get more than this many low-confidence predictions in 24h, trigger retraining alert
-  LOW_CONF_THRESHOLD: ${{ github.event.inputs.threshold || 50 }}
+  LOW_CONF_THRESHOLD: ${{ github.event.inputs.threshold || 5 }}
   HOURS_LOOKBACK: ${{ github.event.inputs.hours_lookback || 24 }}
 
 jobs:
