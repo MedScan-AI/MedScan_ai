@@ -124,7 +124,7 @@ jobs:
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: "🔄 Vision Model Retraining Recommended - Low Confidence Threshold Exceeded"
-          to: sriharsha.py@gmail.com
+          to: sriharsha.py@gmail.com,harshitha8.shekar@gmail.com
           from: MedScan AI <${{ secrets.SMTP_USER }}>
           body: |
             Vision Inference Model Retraining Alert
