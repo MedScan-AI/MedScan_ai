@@ -14,3 +14,6 @@ matplotlib  # For plotting GradCAM visualizations
 
 # GCP dependencies (for Cloud Run deployment)
 google-cloud-storage  # For reading models from GCS
+
+# HTTP requests (for retraining trigger)
+requests  # For GitHub API calls
