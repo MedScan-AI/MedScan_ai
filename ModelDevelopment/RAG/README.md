@@ -16,7 +16,7 @@ This system combines semantic search with large language models to provide evide
 - Comprehensive bias detection with Fairlearn-powered fairness analysis
 - Automated bias mitigation (threshold optimization, reweighting)
 - GCS/local hybrid data loading for flexible deployment
-- Vertex AI deployment support with endpoint management
+- Cloud Run deployment with endpoint management
 - Comprehensive testing suite with pytest
 
 ## Project Structure
@@ -24,7 +24,7 @@ This system combines semantic search with large language models to provide evide
 ├── ModelInference/
 │   ├── RAG_inference.py           # Main RAG pipeline with GCS support
 │   ├── test_rag_pipeline.py       # Comprehensive pytest suite (400+ lines)
-│   ├── deploy.py                  # Vertex AI deployment manager
+│   ├── deploy.py                  # Model versioning manager (registers models in Vertex AI Model Registry)
 │   ├── test_deployment.py         # Pre-flight deployment checks
 │   └── vertex_rag_client.py       # Client for querying deployed endpoint
 │

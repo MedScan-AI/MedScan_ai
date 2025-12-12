@@ -402,6 +402,15 @@ class RAGMonitor:
                 ], check=True, capture_output=True)
                 logger.info("Data pipeline triggered (model selection will auto-follow)")
                 
+                logger.info("Triggering model selection only...")
+                subprocess.run([
+                    'gh', 'workflow', 'run', 'rag-training.yaml',
+                    '-f', 'triggered_by=monitoring',
+                    '-f', f'reason={reason}',
+                    '-f', 'use_existing_data=true'
+                ], check=True, capture_output=True)
+                logger.info("Model selection triggered")
+
             elif strategy == 'model_only':
                 # Scenario 1: Model selection only (use existing data)
                 logger.info("Triggering model selection only...")
